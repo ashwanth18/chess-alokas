@@ -9,6 +9,8 @@ export interface LocalTournament {
   rounds: number;
   status: string;
   currentRound: number;
+  /** false = pair/rank within each category (default); true = one mixed pool */
+  mixCategories?: boolean;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;
@@ -72,6 +74,14 @@ export class ChessDb extends Dexie {
   constructor() {
     super('chess-alokas');
     this.version(1).stores({
+      tournaments: 'id, updatedAt, dirty',
+      categories: 'id, tournamentId, updatedAt, dirty',
+      participants: 'id, tournamentId, updatedAt, dirty',
+      games: 'id, tournamentId, categoryId, round, dirty',
+      meta: 'key',
+    });
+    // v2: mixCategories on tournaments (optional field; no index change needed)
+    this.version(2).stores({
       tournaments: 'id, updatedAt, dirty',
       categories: 'id, tournamentId, updatedAt, dirty',
       participants: 'id, tournamentId, updatedAt, dirty',

@@ -9,16 +9,32 @@ export interface TournamentLike {
   rounds: number;
   status: string;
   currentRound: number;
+  mixCategories?: boolean;
 }
 
-/** Smallest round (1..max) where a category still needs pairings. */
+const MIXED_POOL_ID = '__mixed__';
+
+export function isMixedTournament(tournament: TournamentLike): boolean {
+  return tournament.mixCategories === true;
+}
+
+export { MIXED_POOL_ID };
+
+/** Smallest round (1..max) that still needs pairings. */
 export function getNextPairingRound(
   maxRounds: number,
   categories: CategoryLike[],
   participants: LocalParticipant[],
   games: LocalGame[],
+  mixCategories = false,
 ): number | null {
   for (let round = 1; round <= maxRounds; round++) {
+    if (mixCategories || categories.length === 0) {
+      const hasRound = games.some((g) => !g.deletedAt && g.round === round);
+      if (!hasRound) return round;
+      continue;
+    }
+
     for (const cat of categories) {
       if (cat.deletedAt) continue;
       const count = participants.filter(
@@ -40,7 +56,15 @@ export function isTournamentComplete(
   participants: LocalParticipant[],
   games: LocalGame[],
 ): boolean {
-  return getNextPairingRound(tournament.rounds, categories, participants, games) === null;
+  return (
+    getNextPairingRound(
+      tournament.rounds,
+      categories,
+      participants,
+      games,
+      isMixedTournament(tournament),
+    ) === null
+  );
 }
 
 export function effectiveTournamentStatus(

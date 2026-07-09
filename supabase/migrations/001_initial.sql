@@ -10,6 +10,7 @@ create table if not exists tournaments (
   rounds integer not null check (rounds > 0),
   status text not null check (status in ('draft', 'ready', 'in_progress', 'completed')),
   current_round integer not null default 0,
+  mix_categories boolean not null default false,
   client_id text,
   updated_at timestamptz not null default now(),
   deleted_at timestamptz

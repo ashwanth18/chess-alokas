@@ -45,6 +45,7 @@ export default function CreateTournamentPage() {
   const [date, setDate] = useState('');
   const [style, setStyle] = useState<TournamentStyle>('swiss');
   const [rounds, setRounds] = useState(5);
+  const [mixCategories, setMixCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +143,7 @@ export default function CreateTournamentPage() {
         rounds,
         status: 'draft',
         currentRound: 0,
+        mixCategories,
         updatedAt: now,
         dirty: 1,
       });
@@ -166,6 +168,7 @@ export default function CreateTournamentPage() {
         date: date || null,
         style,
         rounds,
+        mixCategories,
         status: 'draft',
         currentRound: 0,
       }).catch(() => {});
@@ -256,9 +259,25 @@ export default function CreateTournamentPage() {
             </button>
           </div>
 
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={mixCategories}
+              onChange={(e) => setMixCategories(e.target.checked)}
+            />
+            <span>
+              <strong>Allow mixed matches</strong>
+              <span className="form-hint-sm">
+                {mixCategories
+                  ? 'Players from all categories share one pairing pool and one ranking.'
+                  : 'Default: players only play within their category (e.g. U12 vs U12) with separate rankings.'}
+              </span>
+            </span>
+          </label>
+
           {categories.length === 0 && (
             <p className="form-hint">
-              Optional. Categories let you run pairings and standings per age group or section.
+              Add categories like Under 12 / Under 18 so pairings and standings stay separate by default.
             </p>
           )}
 

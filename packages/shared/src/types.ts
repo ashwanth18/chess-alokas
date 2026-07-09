@@ -72,6 +72,11 @@ export const TournamentSchema = z.object({
   rounds: z.number().int().positive(),
   status: TournamentStatusSchema,
   currentRound: z.number().int().nonnegative().default(0),
+  /**
+   * When false (default), players only pair within their category and
+   * standings are per category. When true, everyone shares one pool.
+   */
+  mixCategories: z.boolean().default(false),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),
@@ -98,6 +103,8 @@ export const CreateTournamentInputSchema = z.object({
   date: z.string().nullable().optional(),
   style: TournamentStyleSchema.default('swiss'),
   rounds: z.number().int().positive().default(5),
+  /** Default false: separate pairing + ranking per category. */
+  mixCategories: z.boolean().default(false),
   categories: z
     .array(
       z.object({

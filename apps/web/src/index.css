@@ -528,6 +528,27 @@ input, select, textarea { font-family: var(--font-body); }
 }
 .form-section-header h3 { font-size: 1.05rem; }
 
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0.75rem 0 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--wood-300);
+}
+.checkbox-row input[type='checkbox'] {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+.checkbox-row .form-hint-sm {
+  display: block;
+  margin-top: 0.2rem;
+}
+.category-mode-hint {
+  margin: 0.5rem 0 1rem;
+}
+
 .form-hint { font-size: 0.8rem; color: var(--ink-300); margin-top: 0.25rem; }
 .form-hint-sm { font-size: 0.75rem; color: var(--ink-300); font-style: italic; }
 
@@ -846,18 +867,19 @@ input[type=checkbox] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 1.25rem;
   line-height: 1;
+  font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif;
 }
-.color-horse-svg {
-  width: 1.25rem;
-  height: 1.25rem;
-  display: block;
+.color-horse-white {
+  color: #f5f0e8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
-.color-horse-white .color-horse-svg {
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
-}
-.color-horse-black .color-horse-svg {
-  filter: drop-shadow(0 0 1px rgba(245, 240, 232, 0.25));
+.color-horse-black {
+  color: #1a1208;
+  text-shadow:
+    0 0 1px rgba(245, 240, 232, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .rating-tag {

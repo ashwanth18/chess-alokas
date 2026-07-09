@@ -40,6 +40,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       rounds: input.rounds,
       status: 'draft',
       currentRound: 0,
+      mixCategories: input.mixCategories ?? false,
       updatedAt: now,
     });
 
@@ -84,6 +85,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     rounds: z.number().int().positive().optional(),
     status: z.enum(['draft', 'ready', 'in_progress', 'completed']).optional(),
     currentRound: z.number().int().nonnegative().optional(),
+    mixCategories: z.boolean().optional(),
     clientId: z.string().optional(),
   });
 

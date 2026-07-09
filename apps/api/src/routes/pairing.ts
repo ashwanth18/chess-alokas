@@ -59,17 +59,90 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     const { categoryId: filterCategoryId } = bodyParsed.data;
 
     const allCategories = await store.listCategories(tournamentId);
-    const categoriesToPair: Category[] = filterCategoryId
-      ? allCategories.filter((c) => c.id === filterCategoryId && !c.deletedAt)
-      : allCategories.filter((c) => !c.deletedAt);
-
-    if (categoriesToPair.length === 0) {
-      return reply.code(404).send({ error: 'No matching categories found' });
-    }
+    const activeCategories = allCategories.filter((c) => !c.deletedAt);
+    const mix = tournament.mixCategories === true;
 
     const allParticipants = await store.listParticipants(tournamentId);
     const allGames = await store.listGames(tournamentId);
     const createdGames: Game[] = [];
+    const now = new Date().toISOString();
+
+    // Mixed mode: one shared pairing pool for the whole tournament
+    if (mix || activeCategories.length === 0) {
+      const poolId =
+        filterCategoryId ??
+        activeCategories[0]?.id ??
+        crypto.randomUUID();
+
+      const existingRound = allGames.filter((g) => g.round === round && !g.deletedAt);
+      if (existingRound.length > 0) {
+        if (!force) {
+          return reply.code(409).send({
+            error: `Games already exist for round ${round}. Use ?force=true to re-pair.`,
+          });
+        }
+        for (const cat of activeCategories.length ? activeCategories : [{ id: poolId } as Category]) {
+          await store.softDeleteGamesForRound(tournamentId, round, cat.id);
+        }
+        await store.softDeleteGamesForRound(tournamentId, round, poolId);
+      }
+
+      const players: EnginePlayer[] = allParticipants
+        .filter((p) => !p.deletedAt)
+        .map(participantToEnginePlayer);
+      if (players.length < 2) {
+        return reply.code(400).send({ error: 'Need at least 2 participants to pair' });
+      }
+
+      const pastGames: PastGame[] = allGames
+        .filter((g) => g.round < round && !g.deletedAt)
+        .map(gameToPastGame);
+
+      let pairingOutput;
+      try {
+        pairingOutput = pairRound(tournament.style, { players, pastGames, round });
+      } catch (err) {
+        if (err instanceof UnsupportedPairingStyleError) {
+          return reply
+            .code(422)
+            .send({ error: `Pairing style "${tournament.style}" is not yet implemented` });
+        }
+        throw err;
+      }
+
+      for (const board of pairingOutput.boards) {
+        const game = await store.createGame({
+          id: crypto.randomUUID(),
+          tournamentId,
+          categoryId: poolId,
+          round,
+          board: board.board,
+          whiteId: board.whiteId,
+          blackId: board.blackId,
+          result: board.isBye ? 'bye' : 'pending',
+          isBye: board.isBye,
+          updatedAt: now,
+        });
+        createdGames.push(game);
+      }
+
+      await store.updateTournament(tournamentId, {
+        currentRound: Math.max(tournament.currentRound, round),
+        status: round >= tournament.rounds ? 'completed' : 'in_progress',
+        updatedAt: now,
+      });
+
+      return reply.code(201).send({ round, games: createdGames, mixCategories: true });
+    }
+
+    // Default: separate pairing pools per category
+    const categoriesToPair: Category[] = filterCategoryId
+      ? activeCategories.filter((c) => c.id === filterCategoryId)
+      : activeCategories;
+
+    if (categoriesToPair.length === 0) {
+      return reply.code(404).send({ error: 'No matching categories found' });
+    }
 
     for (const category of categoriesToPair) {
       const existing = allGames.filter(
@@ -87,7 +160,7 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       const catParticipants = allParticipants.filter(
         (p) => p.categoryIds.includes(category.id) && !p.deletedAt,
       );
-      if (catParticipants.length === 0) continue;
+      if (catParticipants.length < 2) continue;
 
       const players: EnginePlayer[] = catParticipants.map(participantToEnginePlayer);
       const pastGames: PastGame[] = allGames
@@ -106,7 +179,6 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         throw err;
       }
 
-      const now = new Date().toISOString();
       for (const board of pairingOutput.boards) {
         const game = await store.createGame({
           id: crypto.randomUUID(),
@@ -124,7 +196,13 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       }
     }
 
-    return reply.code(201).send({ round, games: createdGames });
+    await store.updateTournament(tournamentId, {
+      currentRound: Math.max(tournament.currentRound, round),
+      status: round >= tournament.rounds ? 'completed' : 'in_progress',
+      updatedAt: now,
+    });
+
+    return reply.code(201).send({ round, games: createdGames, mixCategories: false });
   });
 
   // -------------------------------------------------------------------------
@@ -171,13 +249,28 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       return reply.code(404).send({ error: 'Tournament not found' });
     }
 
+    const mix = tournament.mixCategories === true;
     const allCategories = await store.listCategories(tournamentId);
+    const allParticipants = await store.listParticipants(tournamentId);
+    const allGames = await store.listGames(tournamentId);
+
+    if (mix || allCategories.filter((c) => !c.deletedAt).length === 0) {
+      const players: EnginePlayer[] = allParticipants
+        .filter((p) => !p.deletedAt)
+        .map(participantToEnginePlayer);
+      const pastGames: PastGame[] = allGames.filter((g) => !g.deletedAt).map(gameToPastGame);
+      return [
+        {
+          categoryId: null,
+          categoryName: 'Open (mixed)',
+          standings: computeStandings(players, pastGames),
+        },
+      ];
+    }
+
     const categories = filterCategoryId
       ? allCategories.filter((c) => c.id === filterCategoryId && !c.deletedAt)
       : allCategories.filter((c) => !c.deletedAt);
-
-    const allParticipants = await store.listParticipants(tournamentId);
-    const allGames = await store.listGames(tournamentId);
 
     return categories.map((category) => {
       const catParticipants = allParticipants.filter(
@@ -185,11 +278,14 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       );
       const players: EnginePlayer[] = catParticipants.map(participantToEnginePlayer);
       const pastGames: PastGame[] = allGames
-        .filter((g) => g.categoryId === category.id)
+        .filter((g) => g.categoryId === category.id && !g.deletedAt)
         .map(gameToPastGame);
 
-      const standings = computeStandings(players, pastGames);
-      return { categoryId: category.id, categoryName: category.name, standings };
+      return {
+        categoryId: category.id,
+        categoryName: category.name,
+        standings: computeStandings(players, pastGames),
+      };
     });
   });
 };

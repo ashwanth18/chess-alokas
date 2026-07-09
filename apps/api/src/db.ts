@@ -246,6 +246,7 @@ export class MemoryStore implements Store {
         rounds: Number(payload['rounds'] ?? 1),
         status: (payload['status'] as TournamentStatus) ?? 'draft',
         currentRound: Number(payload['currentRound'] ?? 0),
+        mixCategories: Boolean(payload['mixCategories'] ?? false),
         clientId: (payload['clientId'] as string | undefined) ?? undefined,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
@@ -309,6 +310,7 @@ interface TournamentRow {
   rounds: number;
   status: string;
   current_round: number;
+  mix_categories: boolean | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
@@ -371,6 +373,7 @@ function rowToTournament(row: TournamentRow): Tournament {
     rounds: row.rounds,
     status: row.status as TournamentStatus,
     currentRound: row.current_round,
+    mixCategories: row.mix_categories ?? false,
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
@@ -455,9 +458,9 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
-              ${t.status}, ${t.currentRound}, ${t.clientId ?? null},
+              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
     `;
@@ -475,6 +478,7 @@ export class PostgresStore implements Store {
       UPDATE tournaments SET
         name = ${m.name}, date = ${m.date ?? null}, style = ${m.style},
         rounds = ${m.rounds}, status = ${m.status}, current_round = ${m.currentRound},
+        mix_categories = ${m.mixCategories ?? false},
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
         deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
@@ -696,15 +700,17 @@ export class PostgresStore implements Store {
 
     if (entity === 'tournament') {
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
+                ${Boolean(p['mixCategories'] ?? false)},
                 ${(p['clientId'] as string) ?? null}, ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, date = EXCLUDED.date, style = EXCLUDED.style,
           rounds = EXCLUDED.rounds, status = EXCLUDED.status,
-          current_round = EXCLUDED.current_round, client_id = EXCLUDED.client_id,
+          current_round = EXCLUDED.current_round, mix_categories = EXCLUDED.mix_categories,
+          client_id = EXCLUDED.client_id,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > tournaments.updated_at
       `;

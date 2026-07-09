@@ -10,7 +10,9 @@ import {
   effectiveTournamentStatus,
   getNextPairingRound,
   highestPairedRound,
+  isMixedTournament,
   isTournamentComplete,
+  MIXED_POOL_ID,
 } from '../lib/tournamentProgress';
 
 type Tab = 'players' | 'pairings' | 'standings';
@@ -85,7 +87,12 @@ export default function TournamentPage() {
     [id],
   );
 
-  const activeCatId = selectedCategoryId || categories?.[0]?.id || '';
+  const mix = tournament ? isMixedTournament(tournament) : false;
+  const hasCategories = (categories?.length ?? 0) > 0;
+  // Separate mode: always show a specific category (default first). Mixed: no filter.
+  const activeCatId = mix
+    ? ''
+    : selectedCategoryId || categories?.[0]?.id || '';
 
   const roundsInPlay = games
     ? [...new Set(games.map((g) => g.round))].sort((a, b) => a - b)
@@ -94,7 +101,7 @@ export default function TournamentPage() {
   const maxRounds = tournament?.rounds ?? 0;
   const nextPairingRound =
     tournament && categories && participants && games
-      ? getNextPairingRound(maxRounds, categories, participants, games)
+      ? getNextPairingRound(maxRounds, categories, participants, games, mix)
       : null;
   const canGenerateMore = nextPairingRound !== null;
   const isComplete =
@@ -124,7 +131,11 @@ export default function TournamentPage() {
   }, [id, tournament, categories, participants, games]);
 
   const boardsForRound = (games ?? [])
-    .filter((g) => g.round === displayRound && (!activeCatId || g.categoryId === activeCatId))
+    .filter((g) => {
+      if (g.round !== displayRound) return false;
+      if (mix) return true;
+      return !activeCatId || g.categoryId === activeCatId;
+    })
     .sort((a, b) => a.board - b.board);
 
   const playerById = new Map((participants ?? []).map((p) => [p.id, p]));
@@ -143,53 +154,37 @@ export default function TournamentPage() {
 
     try {
       const round = nextPairingRound;
-      const catsToPair = (categories ?? []).filter((cat) => {
-        if (cat.deletedAt) return false;
-        const count = participants.filter((p) => p.categoryIds?.includes(cat.id)).length;
-        if (count < 2) return false;
-        return !(games ?? []).some(
-          (g) => !g.deletedAt && g.categoryId === cat.id && g.round === round,
-        );
-      });
-
-      if (catsToPair.length === 0) {
-        setPairError('All categories already have pairings for this round.');
-        setPairing(false);
-        return;
-      }
-
       const now = nowIso();
 
-      for (const cat of catsToPair) {
-        const catId = cat.id;
-        const relevantParticipants = participants.filter((p) =>
-          p.categoryIds?.includes(catId),
-        );
+      if (mix || !hasCategories) {
+        const already = (games ?? []).some((g) => !g.deletedAt && g.round === round);
+        if (already) {
+          setPairError('Pairings already exist for this round.');
+          setPairing(false);
+          return;
+        }
 
-        const pastGamesForCat = (games ?? []).filter((g) => g.categoryId === catId);
-
-        const enginePlayers = relevantParticipants.map((p) => ({
+        const enginePlayers = participants.map((p) => ({
           id: p.id,
           name: p.name,
           rating: p.rating ?? undefined,
           seed: p.seed,
         }));
-
-        const pastGames = pastGamesForCat.map((g) => ({
+        const pastGames = (games ?? []).map((g) => ({
           round: g.round,
           whiteId: g.whiteId ?? null,
           blackId: g.blackId ?? null,
           result: g.result as GameResult,
           isBye: g.isBye,
         }));
-
         const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
+        const poolId = categories?.[0]?.id ?? MIXED_POOL_ID;
 
         for (const board of boards) {
           await db.games.put({
             id: crypto.randomUUID(),
             tournamentId: id,
-            categoryId: catId,
+            categoryId: poolId,
             round,
             board: board.board,
             whiteId: board.whiteId,
@@ -200,6 +195,59 @@ export default function TournamentPage() {
             dirty: 1,
           });
         }
+      } else {
+        const catsToPair = (categories ?? []).filter((cat) => {
+          if (cat.deletedAt) return false;
+          const count = participants.filter((p) => p.categoryIds?.includes(cat.id)).length;
+          if (count < 2) return false;
+          return !(games ?? []).some(
+            (g) => !g.deletedAt && g.categoryId === cat.id && g.round === round,
+          );
+        });
+
+        if (catsToPair.length === 0) {
+          setPairError('All categories already have pairings for this round.');
+          setPairing(false);
+          return;
+        }
+
+        for (const cat of catsToPair) {
+          const catId = cat.id;
+          const relevantParticipants = participants.filter((p) =>
+            p.categoryIds?.includes(catId),
+          );
+          const pastGamesForCat = (games ?? []).filter((g) => g.categoryId === catId);
+          const enginePlayers = relevantParticipants.map((p) => ({
+            id: p.id,
+            name: p.name,
+            rating: p.rating ?? undefined,
+            seed: p.seed,
+          }));
+          const pastGames = pastGamesForCat.map((g) => ({
+            round: g.round,
+            whiteId: g.whiteId ?? null,
+            blackId: g.blackId ?? null,
+            result: g.result as GameResult,
+            isBye: g.isBye,
+          }));
+          const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
+
+          for (const board of boards) {
+            await db.games.put({
+              id: crypto.randomUUID(),
+              tournamentId: id,
+              categoryId: catId,
+              round,
+              board: board.board,
+              whiteId: board.whiteId,
+              blackId: board.blackId,
+              result: board.isBye ? 'bye' : 'pending',
+              isBye: board.isBye,
+              updatedAt: now,
+              dirty: 1,
+            });
+          }
+        }
       }
 
       const updatedGames = await db.games
@@ -208,7 +256,7 @@ export default function TournamentPage() {
         .filter((g) => !g.deletedAt)
         .toArray();
       const allDone = isTournamentComplete(
-        { ...tournament!, rounds: maxRounds, currentRound: round },
+        { ...tournament!, rounds: maxRounds, currentRound: round, mixCategories: mix },
         categories ?? [],
         participants,
         updatedGames,
@@ -238,12 +286,17 @@ export default function TournamentPage() {
 
   const standings = useLiveQuery(() => {
     if (!participants || !games) return [];
-    const catGames = activeCatId
-      ? games.filter((g) => g.categoryId === activeCatId)
-      : games;
-    const catPlayers = activeCatId
-      ? participants.filter((p) => p.categoryIds?.includes(activeCatId))
-      : participants;
+    // Mixed: one ranking for everyone. Separate: ranking for the active category only.
+    const catGames = mix
+      ? games
+      : activeCatId
+        ? games.filter((g) => g.categoryId === activeCatId)
+        : games;
+    const catPlayers = mix
+      ? participants
+      : activeCatId
+        ? participants.filter((p) => p.categoryIds?.includes(activeCatId))
+        : participants;
     const enginePlayers = catPlayers.map((p) => ({
       id: p.id,
       name: p.name,
@@ -264,7 +317,7 @@ export default function TournamentPage() {
     } catch {
       return [];
     }
-  }, [participants, games, activeCatId]);
+  }, [participants, games, activeCatId, mix]);
 
   if (!tournament) {
     return (
@@ -282,6 +335,7 @@ export default function TournamentPage() {
           <div className="tournament-meta">
             <span>{tournament.style === 'swiss' ? 'FIDE Swiss' : tournament.style}</span>
             <span>{tournament.rounds} rounds</span>
+            <span>{mix ? 'Mixed categories' : 'Separate categories'}</span>
             {tournament.date && <span>{new Date(tournament.date).toLocaleDateString()}</span>}
             <span className={`status-badge status-${displayStatus}`}>
               {displayStatus.replace('_', ' ')}
@@ -293,15 +347,9 @@ export default function TournamentPage() {
         </Link>
       </div>
 
-      {categories && categories.length > 0 && (
+      {hasCategories && !mix && (
         <div className="category-tabs">
-          <button
-            className={`cat-tab ${activeCatId === '' ? 'active' : ''}`}
-            onClick={() => setSelectedCategoryId('')}
-          >
-            All
-          </button>
-          {categories.map((cat) => (
+          {categories!.map((cat) => (
             <button
               key={cat.id}
               className={`cat-tab ${activeCatId === cat.id ? 'active' : ''}`}
@@ -311,6 +359,11 @@ export default function TournamentPage() {
             </button>
           ))}
         </div>
+      )}
+      {hasCategories && mix && (
+        <p className="form-hint category-mode-hint">
+          Mixed mode: all categories share one pairing pool and one ranking.
+        </p>
       )}
 
       <div className="tabs">
