@@ -6,7 +6,7 @@ import { matchesFilter } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 
 interface RawRow {
-  [key: string]: string;
+  [key: string]: unknown;
 }
 
 interface MappedParticipant {
@@ -23,31 +23,40 @@ const REQUIRED_FIELDS = ['name', 'age'] as const;
 const OPTIONAL_FIELDS = ['gender', 'rating', 'club'] as const;
 const ALL_FIELDS = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS] as const;
 
+/** XLSX cells are often numbers; CSV is strings — normalize before trim/parse. */
+function cellText(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return String(value).trim();
+}
+
 function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedParticipant[] {
   return raw
     .filter((row) => {
       const nameCol = mapping['name'];
-      return nameCol && row[nameCol]?.trim();
+      return Boolean(nameCol && cellText(row[nameCol]));
     })
     .map((row) => {
       const nameCol = mapping['name'] ?? '';
       const ageCol = mapping['age'] ?? '';
-      const name = row[nameCol]?.trim() ?? '';
-      const ageRaw = row[ageCol] ?? '';
-      const age = parseInt(ageRaw) || 0;
+      const name = cellText(row[nameCol]);
+      const ageRaw = cellText(row[ageCol]);
+      const age = parseInt(ageRaw, 10) || 0;
       const genderCol = mapping['gender'];
-      const gender = genderCol ? row[genderCol]?.trim() || undefined : undefined;
+      const gender = genderCol ? cellText(row[genderCol]) || undefined : undefined;
       const ratingCol = mapping['rating'];
-      const ratingRaw = ratingCol ? (row[ratingCol] ?? '') : '';
-      const rating = ratingRaw ? parseInt(ratingRaw) || undefined : undefined;
+      const ratingRaw = ratingCol ? cellText(row[ratingCol]) : '';
+      const rating = ratingRaw ? parseInt(ratingRaw, 10) || undefined : undefined;
       const clubCol = mapping['club'];
-      const club = clubCol ? row[clubCol]?.trim() || undefined : undefined;
+      const club = clubCol ? cellText(row[clubCol]) || undefined : undefined;
 
       const customFields: Record<string, unknown> = {};
       for (const [col, val] of Object.entries(row)) {
         const isMapped = Object.values(mapping).includes(col);
-        if (!isMapped && val?.trim()) {
-          customFields[col] = val.trim();
+        const text = cellText(val);
+        if (!isMapped && text) {
+          customFields[col] = text;
         }
       }
 
