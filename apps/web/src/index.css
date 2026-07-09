@@ -1065,12 +1065,19 @@ input[type=checkbox] {
   gap: 0.45rem;
 }
 
-.sim-player {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.88rem;
+.sim-cat-block {
+  margin-bottom: 1.25rem;
 }
+.sim-cat-heading {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--wood-400);
+  margin: 0 0 0.65rem;
+}
+.sim-standings-tabs {
+  margin-bottom: 0.85rem;
+}
+
 .sim-name { color: var(--wood-300); }
 .sim-rating {
   font-size: 0.7rem;

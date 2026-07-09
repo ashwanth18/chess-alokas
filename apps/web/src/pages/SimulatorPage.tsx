@@ -16,10 +16,11 @@ import type { GameResult } from '@chess-alokas/shared';
 import ColorHorse from '../components/ColorHorse';
 
 const DEFAULT_CONFIG = {
-  playerCount: 8,
+  playerCount: 12,
   rounds: 5,
   seed: 42,
-  splitCategories: false,
+  splitCategories: true,
+  mixCategories: false,
   resultMode: 'rating_biased' as ResultMode,
 };
 
@@ -35,7 +36,13 @@ function BoardCard({
   pendingResult,
   onSetResult,
 }: {
-  board: { board: number; whiteId: string | null; blackId: string | null; isBye: boolean };
+  board: {
+    board: number;
+    whiteId: string | null;
+    blackId: string | null;
+    isBye: boolean;
+    category?: string;
+  };
   whitePlayer: SimPlayer | undefined;
   blackPlayer: SimPlayer | undefined;
   resultMode: ResultMode;
@@ -49,6 +56,9 @@ function BoardCard({
     return (
       <div className="sim-board-card sim-board-bye">
         <span className="sim-board-num">Board {board.board}</span>
+        {board.category && board.category !== 'open' && (
+          <CategoryBadge cat={board.category as SimPlayer['category']} />
+        )}
         <div className="sim-board-players">
           <span className="sim-player">{whitePlayer?.name ?? '—'}</span>
           <span className="sim-bye-tag">BYE (+1 pt)</span>
@@ -60,6 +70,9 @@ function BoardCard({
   return (
     <div className="sim-board-card">
       <span className="sim-board-num">Board {board.board}</span>
+      {board.category && board.category !== 'open' && (
+        <CategoryBadge cat={board.category as SimPlayer['category']} />
+      )}
       <div className="sim-board-players">
         <div className="sim-player sim-white">
           <ColorHorse color="white" />
@@ -167,6 +180,7 @@ export default function SimulatorPage() {
   >([]);
   const [error, setError] = useState<string | null>(null);
   const [animKey, setAnimKey] = useState(0);
+  const [standingsTab, setStandingsTab] = useState<'under12' | 'under18' | 'all'>('all');
 
   const cfg = (patch: Partial<typeof config>) =>
     setConfig((c) => ({ ...c, ...patch }));
@@ -180,6 +194,7 @@ export default function SimulatorPage() {
       const sim = createSimulation(config);
       setState(sim);
       setManualOverrides([]);
+      setStandingsTab('all');
       bump();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to generate');
@@ -236,12 +251,33 @@ export default function SimulatorPage() {
   }, []);
 
   const playerById = new Map((state?.players ?? []).map((p) => [p.id, p]));
-  const standings = state ? getSimulationStandings(state) : [];
+  const separatePools =
+    Boolean(state?.config.splitCategories) && !state?.config.mixCategories;
+  const standings = state
+    ? getSimulationStandings(
+        state,
+        separatePools && standingsTab !== 'all' ? standingsTab : undefined,
+      )
+    : [];
 
   const canPair = state !== null && !state.pendingBoards && state.currentRound < state.config.rounds;
   const canApply = state !== null && state.pendingBoards !== null;
   const canRunAll = state !== null && !state.pendingBoards && state.currentRound < state.config.rounds;
   const isDone = state !== null && state.currentRound >= state.config.rounds && !state.pendingBoards;
+
+  const pendingByCategory = (() => {
+    if (!state?.pendingBoards) return null;
+    if (!separatePools) return { open: state.pendingBoards };
+    const groups: Record<string, typeof state.pendingBoards> = {
+      under12: [],
+      under18: [],
+    };
+    for (const b of state.pendingBoards) {
+      const key = b.category === 'under18' ? 'under18' : 'under12';
+      groups[key]!.push(b);
+    }
+    return groups;
+  })();
 
   return (
     <div className="page-container simulator-page">
@@ -305,11 +341,28 @@ export default function SimulatorPage() {
               <input
                 type="checkbox"
                 checked={config.splitCategories}
-                onChange={(e) => cfg({ splitCategories: e.target.checked })}
+                onChange={(e) =>
+                  cfg({
+                    splitCategories: e.target.checked,
+                    mixCategories: e.target.checked ? config.mixCategories : false,
+                  })
+                }
               />
               Split into U12 / U18 categories
             </label>
           </div>
+          {config.splitCategories && (
+            <div className="form-group form-group-check">
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={config.mixCategories}
+                  onChange={(e) => cfg({ mixCategories: e.target.checked })}
+                />
+                Allow mixed matches (one shared pool)
+              </label>
+            </div>
+          )}
         </div>
 
         <div className="sim-buttons">
@@ -355,6 +408,14 @@ export default function SimulatorPage() {
             <span>
               Mode: <strong>{state.config.resultMode}</strong>
             </span>
+            {state.config.splitCategories && (
+              <span>
+                Categories:{' '}
+                <strong>
+                  {state.config.mixCategories ? 'Mixed pool' : 'Separate U12 / U18'}
+                </strong>
+              </span>
+            )}
             {isDone && <span className="sim-done-tag">✓ Tournament complete</span>}
             {canApply && (
               <span className="sim-pending-tag">
@@ -368,27 +429,48 @@ export default function SimulatorPage() {
       {state && (
         <div className="sim-body">
           {/* Current Boards */}
-          {state.pendingBoards && (
+          {state.pendingBoards && pendingByCategory && (
             <section className="sim-section" key={`boards-${animKey}`}>
               <h2 className="sim-section-title">
                 Round {state.currentRound} — Boards ({state.pendingBoards.length})
               </h2>
-              <div className="sim-boards-grid">
-                {state.pendingBoards.map((board) => (
-                  <BoardCard
-                    key={board.board}
-                    board={board}
-                    whitePlayer={board.whiteId ? playerById.get(board.whiteId) : undefined}
-                    blackPlayer={board.blackId ? playerById.get(board.blackId) : undefined}
-                    resultMode={state.config.resultMode}
-                    pendingResult={manualOverrides.find((o) => o.board === board.board)?.result}
-                    onSetResult={setManualResult}
-                  />
-                ))}
-              </div>
+              {Object.entries(pendingByCategory).map(([cat, boards]) =>
+                boards.length === 0 ? null : (
+                  <div key={cat} className="sim-cat-block">
+                    {separatePools && (
+                      <h3 className="sim-cat-heading">
+                        {cat === 'under12'
+                          ? 'Under 12'
+                          : cat === 'under18'
+                            ? 'Under 18'
+                            : 'Open'}
+                      </h3>
+                    )}
+                    <div className="sim-boards-grid">
+                      {boards.map((board) => (
+                        <BoardCard
+                          key={board.board}
+                          board={board}
+                          whitePlayer={
+                            board.whiteId ? playerById.get(board.whiteId) : undefined
+                          }
+                          blackPlayer={
+                            board.blackId ? playerById.get(board.blackId) : undefined
+                          }
+                          resultMode={state.config.resultMode}
+                          pendingResult={
+                            manualOverrides.find((o) => o.board === board.board)?.result
+                          }
+                          onSetResult={setManualResult}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ),
+              )}
               {state.config.resultMode === 'manual' && (
                 <p className="form-hint">
-                  Set results for each board above, then click "Apply Results".
+                  Set results for each board above, then click &quot;Apply Results&quot;.
                 </p>
               )}
             </section>
@@ -436,6 +518,26 @@ export default function SimulatorPage() {
                 Standings{' '}
                 {isDone && <span className="final-tag">Final</span>}
               </h2>
+              {separatePools && (
+                <div className="category-tabs sim-standings-tabs">
+                  {(
+                    [
+                      ['all', 'All categories'],
+                      ['under12', 'Under 12'],
+                      ['under18', 'Under 18'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`cat-tab ${standingsTab === key ? 'active' : ''}`}
+                      onClick={() => setStandingsTab(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <table className="data-table standings-table sim-standings">
                 <thead>
                   <tr>
@@ -460,16 +562,14 @@ export default function SimulatorPage() {
                           {s.rank === 1
                             ? '🥇'
                             : s.rank === 2
-                            ? '🥈'
-                            : s.rank === 3
-                            ? '🥉'
-                            : s.rank}
+                              ? '🥈'
+                              : s.rank === 3
+                                ? '🥉'
+                                : s.rank}
                         </td>
                         <td>{s.name}</td>
                         <td>
-                          {simPlayer && (
-                            <CategoryBadge cat={simPlayer.category} />
-                          )}
+                          {simPlayer && <CategoryBadge cat={simPlayer.category} />}
                         </td>
                         <td>{s.rating || '—'}</td>
                         <td className="score-cell">

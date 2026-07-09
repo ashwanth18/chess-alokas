@@ -35,6 +35,9 @@ export {
   type SimulatorConfig,
   type SimPlayer,
   type SimRound,
+  type SimBoard,
+  type SimCategory,
   type SimulationState,
+  type StandingRow,
   type ResultMode,
 } from './simulator.js';

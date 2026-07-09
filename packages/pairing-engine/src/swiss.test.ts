@@ -6,6 +6,7 @@ import {
   createSimulation,
   runAllRounds,
   getSimulationDiagnostics,
+  getSimulationStandings,
   UnsupportedPairingStyleError,
   pairRound,
   type EnginePlayer,
@@ -146,5 +147,46 @@ describe('simulator', () => {
     expect(a.pastGames.map((g) => g.result)).toEqual(
       b.pastGames.map((g) => g.result),
     );
+  });
+
+  it('pairs U12 and U18 separately when split and not mixed', () => {
+    const done = runAllRounds(
+      createSimulation({
+        playerCount: 12,
+        rounds: 3,
+        seed: 7,
+        splitCategories: true,
+        mixCategories: false,
+      }),
+    );
+    for (const game of done.pastGames) {
+      if (game.isBye) continue;
+      const white = done.players.find((p) => p.id === game.whiteId);
+      const black = done.players.find((p) => p.id === game.blackId);
+      expect(white?.category).toBe(black?.category);
+    }
+    const u12 = getSimulationStandings(done, 'under12');
+    const u18 = getSimulationStandings(done, 'under18');
+    expect(u12.every((s) => s.category === 'under12')).toBe(true);
+    expect(u18.every((s) => s.category === 'under18')).toBe(true);
+  });
+
+  it('allows cross-category games when mixCategories is true', () => {
+    const done = runAllRounds(
+      createSimulation({
+        playerCount: 12,
+        rounds: 3,
+        seed: 11,
+        splitCategories: true,
+        mixCategories: true,
+      }),
+    );
+    const cross = done.pastGames.some((g) => {
+      if (g.isBye || !g.whiteId || !g.blackId) return false;
+      const white = done.players.find((p) => p.id === g.whiteId);
+      const black = done.players.find((p) => p.id === g.blackId);
+      return white && black && white.category !== black.category;
+    });
+    expect(cross).toBe(true);
   });
 });
