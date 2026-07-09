@@ -13,6 +13,7 @@ import type {
   SimPlayer,
 } from '@chess-alokas/pairing-engine';
 import type { GameResult } from '@chess-alokas/shared';
+import ColorHorse from '../components/ColorHorse';
 
 const DEFAULT_CONFIG = {
   playerCount: 8,
@@ -61,14 +62,14 @@ function BoardCard({
       <span className="sim-board-num">Board {board.board}</span>
       <div className="sim-board-players">
         <div className="sim-player sim-white">
-          <span className="sim-color-dot white" />
+          <ColorHorse color="white" />
           <span className="sim-name">{whitePlayer?.name ?? '—'}</span>
           <span className="sim-rating">{whitePlayer?.rating}</span>
           {whitePlayer && <CategoryBadge cat={whitePlayer.category} />}
         </div>
         <span className="sim-vs">vs</span>
         <div className="sim-player sim-black">
-          <span className="sim-color-dot black" />
+          <ColorHorse color="black" />
           <span className="sim-name">{blackPlayer?.name ?? '—'}</span>
           <span className="sim-rating">{blackPlayer?.rating}</span>
           {blackPlayer && <CategoryBadge cat={blackPlayer.category} />}

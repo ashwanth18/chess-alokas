@@ -841,14 +841,25 @@ input[type=checkbox] {
 }
 .vs-sep { color: var(--ink-200); font-size: 0.75rem; }
 
-.color-dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
+.color-horse {
   flex-shrink: 0;
-  border: 1px solid rgba(0,0,0,0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  line-height: 1;
+  font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif;
 }
-.color-dot.white { background: #f5f0e8; }
-.color-dot.black { background: #2a2015; border-color: rgba(255,255,255,0.2); }
+.color-horse-white {
+  color: #f5f0e8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.color-horse-black {
+  color: #1a1208;
+  text-shadow:
+    0 0 1px rgba(245, 240, 232, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+}
 
 .rating-tag {
   font-size: 0.7rem;
@@ -1039,13 +1050,6 @@ input[type=checkbox] {
   gap: 0.5rem;
   font-size: 0.88rem;
 }
-.sim-color-dot {
-  width: 9px; height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.sim-color-dot.white { background: #f0ebe0; border: 1px solid rgba(0,0,0,0.2); }
-.sim-color-dot.black { background: #2a2015; border: 1px solid rgba(255,255,255,0.2); }
 .sim-name { color: var(--wood-300); }
 .sim-rating {
   font-size: 0.7rem;

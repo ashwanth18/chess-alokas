@@ -5,6 +5,7 @@ import { pairRound, computeStandings } from '@chess-alokas/pairing-engine';
 import type { GameResult } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import type { LocalParticipant, LocalGame } from '../db/local';
+import ColorHorse from '../components/ColorHorse';
 import {
   effectiveTournamentStatus,
   getNextPairingRound,
@@ -421,13 +422,13 @@ export default function TournamentPage() {
                     <span className="board-num">Board {game.board}</span>
                     <div className="board-players">
                       <span className="player-white">
-                        <span className="color-dot white" />
+                        <ColorHorse color="white" />
                         {white?.name ?? '—'}
                         {white?.rating && <span className="rating-tag">{white.rating}</span>}
                       </span>
                       <span className="vs-sep">vs</span>
                       <span className="player-black">
-                        <span className="color-dot black" />
+                        <ColorHorse color="black" />
                         {black?.name ?? (game.isBye ? 'BYE' : '—')}
                         {black?.rating && <span className="rating-tag">{black.rating}</span>}
                       </span>
