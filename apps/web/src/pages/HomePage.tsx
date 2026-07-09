@@ -8,6 +8,13 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge status-${status}`}>{status.replace('_', ' ')}</span>;
 }
 
+function deriveListStatus(t: { status: string; currentRound: number; rounds: number }): string {
+  if (t.status === 'completed') return 'completed';
+  if (t.currentRound >= t.rounds && t.rounds > 0 && t.currentRound > 0) return 'completed';
+  if (t.currentRound > 0) return 'in_progress';
+  return t.status;
+}
+
 export default function HomePage() {
   const [lastSync, setLastSync] = useState<string | null>(null);
 
@@ -82,7 +89,7 @@ export default function HomePage() {
                     </div>
                   </div>
                   <div className="tournament-card-side">
-                    <StatusBadge status={t.status} />
+                    <StatusBadge status={deriveListStatus(t)} />
                     {t.currentRound > 0 && (
                       <span className="round-indicator">Round {t.currentRound}</span>
                     )}

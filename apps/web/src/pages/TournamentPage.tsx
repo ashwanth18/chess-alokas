@@ -1,10 +1,16 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { pairRound, computeStandings } from '@chess-alokas/pairing-engine';
 import type { GameResult } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import type { LocalParticipant, LocalGame } from '../db/local';
+import {
+  effectiveTournamentStatus,
+  getNextPairingRound,
+  highestPairedRound,
+  isTournamentComplete,
+} from '../lib/tournamentProgress';
 
 type Tab = 'players' | 'pairings' | 'standings';
 
@@ -84,10 +90,37 @@ export default function TournamentPage() {
     ? [...new Set(games.map((g) => g.round))].sort((a, b) => a - b)
     : [];
   const displayRound = selectedRound || (tournament?.currentRound ?? 1);
-  const nextRound = (tournament?.currentRound ?? 0) + 1;
   const maxRounds = tournament?.rounds ?? 0;
-  const canGenerateMore = nextRound <= maxRounds;
-  const isComplete = maxRounds > 0 && (tournament?.currentRound ?? 0) >= maxRounds;
+  const nextPairingRound =
+    tournament && categories && participants && games
+      ? getNextPairingRound(maxRounds, categories, participants, games)
+      : null;
+  const canGenerateMore = nextPairingRound !== null;
+  const isComplete =
+    tournament && categories && participants && games
+      ? isTournamentComplete(tournament, categories, participants, games)
+      : false;
+  const displayStatus =
+    tournament && categories && participants && games
+      ? effectiveTournamentStatus(tournament, categories, participants, games)
+      : (tournament?.status ?? 'draft');
+
+  useEffect(() => {
+    if (!id || !tournament || !categories || !participants || !games) return;
+    if (!isTournamentComplete(tournament, categories, participants, games)) return;
+    if (tournament.status === 'completed') return;
+
+    void db.tournaments.update(id, {
+      status: 'completed',
+      currentRound: Math.max(
+        tournament.currentRound,
+        highestPairedRound(games),
+        tournament.rounds,
+      ),
+      updatedAt: nowIso(),
+      dirty: 1,
+    });
+  }, [id, tournament, categories, participants, games]);
 
   const boardsForRound = (games ?? [])
     .filter((g) => g.round === displayRound && (!activeCatId || g.categoryId === activeCatId))
@@ -100,7 +133,7 @@ export default function TournamentPage() {
       setPairError('Need at least 2 participants to generate pairings.');
       return;
     }
-    if (!canGenerateMore) {
+    if (!canGenerateMore || nextPairingRound === null) {
       setPairError(`This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`);
       return;
     }
@@ -108,60 +141,81 @@ export default function TournamentPage() {
     setPairError(null);
 
     try {
-      const round = nextRound;
-      const catId = activeCatId;
+      const round = nextPairingRound;
+      const catsToPair = (categories ?? []).filter((cat) => {
+        if (cat.deletedAt) return false;
+        const count = participants.filter((p) => p.categoryIds?.includes(cat.id)).length;
+        if (count < 2) return false;
+        return !(games ?? []).some(
+          (g) => !g.deletedAt && g.categoryId === cat.id && g.round === round,
+        );
+      });
 
-      const relevantParticipants = catId
-        ? participants.filter((p) => p.categoryIds?.includes(catId))
-        : participants;
-
-      if (relevantParticipants.length < 2) {
-        setPairError('Not enough participants in this category.');
+      if (catsToPair.length === 0) {
+        setPairError('All categories already have pairings for this round.');
         setPairing(false);
         return;
       }
 
-      const pastGamesForCat = (games ?? []).filter(
-        (g) => !catId || g.categoryId === catId,
-      );
-
-      const enginePlayers = relevantParticipants.map((p) => ({
-        id: p.id,
-        name: p.name,
-        rating: p.rating ?? undefined,
-        seed: p.seed,
-      }));
-
-      const pastGames = pastGamesForCat.map((g) => ({
-        round: g.round,
-        whiteId: g.whiteId ?? null,
-        blackId: g.blackId ?? null,
-        result: g.result as GameResult,
-        isBye: g.isBye,
-      }));
-
-      const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
-
       const now = nowIso();
-      for (const board of boards) {
-        await db.games.put({
-          id: crypto.randomUUID(),
-          tournamentId: id,
-          categoryId: catId || id,
-          round,
-          board: board.board,
-          whiteId: board.whiteId,
-          blackId: board.blackId,
-          result: 'pending',
-          isBye: board.isBye,
-          updatedAt: now,
-          dirty: 1,
-        });
+
+      for (const cat of catsToPair) {
+        const catId = cat.id;
+        const relevantParticipants = participants.filter((p) =>
+          p.categoryIds?.includes(catId),
+        );
+
+        const pastGamesForCat = (games ?? []).filter((g) => g.categoryId === catId);
+
+        const enginePlayers = relevantParticipants.map((p) => ({
+          id: p.id,
+          name: p.name,
+          rating: p.rating ?? undefined,
+          seed: p.seed,
+        }));
+
+        const pastGames = pastGamesForCat.map((g) => ({
+          round: g.round,
+          whiteId: g.whiteId ?? null,
+          blackId: g.blackId ?? null,
+          result: g.result as GameResult,
+          isBye: g.isBye,
+        }));
+
+        const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
+
+        for (const board of boards) {
+          await db.games.put({
+            id: crypto.randomUUID(),
+            tournamentId: id,
+            categoryId: catId,
+            round,
+            board: board.board,
+            whiteId: board.whiteId,
+            blackId: board.blackId,
+            result: board.isBye ? 'bye' : 'pending',
+            isBye: board.isBye,
+            updatedAt: now,
+            dirty: 1,
+          });
+        }
       }
 
+      const updatedGames = await db.games
+        .where('tournamentId')
+        .equals(id)
+        .filter((g) => !g.deletedAt)
+        .toArray();
+      const allDone = isTournamentComplete(
+        { ...tournament!, rounds: maxRounds, currentRound: round },
+        categories ?? [],
+        participants,
+        updatedGames,
+      );
+
       await db.tournaments.update(id, {
-        currentRound: round,
-        status: round >= maxRounds ? 'completed' : 'in_progress',
+        currentRound: Math.max(tournament?.currentRound ?? 0, round),
+        status: allDone ? 'completed' : 'in_progress',
         updatedAt: now,
         dirty: 1,
       });
@@ -228,8 +282,8 @@ export default function TournamentPage() {
             <span>{tournament.style === 'swiss' ? 'FIDE Swiss' : tournament.style}</span>
             <span>{tournament.rounds} rounds</span>
             {tournament.date && <span>{new Date(tournament.date).toLocaleDateString()}</span>}
-            <span className={`status-badge status-${tournament.status}`}>
-              {tournament.status.replace('_', ' ')}
+            <span className={`status-badge status-${displayStatus}`}>
+              {displayStatus.replace('_', ' ')}
             </span>
           </div>
         </div>
@@ -343,12 +397,12 @@ export default function TournamentPage() {
                 ? 'Pairing…'
                 : isComplete
                   ? 'All rounds complete'
-                  : `Generate Round ${nextRound}`}
+                  : `Generate Round ${nextPairingRound ?? '—'}`}
             </button>
           </div>
 
           {isComplete && (
-            <p className="hint-text">This tournament is limited to {maxRounds} round{maxRounds === 1 ? '' : 's'}.</p>
+            <p className="form-hint">This tournament is limited to {maxRounds} round{maxRounds === 1 ? '' : 's'}.</p>
           )}
 
           {pairError && <div className="form-error">{pairError}</div>}
