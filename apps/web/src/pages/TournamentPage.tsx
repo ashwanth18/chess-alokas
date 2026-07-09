@@ -84,6 +84,10 @@ export default function TournamentPage() {
     ? [...new Set(games.map((g) => g.round))].sort((a, b) => a - b)
     : [];
   const displayRound = selectedRound || (tournament?.currentRound ?? 1);
+  const nextRound = (tournament?.currentRound ?? 0) + 1;
+  const maxRounds = tournament?.rounds ?? 0;
+  const canGenerateMore = nextRound <= maxRounds;
+  const isComplete = maxRounds > 0 && (tournament?.currentRound ?? 0) >= maxRounds;
 
   const boardsForRound = (games ?? [])
     .filter((g) => g.round === displayRound && (!activeCatId || g.categoryId === activeCatId))
@@ -96,11 +100,15 @@ export default function TournamentPage() {
       setPairError('Need at least 2 participants to generate pairings.');
       return;
     }
+    if (!canGenerateMore) {
+      setPairError(`This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`);
+      return;
+    }
     setPairing(true);
     setPairError(null);
 
     try {
-      const round = (tournament?.currentRound ?? 0) + 1;
+      const round = nextRound;
       const catId = activeCatId;
 
       const relevantParticipants = catId
@@ -153,7 +161,7 @@ export default function TournamentPage() {
 
       await db.tournaments.update(id, {
         currentRound: round,
-        status: 'in_progress',
+        status: round >= maxRounds ? 'completed' : 'in_progress',
         updatedAt: now,
         dirty: 1,
       });
@@ -329,11 +337,19 @@ export default function TournamentPage() {
             <button
               className="btn btn-primary"
               onClick={generatePairings}
-              disabled={pairing || !participants || participants.length < 2}
+              disabled={pairing || !participants || participants.length < 2 || !canGenerateMore}
             >
-              {pairing ? 'Pairing…' : `Generate Round ${(tournament.currentRound ?? 0) + 1}`}
+              {pairing
+                ? 'Pairing…'
+                : isComplete
+                  ? 'All rounds complete'
+                  : `Generate Round ${nextRound}`}
             </button>
           </div>
+
+          {isComplete && (
+            <p className="hint-text">This tournament is limited to {maxRounds} round{maxRounds === 1 ? '' : 's'}.</p>
+          )}
 
           {pairError && <div className="form-error">{pairError}</div>}
 
