@@ -22,6 +22,8 @@ export interface TournamentCapabilities {
   showStartHint: boolean;
   allRoundsPaired: boolean;
   allResultsDone: boolean;
+  /** Round that must be scored before the next pairing can run. */
+  pendingResultsRound: number | null;
 }
 
 const MIXED_POOL_ID = '__mixed__';
@@ -66,6 +68,19 @@ export function allResultsEntered(games: LocalGame[]): boolean {
   const active = games.filter((g) => !g.deletedAt);
   if (active.length === 0) return false;
   return active.every((g) => g.isBye || g.result === 'bye' || g.result !== 'pending');
+}
+
+/** First round (before `beforeRound`) that still has pending non-bye results, or null. */
+export function firstRoundMissingResults(
+  games: LocalGame[],
+  beforeRound: number,
+): number | null {
+  for (let r = 1; r < beforeRound; r++) {
+    const roundGames = games.filter((g) => !g.deletedAt && g.round === r);
+    if (roundGames.length === 0) continue;
+    if (roundGames.some((g) => !g.isBye && g.result === 'pending')) return r;
+  }
+  return null;
 }
 
 export function isAllRoundsPaired(
@@ -149,6 +164,8 @@ export function getTournamentCapabilities(
   );
   const allRoundsPaired = isAllRoundsPaired(tournament, categories, participants, games);
   const allResultsDone = allResultsEntered(games);
+  const pendingResultsRound =
+    nextRound !== null ? firstRoundMissingResults(games, nextRound) : null;
 
   const completed = stage === 'completed';
   const live = stage === 'in_progress';
@@ -157,12 +174,17 @@ export function getTournamentCapabilities(
     stage,
     canImport: !completed,
     importRequiresLateWarning: live || allRoundsPaired,
-    canPair: !completed && enoughPlayers && nextRound !== null,
+    canPair:
+      !completed &&
+      enoughPlayers &&
+      nextRound !== null &&
+      pendingResultsRound === null,
     canEditResults: !completed && games.some((g) => !g.deletedAt),
     canMarkReady: stage === 'draft' && enoughPlayers,
     showStartHint: (stage === 'draft' || stage === 'ready') && enoughPlayers,
     allRoundsPaired,
     allResultsDone,
+    pendingResultsRound,
   };
 }
 

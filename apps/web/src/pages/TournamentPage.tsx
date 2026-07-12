@@ -226,13 +226,19 @@ export default function TournamentPage() {
 
   async function generatePairings() {
     if (!id || !participants || !caps?.canPair) {
-      setPairError(
-        !participants || participants.length < 2
-          ? 'Need at least 2 participants to generate pairings.'
-          : caps?.stage === 'completed'
-            ? 'This tournament is complete.'
-            : `This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`,
-      );
+      if (caps?.pendingResultsRound != null) {
+        setPairError(
+          `Enter all results for Round ${caps.pendingResultsRound} before generating Round ${nextPairingRound ?? '—'}.`,
+        );
+      } else {
+        setPairError(
+          !participants || participants.length < 2
+            ? 'Need at least 2 participants to generate pairings.'
+            : caps?.stage === 'completed'
+              ? 'This tournament is complete.'
+              : `This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`,
+        );
+      }
       return;
     }
     if (nextPairingRound === null) {
@@ -616,6 +622,12 @@ export default function TournamentPage() {
             </button>
           </div>
 
+          {caps?.pendingResultsRound != null && !caps.allRoundsPaired && (
+            <p className="form-hint stage-banner-warn">
+              Enter all Round {caps.pendingResultsRound} results before generating Round{' '}
+              {nextPairingRound ?? '—'}.
+            </p>
+          )}
           {caps?.allRoundsPaired && !caps.allResultsDone && (
             <p className="form-hint">
               All {maxRounds} rounds are paired. Enter remaining results to complete the

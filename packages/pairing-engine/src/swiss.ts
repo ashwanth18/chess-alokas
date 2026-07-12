@@ -457,3 +457,16 @@ export function diagnosePairings(
 
   return { rematchCount, byeCounts, colorImbalances };
 }
+
+/** First round before `beforeRound` that still has pending non-bye results. */
+export function firstRoundMissingResults(
+  pastGames: PastGame[],
+  beforeRound: number,
+): number | null {
+  for (let r = 1; r < beforeRound; r++) {
+    const roundGames = pastGames.filter((g) => g.round === r);
+    if (roundGames.length === 0) continue;
+    if (roundGames.some((g) => !g.isBye && g.result === 'pending')) return r;
+  }
+  return null;
+}

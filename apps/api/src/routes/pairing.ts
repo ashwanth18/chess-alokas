@@ -5,6 +5,7 @@ import {
   pairRound,
   computeStandings,
   UnsupportedPairingStyleError,
+  firstRoundMissingResults,
 } from '@chess-alokas/pairing-engine';
 import type { EnginePlayer, PastGame } from '@chess-alokas/pairing-engine';
 import type { Participant, Game, Category } from '@chess-alokas/shared';
@@ -52,6 +53,15 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         .send({ error: `Pairing style "${tournament.style}" is not yet implemented` });
     }
 
+    const allGames = await store.listGames(tournamentId);
+    const pastForCheck = allGames.filter((g) => !g.deletedAt).map(gameToPastGame);
+    const pendingRound = firstRoundMissingResults(pastForCheck, round);
+    if (pendingRound !== null) {
+      return reply.code(400).send({
+        error: `Enter all results for round ${pendingRound} before pairing round ${round}.`,
+      });
+    }
+
     const bodyParsed = PairBodySchema.safeParse(request.body ?? {});
     if (!bodyParsed.success) {
       return reply.code(400).send({ error: 'Invalid request', details: bodyParsed.error.format() });
@@ -63,7 +73,6 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     const mix = tournament.mixCategories === true;
 
     const allParticipants = await store.listParticipants(tournamentId);
-    const allGames = await store.listGames(tournamentId);
     const createdGames: Game[] = [];
     const now = new Date().toISOString();
 

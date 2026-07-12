@@ -12,6 +12,7 @@ export {
   type PairingOutput,
   type PlayerState,
   type PlayerId,
+  firstRoundMissingResults,
 } from './swiss.js';
 
 export {

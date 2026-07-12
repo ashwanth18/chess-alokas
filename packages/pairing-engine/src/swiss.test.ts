@@ -3,6 +3,7 @@ import {
   pairSwissRound,
   computeStandings,
   diagnosePairings,
+  firstRoundMissingResults,
   createSimulation,
   runAllRounds,
   getSimulationDiagnostics,
@@ -98,6 +99,22 @@ describe('pairSwissRound', () => {
     }));
     const r2 = pairSwissRound({ players: plist, pastGames: past, round: 2 });
     expect(r2.byePlayerId).not.toBe(bye1);
+  });
+});
+
+describe('firstRoundMissingResults', () => {
+  it('returns round with pending results before pairing next round', () => {
+    const plist = players(4);
+    const r1 = pairSwissRound({ players: plist, pastGames: [], round: 1 });
+    const pending: PastGame[] = r1.boards.map((b) => ({
+      round: 1,
+      whiteId: b.whiteId,
+      blackId: b.blackId,
+      result: 'pending',
+      isBye: b.isBye,
+    }));
+    expect(firstRoundMissingResults(pending, 2)).toBe(1);
+    expect(firstRoundMissingResults(pending, 1)).toBeNull();
   });
 });
 
