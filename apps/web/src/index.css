@@ -231,6 +231,12 @@ input, select, textarea { font-family: var(--font-body); }
   flex-wrap: wrap;
 }
 .page-header h1 { font-size: 2rem; }
+.page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
 .page-subtitle {
   color: var(--ink-300);
   font-size: 0.95rem;
@@ -385,6 +391,97 @@ input, select, textarea { font-family: var(--font-body); }
 .status-ready { background: rgba(76,175,130,0.2); color: var(--green-200); }
 .status-in_progress { background: rgba(255,190,80,0.15); color: #ffcc60; }
 .status-completed { background: rgba(76,175,130,0.3); color: var(--green-200); }
+
+/* ─── Tournament stage strip ─────────────────────────────────────────────────── */
+.stage-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0 0 1.25rem;
+  padding: 0.45rem;
+  border: 1px solid var(--color-border-warm);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+.stage-step {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  min-width: 5.5rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: var(--radius);
+  color: var(--ink-300);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.stage-step .stage-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-warm);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.stage-step.done {
+  color: var(--green-200);
+}
+.stage-step.done .stage-num {
+  background: rgba(76,175,130,0.25);
+  border-color: transparent;
+}
+.stage-step.active {
+  color: var(--wood-300);
+  background: rgba(196,165,116,0.12);
+}
+.stage-step.active .stage-num {
+  background: var(--wood-500);
+  border-color: transparent;
+  color: var(--ink-900);
+}
+
+.stage-banner {
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border-warm);
+  background: var(--color-surface);
+  color: var(--ink-200);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+.stage-banner-warn {
+  border-color: rgba(255,190,80,0.35);
+  background: rgba(255,190,80,0.08);
+  color: #ffcc60;
+}
+.stage-banner-done {
+  border-color: rgba(76,175,130,0.35);
+  background: rgba(76,175,130,0.1);
+  color: var(--green-200);
+}
+.late-entry-panel strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+.late-entry-panel p {
+  margin: 0 0 0.75rem;
+}
+.late-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.85rem;
+  color: var(--ink-100);
+  cursor: pointer;
+}
+.late-confirm input {
+  margin-top: 0.2rem;
+}
 
 /* ─── Empty state ────────────────────────────────────────────────────────────── */
 .empty-state {
@@ -916,6 +1013,12 @@ input[type=checkbox] {
   font-size: 0.78rem;
   font-style: italic;
   color: var(--ink-300);
+}
+.result-readonly {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--wood-300);
 }
 
 /* ─── Import Page ────────────────────────────────────────────────────────────── */

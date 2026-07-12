@@ -12,6 +12,18 @@ export interface TournamentLike {
   mixCategories?: boolean;
 }
 
+export interface TournamentCapabilities {
+  stage: 'draft' | 'ready' | 'in_progress' | 'completed';
+  canImport: boolean;
+  importRequiresLateWarning: boolean;
+  canPair: boolean;
+  canEditResults: boolean;
+  canMarkReady: boolean;
+  showStartHint: boolean;
+  allRoundsPaired: boolean;
+  allResultsDone: boolean;
+}
+
 const MIXED_POOL_ID = '__mixed__';
 
 export function isMixedTournament(tournament: TournamentLike): boolean {
@@ -50,7 +62,13 @@ export function getNextPairingRound(
   return null;
 }
 
-export function isTournamentComplete(
+export function allResultsEntered(games: LocalGame[]): boolean {
+  const active = games.filter((g) => !g.deletedAt);
+  if (active.length === 0) return false;
+  return active.every((g) => g.isBye || g.result === 'bye' || g.result !== 'pending');
+}
+
+export function isAllRoundsPaired(
   tournament: TournamentLike,
   categories: CategoryLike[],
   participants: LocalParticipant[],
@@ -63,8 +81,37 @@ export function isTournamentComplete(
       participants,
       games,
       isMixedTournament(tournament),
-    ) === null
+    ) === null &&
+    games.some((g) => !g.deletedAt)
   );
+}
+
+/** Fully complete: all rounds paired and all non-bye results entered. */
+export function isTournamentComplete(
+  tournament: TournamentLike,
+  categories: CategoryLike[],
+  participants: LocalParticipant[],
+  games: LocalGame[],
+): boolean {
+  return (
+    isAllRoundsPaired(tournament, categories, participants, games) &&
+    allResultsEntered(games)
+  );
+}
+
+export function hasEnoughPlayersToStart(
+  categories: CategoryLike[],
+  participants: LocalParticipant[],
+  mixCategories = false,
+): boolean {
+  const active = participants.filter((p) => !p.deletedAt);
+  if (mixCategories || categories.filter((c) => !c.deletedAt).length === 0) {
+    return active.length >= 2;
+  }
+  return categories.some((cat) => {
+    if (cat.deletedAt) return false;
+    return active.filter((p) => p.categoryIds?.includes(cat.id)).length >= 2;
+  });
 }
 
 export function effectiveTournamentStatus(
@@ -72,7 +119,7 @@ export function effectiveTournamentStatus(
   categories: CategoryLike[],
   participants: LocalParticipant[],
   games: LocalGame[],
-): string {
+): 'draft' | 'ready' | 'in_progress' | 'completed' {
   if (isTournamentComplete(tournament, categories, participants, games)) {
     return 'completed';
   }
@@ -80,7 +127,43 @@ export function effectiveTournamentStatus(
   if (hasGames || tournament.currentRound > 0) {
     return 'in_progress';
   }
-  return tournament.status;
+  if (tournament.status === 'ready') return 'ready';
+  return 'draft';
+}
+
+export function getTournamentCapabilities(
+  tournament: TournamentLike,
+  categories: CategoryLike[],
+  participants: LocalParticipant[],
+  games: LocalGame[],
+): TournamentCapabilities {
+  const stage = effectiveTournamentStatus(tournament, categories, participants, games);
+  const mix = isMixedTournament(tournament);
+  const enoughPlayers = hasEnoughPlayersToStart(categories, participants, mix);
+  const nextRound = getNextPairingRound(
+    tournament.rounds,
+    categories,
+    participants,
+    games,
+    mix,
+  );
+  const allRoundsPaired = isAllRoundsPaired(tournament, categories, participants, games);
+  const allResultsDone = allResultsEntered(games);
+
+  const completed = stage === 'completed';
+  const live = stage === 'in_progress';
+
+  return {
+    stage,
+    canImport: !completed,
+    importRequiresLateWarning: live || allRoundsPaired,
+    canPair: !completed && enoughPlayers && nextRound !== null,
+    canEditResults: !completed && games.some((g) => !g.deletedAt),
+    canMarkReady: stage === 'draft' && enoughPlayers,
+    showStartHint: (stage === 'draft' || stage === 'ready') && enoughPlayers,
+    allRoundsPaired,
+    allResultsDone,
+  };
 }
 
 export function highestPairedRound(games: LocalGame[]): number {

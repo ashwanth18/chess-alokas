@@ -4,11 +4,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { pairRound, computeStandings } from '@chess-alokas/pairing-engine';
 import type { GameResult } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
-import type { LocalParticipant, LocalGame } from '../db/local';
 import ColorHorse from '../components/ColorHorse';
 import {
   effectiveTournamentStatus,
   getNextPairingRound,
+  getTournamentCapabilities,
   highestPairedRound,
   isMixedTournament,
   isTournamentComplete,
@@ -21,12 +21,17 @@ function ResultSelector({
   value,
   onChange,
   isBye,
+  readOnly,
 }: {
   value: string;
   onChange: (r: GameResult) => void;
   isBye: boolean;
+  readOnly?: boolean;
 }) {
   if (isBye) return <span className="result-bye">BYE (1pt)</span>;
+  if (readOnly) {
+    return <span className="result-readonly">{value === 'pending' ? '—' : value}</span>;
+  }
   const options: GameResult[] = ['1-0', '0-1', '1/2-1/2'];
   return (
     <div className="result-selector">
@@ -41,6 +46,40 @@ function ResultSelector({
         </button>
       ))}
     </div>
+  );
+}
+
+function StageStrip({ stage }: { stage: string }) {
+  const steps = [
+    { id: 'players', label: 'Players' },
+    { id: 'ready', label: 'Ready' },
+    { id: 'live', label: 'Pairings' },
+    { id: 'done', label: 'Complete' },
+  ] as const;
+
+  let activeIndex = 0;
+  if (stage === 'ready') activeIndex = 1;
+  else if (stage === 'in_progress') activeIndex = 2;
+  else if (stage === 'completed') activeIndex = 3;
+
+  return (
+    <ol className="stage-strip" aria-label="Tournament progress">
+      {steps.map((step, i) => (
+        <li
+          key={step.id}
+          className={[
+            'stage-step',
+            i < activeIndex ? 'done' : '',
+            i === activeIndex ? 'active' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <span className="stage-num">{i + 1}</span>
+          <span className="stage-label">{step.label}</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -89,10 +128,7 @@ export default function TournamentPage() {
 
   const mix = tournament ? isMixedTournament(tournament) : false;
   const hasCategories = (categories?.length ?? 0) > 0;
-  // Separate mode: always show a specific category (default first). Mixed: no filter.
-  const activeCatId = mix
-    ? ''
-    : selectedCategoryId || categories?.[0]?.id || '';
+  const activeCatId = mix ? '' : selectedCategoryId || categories?.[0]?.id || '';
 
   const roundsInPlay = games
     ? [...new Set(games.map((g) => g.round))].sort((a, b) => a - b)
@@ -103,32 +139,46 @@ export default function TournamentPage() {
     tournament && categories && participants && games
       ? getNextPairingRound(maxRounds, categories, participants, games, mix)
       : null;
-  const canGenerateMore = nextPairingRound !== null;
-  const isComplete =
+
+  const caps =
     tournament && categories && participants && games
-      ? isTournamentComplete(tournament, categories, participants, games)
-      : false;
+      ? getTournamentCapabilities(tournament, categories, participants, games)
+      : null;
   const displayStatus =
     tournament && categories && participants && games
       ? effectiveTournamentStatus(tournament, categories, participants, games)
       : (tournament?.status ?? 'draft');
 
+  // Persist completed only when fully done; keep in_progress while results pending
   useEffect(() => {
-    if (!id || !tournament || !categories || !participants || !games) return;
-    if (!isTournamentComplete(tournament, categories, participants, games)) return;
-    if (tournament.status === 'completed') return;
+    if (!id || !tournament || !categories || !participants || !games || !caps) return;
 
-    void db.tournaments.update(id, {
-      status: 'completed',
-      currentRound: Math.max(
-        tournament.currentRound,
-        highestPairedRound(games),
-        tournament.rounds,
-      ),
-      updatedAt: nowIso(),
-      dirty: 1,
-    });
-  }, [id, tournament, categories, participants, games]);
+    if (caps.stage === 'completed' && tournament.status !== 'completed') {
+      void db.tournaments.update(id, {
+        status: 'completed',
+        currentRound: Math.max(
+          tournament.currentRound,
+          highestPairedRound(games),
+          tournament.rounds,
+        ),
+        updatedAt: nowIso(),
+        dirty: 1,
+      });
+      return;
+    }
+
+    if (
+      caps.stage === 'in_progress' &&
+      tournament.status === 'completed' &&
+      !caps.allResultsDone
+    ) {
+      void db.tournaments.update(id, {
+        status: 'in_progress',
+        updatedAt: nowIso(),
+        dirty: 1,
+      });
+    }
+  }, [id, tournament, categories, participants, games, caps]);
 
   const boardsForRound = (games ?? [])
     .filter((g) => {
@@ -140,12 +190,28 @@ export default function TournamentPage() {
 
   const playerById = new Map((participants ?? []).map((p) => [p.id, p]));
 
+  async function markReady() {
+    if (!id || !caps?.canMarkReady) return;
+    await db.tournaments.update(id, {
+      status: 'ready',
+      updatedAt: nowIso(),
+      dirty: 1,
+    });
+    setTab('pairings');
+  }
+
   async function generatePairings() {
-    if (!id || !participants || participants.length < 2) {
-      setPairError('Need at least 2 participants to generate pairings.');
+    if (!id || !participants || !caps?.canPair) {
+      setPairError(
+        !participants || participants.length < 2
+          ? 'Need at least 2 participants to generate pairings.'
+          : caps?.stage === 'completed'
+            ? 'This tournament is complete.'
+            : `This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`,
+      );
       return;
     }
-    if (!canGenerateMore || nextPairingRound === null) {
+    if (nextPairingRound === null) {
       setPairError(`This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`);
       return;
     }
@@ -255,7 +321,7 @@ export default function TournamentPage() {
         .equals(id)
         .filter((g) => !g.deletedAt)
         .toArray();
-      const allDone = isTournamentComplete(
+      const fullyDone = isTournamentComplete(
         { ...tournament!, rounds: maxRounds, currentRound: round, mixCategories: mix },
         categories ?? [],
         participants,
@@ -264,12 +330,13 @@ export default function TournamentPage() {
 
       await db.tournaments.update(id, {
         currentRound: Math.max(tournament?.currentRound ?? 0, round),
-        status: allDone ? 'completed' : 'in_progress',
+        status: fullyDone ? 'completed' : 'in_progress',
         updatedAt: now,
         dirty: 1,
       });
 
       setSelectedRound(round);
+      setTab('pairings');
     } catch (err) {
       setPairError(err instanceof Error ? err.message : 'Pairing failed');
     } finally {
@@ -279,14 +346,34 @@ export default function TournamentPage() {
 
   const updateGameResult = useCallback(
     async (gameId: string, result: GameResult) => {
-      await db.games.update(gameId, { result, updatedAt: nowIso(), dirty: 1 });
+      if (!id || !caps?.canEditResults) return;
+      const now = nowIso();
+      await db.games.update(gameId, { result, updatedAt: now, dirty: 1 });
+
+      if (!tournament || !categories || !participants) return;
+      const updatedGames = await db.games
+        .where('tournamentId')
+        .equals(id)
+        .filter((g) => !g.deletedAt)
+        .toArray();
+      if (isTournamentComplete(tournament, categories, participants, updatedGames)) {
+        await db.tournaments.update(id, {
+          status: 'completed',
+          currentRound: Math.max(
+            tournament.currentRound,
+            highestPairedRound(updatedGames),
+            tournament.rounds,
+          ),
+          updatedAt: now,
+          dirty: 1,
+        });
+      }
     },
-    [],
+    [id, caps?.canEditResults, tournament, categories, participants],
   );
 
   const standings = useLiveQuery(() => {
     if (!participants || !games) return [];
-    // Mixed: one ranking for everyone. Separate: ranking for the active category only.
     const catGames = mix
       ? games
       : activeCatId
@@ -327,6 +414,11 @@ export default function TournamentPage() {
     );
   }
 
+  const importHref =
+    caps?.importRequiresLateWarning
+      ? `/tournaments/${id}/import?late=1`
+      : `/tournaments/${id}/import`;
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -342,10 +434,41 @@ export default function TournamentPage() {
             </span>
           </div>
         </div>
-        <Link to={`/tournaments/${id}/import`} className="btn btn-outline">
-          Import Players
-        </Link>
+        <div className="page-header-actions">
+          {caps?.canMarkReady && (
+            <button type="button" className="btn btn-primary" onClick={markReady}>
+              Mark Ready
+            </button>
+          )}
+          {caps?.canImport && (
+            <Link
+              to={importHref}
+              className={`btn ${caps.importRequiresLateWarning ? 'btn-ghost' : 'btn-outline'}`}
+            >
+              {caps.importRequiresLateWarning ? 'Late entry' : 'Import Players'}
+            </Link>
+          )}
+        </div>
       </div>
+
+      {caps && <StageStrip stage={caps.stage} />}
+
+      {caps?.stage === 'completed' && (
+        <p className="stage-banner stage-banner-done">
+          Tournament complete — pairings and results are locked. View standings below.
+        </p>
+      )}
+      {caps?.importRequiresLateWarning && caps.canImport && (
+        <p className="stage-banner stage-banner-warn">
+          Event is live. New players can still be added as late entries, but they won’t appear
+          in past rounds.
+        </p>
+      )}
+      {caps?.showStartHint && caps.stage === 'ready' && (
+        <p className="stage-banner">
+          Ready to play — open Pairings and generate Round 1 when the hall is set.
+        </p>
+      )}
 
       {hasCategories && !mix && (
         <div className="category-tabs">
@@ -382,17 +505,21 @@ export default function TournamentPage() {
         <div className="tab-panel">
           <div className="tab-actions">
             <span className="count-label">{participants?.length ?? 0} participants</span>
-            <Link to={`/tournaments/${id}/import`} className="btn btn-sm btn-outline">
-              Import CSV
-            </Link>
+            {caps?.canImport && (
+              <Link to={importHref} className="btn btn-sm btn-outline">
+                {caps.importRequiresLateWarning ? 'Late entry CSV' : 'Import CSV'}
+              </Link>
+            )}
           </div>
           {(!participants || participants.length === 0) ? (
             <div className="empty-state">
               <span className="empty-icon">♟</span>
-              <p>No players yet. Import a CSV to add participants.</p>
-              <Link to={`/tournaments/${id}/import`} className="btn btn-primary">
-                Import Players
-              </Link>
+              <p>No players yet. Import a CSV to continue setup.</p>
+              {caps?.canImport && (
+                <Link to={importHref} className="btn btn-primary">
+                  Import Players
+                </Link>
+              )}
             </div>
           ) : (
             <table className="data-table">
@@ -445,25 +572,37 @@ export default function TournamentPage() {
             <button
               className="btn btn-primary"
               onClick={generatePairings}
-              disabled={pairing || !participants || participants.length < 2 || !canGenerateMore}
+              disabled={pairing || !caps?.canPair}
             >
               {pairing
                 ? 'Pairing…'
-                : isComplete
-                  ? 'All rounds complete'
-                  : `Generate Round ${nextPairingRound ?? '—'}`}
+                : caps?.stage === 'completed'
+                  ? 'Tournament complete'
+                  : caps?.allRoundsPaired
+                    ? 'All rounds paired'
+                    : `Generate Round ${nextPairingRound ?? '—'}`}
             </button>
           </div>
 
-          {isComplete && (
-            <p className="form-hint">This tournament is limited to {maxRounds} round{maxRounds === 1 ? '' : 's'}.</p>
+          {caps?.allRoundsPaired && !caps.allResultsDone && (
+            <p className="form-hint">
+              All {maxRounds} rounds are paired. Enter remaining results to complete the
+              tournament.
+            </p>
+          )}
+          {caps?.stage === 'completed' && (
+            <p className="form-hint">Results are locked for this completed tournament.</p>
           )}
 
           {pairError && <div className="form-error">{pairError}</div>}
 
           {boardsForRound.length === 0 ? (
             <div className="empty-state">
-              <p>No pairings for this round. Generate them above.</p>
+              <p>
+                {caps?.showStartHint
+                  ? 'No pairings yet. Generate Round 1 when you are ready to start.'
+                  : 'No pairings for this round.'}
+              </p>
             </div>
           ) : (
             <div className="boards-list">
@@ -490,6 +629,7 @@ export default function TournamentPage() {
                       value={game.result}
                       onChange={(r) => updateGameResult(game.id, r)}
                       isBye={game.isBye}
+                      readOnly={!caps?.canEditResults}
                     />
                   </div>
                 );
@@ -503,7 +643,11 @@ export default function TournamentPage() {
         <div className="tab-panel">
           {(!standings || standings.length === 0) ? (
             <div className="empty-state">
-              <p>No results recorded yet.</p>
+              <p>
+                {caps?.stage === 'completed'
+                  ? 'No standings available.'
+                  : 'No results recorded yet.'}
+              </p>
             </div>
           ) : (
             <table className="data-table standings-table">

@@ -8,11 +8,12 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge status-${status}`}>{status.replace('_', ' ')}</span>;
 }
 
+/** Prefer persisted status; never infer completed from round count alone (results may still be pending). */
 function deriveListStatus(t: { status: string; currentRound: number; rounds: number }): string {
   if (t.status === 'completed') return 'completed';
-  if (t.currentRound >= t.rounds && t.rounds > 0 && t.currentRound > 0) return 'completed';
-  if (t.currentRound > 0) return 'in_progress';
-  return t.status;
+  if (t.status === 'in_progress' || t.currentRound > 0) return 'in_progress';
+  if (t.status === 'ready') return 'ready';
+  return t.status === 'draft' ? 'draft' : t.status;
 }
 
 export default function HomePage() {

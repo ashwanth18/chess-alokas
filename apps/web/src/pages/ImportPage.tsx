@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import Papa from 'papaparse';
 import { matchesFilter } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
+import { getTournamentCapabilities, isMixedTournament } from '../lib/tournamentProgress';
 
 interface RawRow {
   [key: string]: unknown;
@@ -67,6 +68,8 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
 export default function ImportPage() {
   const { id: tournamentId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const lateQuery = searchParams.get('late') === '1';
 
   const [dragging, setDragging] = useState(false);
   const [columns, setColumns] = useState<string[]>([]);
@@ -75,8 +78,13 @@ export default function ImportPage() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
+  const [lateConfirmed, setLateConfirmed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const tournament = useLiveQuery(
+    () => (tournamentId ? db.tournaments.get(tournamentId) : undefined),
+    [tournamentId],
+  );
   const categories = useLiveQuery(
     () =>
       tournamentId
@@ -88,6 +96,46 @@ export default function ImportPage() {
         : [],
     [tournamentId],
   );
+  const participants = useLiveQuery(
+    () =>
+      tournamentId
+        ? db.participants
+            .where('tournamentId')
+            .equals(tournamentId)
+            .filter((p) => !p.deletedAt)
+            .toArray()
+        : [],
+    [tournamentId],
+  );
+  const games = useLiveQuery(
+    () =>
+      tournamentId
+        ? db.games
+            .where('tournamentId')
+            .equals(tournamentId)
+            .filter((g) => !g.deletedAt)
+            .toArray()
+        : [],
+    [tournamentId],
+  );
+
+  const caps =
+    tournament && categories && participants && games
+      ? getTournamentCapabilities(tournament, categories, participants, games)
+      : null;
+
+  const requiresLateWarning = Boolean(
+    caps?.importRequiresLateWarning || lateQuery,
+  );
+
+  useEffect(() => {
+    if (caps && !caps.canImport && tournamentId) {
+      const t = window.setTimeout(() => {
+        navigate(`/tournaments/${tournamentId}`, { replace: true });
+      }, 2200);
+      return () => window.clearTimeout(t);
+    }
+  }, [caps, tournamentId, navigate]);
 
   function autoDetectMapping(cols: string[]): Record<string, string> {
     const lower = cols.map((c) => c.toLowerCase().trim());
@@ -121,7 +169,10 @@ export default function ImportPage() {
             const data = new Uint8Array(e.target?.result as ArrayBuffer);
             const workbook = XLSX.read(data, { type: 'array' });
             const sheetName = workbook.SheetNames[0];
-            if (!sheetName) { setImportError('No sheets found'); return; }
+            if (!sheetName) {
+              setImportError('No sheets found');
+              return;
+            }
             const sheet = workbook.Sheets[sheetName]!;
             const json = (XLSX.utils.sheet_to_json(sheet, { defval: '' }) as unknown) as RawRow[];
             if (json.length === 0) {
@@ -141,7 +192,6 @@ export default function ImportPage() {
       return;
     }
 
-    // CSV parse
     Papa.parse<RawRow>(file, {
       header: true,
       skipEmptyLines: true,
@@ -161,15 +211,12 @@ export default function ImportPage() {
     });
   }
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragging(false);
-      const file = e.dataTransfer.files[0];
-      if (file) processFile(file);
-    },
-    [],
-  );
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -181,6 +228,15 @@ export default function ImportPage() {
 
   async function handleImport() {
     if (!tournamentId || rawRows.length === 0) return;
+    if (caps && !caps.canImport) {
+      setImportError('This tournament is complete. Import is locked.');
+      return;
+    }
+    if (requiresLateWarning && !lateConfirmed) {
+      setImportError('Confirm that you understand late entries won’t join past rounds.');
+      return;
+    }
+
     setImporting(true);
     setImportError(null);
 
@@ -190,7 +246,6 @@ export default function ImportPage() {
 
       for (const p of parsed) {
         const pid = crypto.randomUUID();
-        // Assign categories via filter matching
         const catIds =
           categories
             ?.filter((cat) => matchesFilter(p, cat.filter))
@@ -220,14 +275,52 @@ export default function ImportPage() {
     }
   }
 
+  if (caps && !caps.canImport) {
+    return (
+      <div className="page-container">
+        <div className="page-header">
+          <h1>Import Players</h1>
+          <Link to={`/tournaments/${tournamentId}`} className="btn btn-ghost">
+            ← Back
+          </Link>
+        </div>
+        <div className="stage-banner stage-banner-done">
+          This tournament is complete. Player import is locked.
+        </div>
+        <p className="form-hint">Returning to the tournament…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="page-container">
       <div className="page-header">
-        <h1>Import Players</h1>
+        <h1>{requiresLateWarning ? 'Late Entry Import' : 'Import Players'}</h1>
         <button className="btn btn-ghost" onClick={() => navigate(-1)}>
           ← Back
         </button>
       </div>
+
+      {requiresLateWarning && (
+        <div className="stage-banner stage-banner-warn late-entry-panel">
+          <strong>Round 1 has started.</strong>
+          <p>
+            New players will be appended only. They will not be paired into past rounds
+            {tournament && isMixedTournament(tournament)
+              ? ''
+              : ' for their category'}
+            . Use this only for genuine late registrations.
+          </p>
+          <label className="late-confirm">
+            <input
+              type="checkbox"
+              checked={lateConfirmed}
+              onChange={(e) => setLateConfirmed(e.target.checked)}
+            />
+            I understand these are late entries and won’t appear in finished rounds.
+          </label>
+        </div>
+      )}
 
       {importedCount !== null ? (
         <div className="success-banner">
@@ -235,11 +328,13 @@ export default function ImportPage() {
         </div>
       ) : (
         <>
-          {/* Drop zone */}
           {rawRows.length === 0 && (
             <div
               className={`drop-zone ${dragging ? 'dragging' : ''}`}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
               onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
@@ -262,13 +357,12 @@ export default function ImportPage() {
 
           {importError && <div className="form-error">{importError}</div>}
 
-          {/* Column mapping */}
           {rawRows.length > 0 && (
             <>
               <section className="mapping-section">
                 <h3>Column Mapping</h3>
                 <p className="form-hint">
-                  Map your file's columns to participant fields. Name and Age are required.
+                  Map your file&apos;s columns to participant fields. Name and Age are required.
                 </p>
                 <div className="mapping-grid">
                   {ALL_FIELDS.map((field) => (
@@ -298,7 +392,6 @@ export default function ImportPage() {
                 </div>
               </section>
 
-              {/* Preview */}
               {preview.length > 0 && (
                 <section className="preview-section">
                   <h3>Preview (first {preview.length} rows)</h3>
@@ -342,9 +435,18 @@ export default function ImportPage() {
                 <button
                   className="btn btn-primary"
                   onClick={handleImport}
-                  disabled={importing || !mapping['name'] || !mapping['age']}
+                  disabled={
+                    importing ||
+                    !mapping['name'] ||
+                    !mapping['age'] ||
+                    (requiresLateWarning && !lateConfirmed)
+                  }
                 >
-                  {importing ? 'Importing…' : `Import ${total} Players`}
+                  {importing
+                    ? 'Importing…'
+                    : requiresLateWarning
+                      ? `Import ${total} late entries`
+                      : `Import ${total} Players`}
                 </button>
               </div>
             </>
