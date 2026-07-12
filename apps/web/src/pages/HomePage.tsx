@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { db } from '../db/local';
 import { getLastSyncAt } from '../db/local';
 import { useEffect, useState } from 'react';
+import { softDeleteTournament } from '../lib/deleteTournament';
 
 function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge status-${status}`}>{status.replace('_', ' ')}</span>;
@@ -18,6 +19,7 @@ function deriveListStatus(t: { status: string; currentRound: number; rounds: num
 
 export default function HomePage() {
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     getLastSyncAt().then(setLastSync);
@@ -33,6 +35,21 @@ export default function HomePage() {
   );
 
   const isEmpty = tournaments?.length === 0;
+
+  async function handleDelete(e: React.MouseEvent, tournamentId: string, name: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    const ok = window.confirm(
+      `Delete "${name}"?\n\nThis removes the tournament locally and from the cloud on the next sync.`,
+    );
+    if (!ok) return;
+    setDeletingId(tournamentId);
+    try {
+      await softDeleteTournament(tournamentId);
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div className="home-page">
@@ -96,6 +113,15 @@ export default function HomePage() {
                     )}
                   </div>
                 </Link>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost btn-danger tournament-delete-btn"
+                  disabled={deletingId === t.id}
+                  aria-label={`Delete ${t.name}`}
+                  onClick={(e) => void handleDelete(e, t.id, t.name)}
+                >
+                  {deletingId === t.id ? 'Deleting…' : 'Delete'}
+                </button>
               </li>
             ))}
           </ul>

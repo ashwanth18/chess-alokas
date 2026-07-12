@@ -83,6 +83,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
       await db.tournaments.put({
         ...remote,
         mixCategories: remote.mixCategories ?? false,
+        deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalTournament);
       pulled++;
@@ -91,7 +92,11 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   for (const remote of categories) {
     const local = await db.categories.get(remote.id);
     if (!local || remote.updatedAt > local.updatedAt) {
-      await db.categories.put({ ...remote, dirty: 0 } as LocalCategory);
+      await db.categories.put({
+        ...remote,
+        deletedAt: remote.deletedAt ?? null,
+        dirty: 0,
+      } as LocalCategory);
       pulled++;
     }
   }
@@ -102,6 +107,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
         ...remote,
         customFields: (remote.customFields ?? {}) as Record<string, unknown>,
         categoryIds: remote.categoryIds ?? [],
+        deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalParticipant);
       pulled++;
@@ -110,7 +116,11 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   for (const remote of games) {
     const local = await db.games.get(remote.id);
     if (!local || remote.updatedAt > local.updatedAt) {
-      await db.games.put({ ...remote, dirty: 0 } as LocalGame);
+      await db.games.put({
+        ...remote,
+        deletedAt: remote.deletedAt ?? null,
+        dirty: 0,
+      } as LocalGame);
       pulled++;
     }
   }

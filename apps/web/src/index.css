@@ -339,20 +339,32 @@ input, select, textarea { font-family: var(--font-body); }
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   transition: background var(--transition), border-color var(--transition), transform var(--transition);
+  display: flex;
+  align-items: stretch;
+  gap: 0;
 }
 .tournament-card:hover {
   background: var(--color-surface-mid);
   border-color: var(--color-border-warm);
-  transform: translateX(2px);
 }
 .tournament-card-link {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.25rem;
   text-decoration: none;
   color: inherit;
   gap: 1rem;
+  min-width: 0;
+}
+.tournament-card:hover .tournament-card-link {
+  transform: translateX(2px);
+}
+.tournament-delete-btn {
+  align-self: center;
+  margin-right: 0.75rem;
+  flex-shrink: 0;
 }
 .tournament-name {
   font-family: var(--font-display);

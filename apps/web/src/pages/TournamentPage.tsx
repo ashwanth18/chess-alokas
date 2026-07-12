@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { pairRound, computeStandings } from '@chess-alokas/pairing-engine';
 import type { GameResult } from '@chess-alokas/shared';
@@ -14,6 +14,7 @@ import {
   isTournamentComplete,
   MIXED_POOL_ID,
 } from '../lib/tournamentProgress';
+import { softDeleteTournament } from '../lib/deleteTournament';
 
 type Tab = 'players' | 'pairings' | 'standings';
 
@@ -85,11 +86,13 @@ function StageStrip({ stage }: { stage: string }) {
 
 export default function TournamentPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('players');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [selectedRound, setSelectedRound] = useState<number>(1);
   const [pairing, setPairing] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const tournament = useLiveQuery(() => (id ? db.tournaments.get(id) : undefined), [id]);
   const categories = useLiveQuery(
@@ -180,6 +183,12 @@ export default function TournamentPage() {
     }
   }, [id, tournament, categories, participants, games, caps]);
 
+  useEffect(() => {
+    if (tournament?.deletedAt) {
+      navigate('/', { replace: true });
+    }
+  }, [tournament?.deletedAt, navigate]);
+
   const boardsForRound = (games ?? [])
     .filter((g) => {
       if (g.round !== displayRound) return false;
@@ -198,6 +207,21 @@ export default function TournamentPage() {
       dirty: 1,
     });
     setTab('pairings');
+  }
+
+  async function handleDelete() {
+    if (!id || !tournament) return;
+    const ok = window.confirm(
+      `Delete "${tournament.name}"?\n\nThis removes the tournament locally and from the cloud on the next sync.`,
+    );
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      const removed = await softDeleteTournament(id);
+      if (removed) navigate('/', { replace: true });
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function generatePairings() {
@@ -448,6 +472,14 @@ export default function TournamentPage() {
               {caps.importRequiresLateWarning ? 'Late entry' : 'Import Players'}
             </Link>
           )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-danger"
+            disabled={deleting}
+            onClick={() => void handleDelete()}
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
         </div>
       </div>
 
