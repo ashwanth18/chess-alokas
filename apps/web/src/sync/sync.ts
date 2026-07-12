@@ -1,6 +1,7 @@
 import { db, getOrCreateClientId, getLastSyncAt, setLastSyncAt } from '../db/local';
 import { apiSyncPush, apiSyncPull } from '../api/client';
 import type { LocalTournament, LocalCategory, LocalParticipant, LocalGame } from '../db/local';
+import { repairInvalidGameCategoryIds, softDeleteOrphanGames } from '../lib/poolCategory';
 
 function toSyncItem(
   entity: 'tournament' | 'category' | 'participant' | 'game',
@@ -20,6 +21,10 @@ function toSyncItem(
 export async function syncOnline(): Promise<{ pushed: number; pulled: number }> {
   const clientId = await getOrCreateClientId();
 
+  // Legacy mixed-pool games used categoryId "__mixed__", which Postgres rejects.
+  await repairInvalidGameCategoryIds();
+  await softDeleteOrphanGames();
+
   const dirtyTournaments = await db.tournaments.where('dirty').equals(1).toArray();
   const dirtyCategories = await db.categories.where('dirty').equals(1).toArray();
   const dirtyParticipants = await db.participants.where('dirty').equals(1).toArray();
@@ -38,7 +43,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   if (items.length > 0) {
     const pushResult = await apiSyncPush({ clientId, items });
     if (!pushResult.ok) {
-      throw new Error('Sync push failed');
+      throw new Error(pushResult.error ?? 'Sync push failed');
     }
     pushed = pushResult.data.accepted;
 
@@ -72,7 +77,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   const pullResult = await apiSyncPull(since);
 
   if (!pullResult.ok) {
-    throw new Error('Sync pull failed');
+    throw new Error(pullResult.error ?? 'Sync pull failed');
   }
 
   const { tournaments, categories, participants, games, serverTime } = pullResult.data;
@@ -83,6 +88,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
       await db.tournaments.put({
         ...remote,
         mixCategories: remote.mixCategories ?? false,
+        prizePlaces: remote.prizePlaces ?? 3,
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalTournament);
@@ -94,6 +100,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
     if (!local || remote.updatedAt > local.updatedAt) {
       await db.categories.put({
         ...remote,
+        prizePlaces: remote.prizePlaces ?? null,
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalCategory);

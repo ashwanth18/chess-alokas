@@ -247,6 +247,7 @@ export class MemoryStore implements Store {
         status: (payload['status'] as TournamentStatus) ?? 'draft',
         currentRound: Number(payload['currentRound'] ?? 0),
         mixCategories: Boolean(payload['mixCategories'] ?? false),
+        prizePlaces: Number(payload['prizePlaces'] ?? 3),
         clientId: (payload['clientId'] as string | undefined) ?? undefined,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
@@ -259,6 +260,8 @@ export class MemoryStore implements Store {
         name: String(payload['name'] ?? ''),
         filter: (payload['filter'] as FilterGroup) ?? { logic: 'and', rules: [] },
         sortOrder: Number(payload['sortOrder'] ?? 0),
+        prizePlaces:
+          payload['prizePlaces'] == null ? null : Number(payload['prizePlaces']),
         updatedAt,
         deletedAt: deletedAt ?? undefined,
       };
@@ -311,6 +314,7 @@ interface TournamentRow {
   status: string;
   current_round: number;
   mix_categories: boolean | null;
+  prize_places: number | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
@@ -322,6 +326,7 @@ interface CategoryRow {
   name: string;
   filter: FilterGroup;
   sort_order: number;
+  prize_places: number | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
 }
@@ -374,6 +379,7 @@ function rowToTournament(row: TournamentRow): Tournament {
     status: row.status as TournamentStatus,
     currentRound: row.current_round,
     mixCategories: row.mix_categories ?? false,
+    prizePlaces: row.prize_places ?? 3,
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
@@ -387,6 +393,7 @@ function rowToCategory(row: CategoryRow): Category {
     name: row.name,
     filter: row.filter,
     sortOrder: row.sort_order,
+    prizePlaces: row.prize_places ?? null,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
   };
@@ -458,9 +465,9 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
-              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.clientId ?? null},
+              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
     `;
@@ -479,6 +486,7 @@ export class PostgresStore implements Store {
         name = ${m.name}, date = ${m.date ?? null}, style = ${m.style},
         rounds = ${m.rounds}, status = ${m.status}, current_round = ${m.currentRound},
         mix_categories = ${m.mixCategories ?? false},
+        prize_places = ${m.prizePlaces ?? 3},
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
         deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
@@ -507,9 +515,9 @@ export class PostgresStore implements Store {
 
   async createCategory(c: Category): Promise<Category> {
     const rows = await this.sql<CategoryRow[]>`
-      INSERT INTO categories (id, tournament_id, name, filter, sort_order, updated_at, deleted_at)
+      INSERT INTO categories (id, tournament_id, name, filter, sort_order, prize_places, updated_at, deleted_at)
       VALUES (${c.id}, ${c.tournamentId}, ${c.name}, ${this.j(c.filter)},
-              ${c.sortOrder}, ${c.updatedAt}, ${c.deletedAt ?? null})
+              ${c.sortOrder}, ${c.prizePlaces ?? null}, ${c.updatedAt}, ${c.deletedAt ?? null})
       RETURNING *
     `;
     return rowToCategory(rows[0]!);
@@ -526,6 +534,7 @@ export class PostgresStore implements Store {
       UPDATE categories SET
         tournament_id = ${m.tournamentId}, name = ${m.name},
         filter = ${this.j(m.filter)}, sort_order = ${m.sortOrder},
+        prize_places = ${m.prizePlaces ?? null},
         updated_at = ${m.updatedAt}, deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
     `;
@@ -690,7 +699,11 @@ export class PostgresStore implements Store {
   }
 
   async pushSync(items: SyncPushItem[]): Promise<void> {
-    for (const item of items) {
+    const order = { tournament: 0, category: 1, participant: 2, game: 3 } as const;
+    const sorted = [...items].sort(
+      (a, b) => (order[a.entity] ?? 9) - (order[b.entity] ?? 9),
+    );
+    for (const item of sorted) {
       await this.applySyncItem(item);
     }
   }
@@ -698,18 +711,32 @@ export class PostgresStore implements Store {
   private async applySyncItem(item: SyncPushItem): Promise<void> {
     const { entity, id, payload: p, updatedAt, deletedAt } = item;
 
+    if (entity === 'game') {
+      const categoryId = String(p['categoryId'] ?? '');
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(categoryId)) {
+        throw Object.assign(
+          new Error(
+            `Game ${id} has invalid categoryId "${categoryId}". Re-pair or repair local data before syncing.`,
+          ),
+          { statusCode: 400 },
+        );
+      }
+    }
+
     if (entity === 'tournament') {
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
                 ${Boolean(p['mixCategories'] ?? false)},
+                ${Number(p['prizePlaces'] ?? 3)},
                 ${(p['clientId'] as string) ?? null}, ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, date = EXCLUDED.date, style = EXCLUDED.style,
           rounds = EXCLUDED.rounds, status = EXCLUDED.status,
           current_round = EXCLUDED.current_round, mix_categories = EXCLUDED.mix_categories,
+          prize_places = EXCLUDED.prize_places,
           client_id = EXCLUDED.client_id,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > tournaments.updated_at
@@ -717,13 +744,15 @@ export class PostgresStore implements Store {
     } else if (entity === 'category') {
       const filter = (p['filter'] as FilterGroup) ?? { logic: 'and', rules: [] };
       await this.sql`
-        INSERT INTO categories (id, tournament_id, name, filter, sort_order, updated_at, deleted_at)
+        INSERT INTO categories (id, tournament_id, name, filter, sort_order, prize_places, updated_at, deleted_at)
         VALUES (${id}, ${String(p['tournamentId'] ?? '')}, ${String(p['name'] ?? '')},
                 ${this.j(filter)}, ${Number(p['sortOrder'] ?? 0)},
+                ${p['prizePlaces'] == null ? null : Number(p['prizePlaces'])},
                 ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           tournament_id = EXCLUDED.tournament_id, name = EXCLUDED.name,
           filter = EXCLUDED.filter, sort_order = EXCLUDED.sort_order,
+          prize_places = EXCLUDED.prize_places,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > categories.updated_at
       `;

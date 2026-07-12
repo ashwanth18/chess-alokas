@@ -40,7 +40,16 @@ export const syncPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) =
     if (!parsed.success) {
       return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
     }
-    await store.pushSync(parsed.data.items);
+    try {
+      await store.pushSync(parsed.data.items);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Sync push failed';
+      const status =
+        err && typeof err === 'object' && 'statusCode' in err && typeof err.statusCode === 'number'
+          ? err.statusCode
+          : 500;
+      return reply.code(status).send({ error: message, message });
+    }
     const serverTime = new Date().toISOString();
     return reply.code(200).send({
       accepted: parsed.data.items.length,

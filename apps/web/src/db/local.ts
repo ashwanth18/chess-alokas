@@ -11,6 +11,8 @@ export interface LocalTournament {
   currentRound: number;
   /** false = pair/rank within each category (default); true = one mixed pool */
   mixCategories?: boolean;
+  /** Top N places highlighted as prize winners (default 3). */
+  prizePlaces?: number;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;
@@ -23,6 +25,8 @@ export interface LocalCategory {
   name: string;
   filter: FilterGroup;
   sortOrder: number;
+  /** Override tournament prizePlaces; null = inherit. */
+  prizePlaces?: number | null;
   updatedAt: string;
   deletedAt?: string | null;
   dirty: 1 | 0;
@@ -82,6 +86,14 @@ export class ChessDb extends Dexie {
     });
     // v2: mixCategories on tournaments (optional field; no index change needed)
     this.version(2).stores({
+      tournaments: 'id, updatedAt, dirty',
+      categories: 'id, tournamentId, updatedAt, dirty',
+      participants: 'id, tournamentId, updatedAt, dirty',
+      games: 'id, tournamentId, categoryId, round, dirty',
+      meta: 'key',
+    });
+    // v3: prizePlaces on tournaments / categories (optional fields; no index change)
+    this.version(3).stores({
       tournaments: 'id, updatedAt, dirty',
       categories: 'id, tournamentId, updatedAt, dirty',
       participants: 'id, tournamentId, updatedAt, dirty',

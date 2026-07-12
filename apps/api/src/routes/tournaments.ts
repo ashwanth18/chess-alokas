@@ -41,6 +41,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       status: 'draft',
       currentRound: 0,
       mixCategories: input.mixCategories ?? false,
+      prizePlaces: input.prizePlaces ?? 3,
       updatedAt: now,
     });
 
@@ -52,6 +53,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
           name: cat.name,
           filter: cat.filter,
           sortOrder: cat.sortOrder ?? i,
+          prizePlaces: cat.prizePlaces ?? null,
           updatedAt: now,
         }),
       ),
@@ -86,6 +88,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     status: z.enum(['draft', 'ready', 'in_progress', 'completed']).optional(),
     currentRound: z.number().int().nonnegative().optional(),
     mixCategories: z.boolean().optional(),
+    prizePlaces: z.number().int().min(1).max(20).optional(),
     clientId: z.string().optional(),
   });
 
@@ -124,6 +127,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     name: z.string().min(1),
     filter: FilterGroupSchema,
     sortOrder: z.number().int().optional(),
+    prizePlaces: z.number().int().min(1).max(20).nullable().optional(),
   });
 
   app.post<{ Params: { id: string }; Body: unknown }>(
@@ -146,6 +150,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
         name: parsed.data.name,
         filter: parsed.data.filter,
         sortOrder: parsed.data.sortOrder ?? maxOrder + 1,
+        prizePlaces: parsed.data.prizePlaces ?? null,
         updatedAt: new Date().toISOString(),
       });
       return reply.code(201).send(category);
@@ -159,6 +164,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     name: z.string().min(1).optional(),
     filter: FilterGroupSchema.optional(),
     sortOrder: z.number().int().optional(),
+    prizePlaces: z.number().int().min(1).max(20).nullable().optional(),
   });
 
   app.patch<{ Params: { id: string }; Body: unknown }>(

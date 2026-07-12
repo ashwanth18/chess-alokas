@@ -11,21 +11,34 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 async function req<T>(
   path: string,
   options?: RequestInit,
-): Promise<{ data: T; ok: true } | { data: null; ok: false }> {
+): Promise<{ data: T; ok: true } | { data: null; ok: false; error: string }> {
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(path.startsWith('/sync') ? 60_000 : 8_000),
       ...options,
       headers: {
         'Content-Type': 'application/json',
         ...(options?.headers ?? {}),
       },
     });
-    if (!res.ok) return { data: null, ok: false };
+    if (!res.ok) {
+      let error = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { message?: string; error?: string };
+        error = body.message ?? body.error ?? error;
+      } catch {
+        /* ignore non-JSON error bodies */
+      }
+      return { data: null, ok: false, error };
+    }
     const data = (await res.json()) as T;
     return { data, ok: true };
-  } catch {
-    return { data: null, ok: false };
+  } catch (err) {
+    return {
+      data: null,
+      ok: false,
+      error: err instanceof Error ? err.message : 'Network error',
+    };
   }
 }
 

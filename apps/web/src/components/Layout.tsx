@@ -50,9 +50,11 @@ export default function Layout() {
       setLastSync(now);
       setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
       setTimeout(() => setSyncResult(null), 4000);
-    } catch {
-      setSyncResult('Sync failed');
-      setTimeout(() => setSyncResult(null), 3000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Sync failed';
+      setSyncResult(message.length > 60 ? 'Sync failed' : message);
+      console.error('[sync]', err);
+      setTimeout(() => setSyncResult(null), 5000);
     } finally {
       setSyncing(false);
     }

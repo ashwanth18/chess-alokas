@@ -5,11 +5,19 @@ import { PRESET_FILTERS } from '@chess-alokas/shared';
 import type { FilterGroup, FilterOp, TournamentStyle } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import { apiCreateTournament } from '../api/client';
+import {
+  DEFAULT_PRIZE_PLACES,
+  MAX_PRIZE_PLACES,
+  MIN_PRIZE_PLACES,
+  clampPrizePlaces,
+} from '../lib/prizePlaces';
 
 interface CategoryDraft {
   id: string;
   name: string;
   filter: FilterGroup;
+  /** Blank = inherit tournament default. */
+  prizePlaces: number | null;
 }
 
 const FIELD_OPTIONS = ['age', 'gender', 'rating', 'club'] as const;
@@ -36,6 +44,7 @@ function newCategory(): CategoryDraft {
     id: crypto.randomUUID(),
     name: '',
     filter: { logic: 'and', rules: [] },
+    prizePlaces: null,
   };
 }
 
@@ -45,6 +54,7 @@ export default function CreateTournamentPage() {
   const [date, setDate] = useState('');
   const [style, setStyle] = useState<TournamentStyle>('swiss');
   const [rounds, setRounds] = useState(5);
+  const [prizePlaces, setPrizePlaces] = useState(DEFAULT_PRIZE_PLACES);
   const [mixCategories, setMixCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryDraft[]>([]);
   const [saving, setSaving] = useState(false);
@@ -144,6 +154,7 @@ export default function CreateTournamentPage() {
         status: 'draft',
         currentRound: 0,
         mixCategories,
+        prizePlaces: clampPrizePlaces(prizePlaces),
         updatedAt: now,
         dirty: 1,
       });
@@ -156,6 +167,7 @@ export default function CreateTournamentPage() {
           name: cat.name || `Category ${i + 1}`,
           filter: cat.filter,
           sortOrder: i,
+          prizePlaces: cat.prizePlaces == null ? null : clampPrizePlaces(cat.prizePlaces),
           updatedAt: now,
           dirty: 1,
         });
@@ -169,6 +181,7 @@ export default function CreateTournamentPage() {
         style,
         rounds,
         mixCategories,
+        prizePlaces: clampPrizePlaces(prizePlaces),
         status: 'draft',
         currentRound: 0,
       }).catch(() => {});
@@ -227,6 +240,24 @@ export default function CreateTournamentPage() {
               value={rounds}
               onChange={(e) => setRounds(Math.max(1, parseInt(e.target.value) || 5))}
             />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="prizePlaces">Prize places (top N)</label>
+            <input
+              id="prizePlaces"
+              type="number"
+              className="input"
+              min={MIN_PRIZE_PLACES}
+              max={MAX_PRIZE_PLACES}
+              value={prizePlaces}
+              onChange={(e) =>
+                setPrizePlaces(clampPrizePlaces(parseInt(e.target.value, 10) || DEFAULT_PRIZE_PLACES))
+              }
+            />
+            <span className="form-hint-sm">
+              Top {prizePlaces} in each ranking get podium styling (prizes later).
+            </span>
           </div>
         </div>
 
@@ -291,6 +322,24 @@ export default function CreateTournamentPage() {
                   value={cat.name}
                   onChange={(e) => updateCategory(cat.id, { name: e.target.value })}
                 />
+                <label className="category-prize-override">
+                  <span className="preset-label">Prize places</span>
+                  <input
+                    type="number"
+                    className="input input-xs"
+                    min={MIN_PRIZE_PLACES}
+                    max={MAX_PRIZE_PLACES}
+                    placeholder={String(prizePlaces)}
+                    value={cat.prizePlaces ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value.trim();
+                      updateCategory(cat.id, {
+                        prizePlaces: raw === '' ? null : clampPrizePlaces(parseInt(raw, 10)),
+                      });
+                    }}
+                    title="Leave blank to use tournament default"
+                  />
+                </label>
                 <button
                   type="button"
                   className="btn btn-sm btn-ghost btn-danger"

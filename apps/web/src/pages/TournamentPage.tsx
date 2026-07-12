@@ -1,23 +1,48 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { pairRound, computeStandings } from '@chess-alokas/pairing-engine';
-import type { GameResult } from '@chess-alokas/shared';
+import type { FilterGroup, FilterOp, GameResult } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
-import ColorHorse from '../components/ColorHorse';
+import ColorSide from '../components/ColorSide';
 import {
   effectiveTournamentStatus,
   getNextPairingRound,
   getTournamentCapabilities,
+  getTournamentInstructions,
+  pendingResultsCountForCategory,
   highestPairedRound,
   isMixedTournament,
   isTournamentComplete,
-  MIXED_POOL_ID,
 } from '../lib/tournamentProgress';
+import TournamentInstructions from '../components/TournamentInstructions';
+import TableSearch from '../components/TableSearch';
+import { matchesTextSearch } from '../lib/textSearch';
 import { softDeleteTournament } from '../lib/deleteTournament';
+import { ensurePoolCategoryId, repairTournamentLocalData } from '../lib/poolCategory';
+import { DEFAULT_PRIZE_PLACES, resolvePrizePlaces } from '../lib/prizePlaces';
 
 type Tab = 'players' | 'pairings' | 'standings';
 
+const FILTER_OP_LABELS: Record<FilterOp, string> = {
+  eq: '=',
+  neq: '≠',
+  lt: '<',
+  lte: '≤',
+  gt: '>',
+  gte: '≥',
+  in: 'in',
+};
+
+function formatFilterSummary(filter: FilterGroup | null | undefined): string {
+  if (!filter?.rules?.length) return 'No filter (matches everyone)';
+  const parts = filter.rules.map((r) => {
+    const op = FILTER_OP_LABELS[r.op as FilterOp] ?? r.op;
+    const value = Array.isArray(r.value) ? r.value.join(', ') : String(r.value);
+    return `${r.field} ${op} ${value}`;
+  });
+  return parts.join(` ${filter.logic.toUpperCase()} `);
+}
 function ResultSelector({
   value,
   onChange,
@@ -93,6 +118,9 @@ export default function TournamentPage() {
   const [pairing, setPairing] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [playerSearch, setPlayerSearch] = useState('');
+  const [boardSearch, setBoardSearch] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const tournament = useLiveQuery(() => (id ? db.tournaments.get(id) : undefined), [id]);
   const categories = useLiveQuery(
@@ -147,6 +175,18 @@ export default function TournamentPage() {
     tournament && categories && participants && games
       ? getTournamentCapabilities(tournament, categories, participants, games)
       : null;
+  const categoryNames = Object.fromEntries((categories ?? []).map((c) => [c.id, c.name]));
+  const instructionSteps =
+    tournament && categories && participants && games && caps && caps.stage !== 'completed'
+      ? getTournamentInstructions(
+          tournament,
+          categories,
+          participants,
+          games,
+          caps,
+          categoryNames,
+        )
+      : [];
   const displayStatus =
     tournament && categories && participants && games
       ? effectiveTournamentStatus(tournament, categories, participants, games)
@@ -183,11 +223,26 @@ export default function TournamentPage() {
     }
   }, [id, tournament, categories, participants, games, caps]);
 
+  // Repair legacy/orphan local data that can block Round 2 and empty standings.
+  useEffect(() => {
+    if (!id) return;
+    void repairTournamentLocalData(id);
+  }, [id]);
+
   useEffect(() => {
     if (tournament?.deletedAt) {
       navigate('/', { replace: true });
     }
   }, [tournament?.deletedAt, navigate]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSettingsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen]);
 
   const boardsForRound = (games ?? [])
     .filter((g) => {
@@ -198,6 +253,16 @@ export default function TournamentPage() {
     .sort((a, b) => a.board - b.board);
 
   const playerById = new Map((participants ?? []).map((p) => [p.id, p]));
+
+  const filteredParticipants = (participants ?? []).filter((p) =>
+    matchesTextSearch(playerSearch, p.name, p.club, p.rating),
+  );
+
+  const filteredBoards = boardsForRound.filter((game) => {
+    const white = game.whiteId ? playerById.get(game.whiteId) : null;
+    const black = game.blackId ? playerById.get(game.blackId) : null;
+    return matchesTextSearch(boardSearch, game.board, white?.name, black?.name);
+  });
 
   async function markReady() {
     if (!id || !caps?.canMarkReady) return;
@@ -274,7 +339,7 @@ export default function TournamentPage() {
           isBye: g.isBye,
         }));
         const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
-        const poolId = categories?.[0]?.id ?? MIXED_POOL_ID;
+        const poolId = await ensurePoolCategoryId(id, categories);
 
         for (const board of boards) {
           await db.games.put({
@@ -402,7 +467,7 @@ export default function TournamentPage() {
     [id, caps?.canEditResults, tournament, categories, participants],
   );
 
-  const standings = useLiveQuery(() => {
+  const standings = useMemo(() => {
     if (!participants || !games) return [];
     const catGames = mix
       ? games
@@ -414,6 +479,7 @@ export default function TournamentPage() {
       : activeCatId
         ? participants.filter((p) => p.categoryIds?.includes(activeCatId))
         : participants;
+    if (catPlayers.length === 0) return [];
     const enginePlayers = catPlayers.map((p) => ({
       id: p.id,
       name: p.name,
@@ -435,6 +501,25 @@ export default function TournamentPage() {
       return [];
     }
   }, [participants, games, activeCatId, mix]);
+
+  const standingsEmptyReason = useMemo(() => {
+    if (!participants || participants.length === 0) return 'no-players' as const;
+    if (!mix && activeCatId) {
+      const inCat = participants.filter((p) => p.categoryIds?.includes(activeCatId));
+      if (inCat.length === 0) return 'no-category-players' as const;
+    }
+    if (!standings || standings.length === 0) return 'empty' as const;
+    return null;
+  }, [participants, mix, activeCatId, standings]);
+
+  const prizePlacesN = useMemo(() => {
+    if (!tournament) return 3;
+    const activeCat =
+      !mix && activeCatId
+        ? (categories ?? []).find((c) => c.id === activeCatId)
+        : undefined;
+    return resolvePrizePlaces(tournament, activeCat, { mix });
+  }, [tournament, categories, activeCatId, mix]);
 
   if (!tournament) {
     return (
@@ -465,6 +550,13 @@ export default function TournamentPage() {
           </div>
         </div>
         <div className="page-header-actions">
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Settings
+          </button>
           {caps?.canMarkReady && (
             <button type="button" className="btn btn-primary" onClick={markReady}>
               Mark Ready
@@ -489,6 +581,114 @@ export default function TournamentPage() {
         </div>
       </div>
 
+      {settingsOpen && (
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tournament-settings-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="settings-modal-header">
+              <h2 id="tournament-settings-title">Tournament settings</h2>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={() => setSettingsOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <dl className="settings-list">
+              <div className="settings-row">
+                <dt>Name</dt>
+                <dd>{tournament.name}</dd>
+              </div>
+              <div className="settings-row">
+                <dt>Date</dt>
+                <dd>
+                  {tournament.date
+                    ? new Date(tournament.date).toLocaleDateString()
+                    : '—'}
+                </dd>
+              </div>
+              <div className="settings-row">
+                <dt>Pairing style</dt>
+                <dd>{tournament.style === 'swiss' ? 'FIDE Swiss' : tournament.style}</dd>
+              </div>
+              <div className="settings-row">
+                <dt>Rounds</dt>
+                <dd>{tournament.rounds}</dd>
+              </div>
+              <div className="settings-row">
+                <dt>Category mode</dt>
+                <dd>
+                  {mix
+                    ? 'Mixed — one shared pairing pool and ranking'
+                    : 'Separate — pair and rank within each category'}
+                </dd>
+              </div>
+              <div className="settings-row">
+                <dt>Prize places (top N)</dt>
+                <dd>
+                  {tournament.prizePlaces ?? DEFAULT_PRIZE_PLACES}
+                  <span className="form-hint-sm">
+                    {' '}
+                    (default for all rankings)
+                  </span>
+                </dd>
+              </div>
+              <div className="settings-row">
+                <dt>Status</dt>
+                <dd className={`status-badge status-${displayStatus}`}>
+                  {displayStatus.replace('_', ' ')}
+                </dd>
+              </div>
+            </dl>
+
+            <h3 className="settings-subtitle">Categories</h3>
+            {(categories?.length ?? 0) === 0 ? (
+              <p className="form-hint">No categories — open pool.</p>
+            ) : (
+              <ul className="settings-categories">
+                {categories!.map((cat) => {
+                  const effective = resolvePrizePlaces(tournament, cat, { mix });
+                  const override =
+                    !mix && cat.prizePlaces != null
+                      ? `override ${cat.prizePlaces}`
+                      : 'uses default';
+                  return (
+                    <li key={cat.id} className="settings-category-card">
+                      <div className="settings-category-name">{cat.name}</div>
+                      <div className="settings-category-meta">
+                        Prize places: top {effective}
+                        {!mix && (
+                          <span className="form-hint-sm"> ({override})</span>
+                        )}
+                      </div>
+                      <div className="settings-category-filter">
+                        {formatFilterSummary(cat.filter)}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {mix && (categories?.length ?? 0) > 0 && (
+              <p className="form-hint">
+                Mixed mode ignores per-category prize overrides — one ranking uses the
+                tournament top N.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {caps && <StageStrip stage={caps.stage} />}
 
       {caps?.stage === 'completed' && (
@@ -502,23 +702,25 @@ export default function TournamentPage() {
           in past rounds.
         </p>
       )}
-      {caps?.showStartHint && caps.stage === 'ready' && (
-        <p className="stage-banner">
-          Ready to play — open Pairings and generate Round 1 when the hall is set.
-        </p>
+      {instructionSteps.length > 0 && (
+        <TournamentInstructions steps={instructionSteps} />
       )}
 
       {hasCategories && !mix && (
         <div className="category-tabs">
-          {categories!.map((cat) => (
-            <button
-              key={cat.id}
-              className={`cat-tab ${activeCatId === cat.id ? 'active' : ''}`}
-              onClick={() => setSelectedCategoryId(cat.id)}
-            >
-              {cat.name}
-            </button>
-          ))}
+          {categories!.map((cat) => {
+            const pending = pendingResultsCountForCategory(games ?? [], cat.id);
+            return (
+              <button
+                key={cat.id}
+                className={`cat-tab ${activeCatId === cat.id ? 'active' : ''}`}
+                onClick={() => setSelectedCategoryId(cat.id)}
+              >
+                {cat.name}
+                {pending > 0 && <span className="cat-tab-badge">{pending}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
       {hasCategories && mix && (
@@ -549,6 +751,16 @@ export default function TournamentPage() {
               </Link>
             )}
           </div>
+          {(participants?.length ?? 0) > 0 && (
+            <TableSearch
+              id="player-search"
+              value={playerSearch}
+              onChange={setPlayerSearch}
+              placeholder="Search name, club, or rating…"
+              resultCount={filteredParticipants.length}
+              totalCount={participants?.length}
+            />
+          )}
           {(!participants || participants.length === 0) ? (
             <div className="empty-state">
               <span className="empty-icon">♟</span>
@@ -558,6 +770,10 @@ export default function TournamentPage() {
                   Import Players
                 </Link>
               )}
+            </div>
+          ) : filteredParticipants.length === 0 ? (
+            <div className="empty-state">
+              <p>No players match &ldquo;{playerSearch.trim()}&rdquo;.</p>
             </div>
           ) : (
             <table className="data-table">
@@ -572,16 +788,20 @@ export default function TournamentPage() {
                 </tr>
               </thead>
               <tbody>
-                {participants.map((p, i) => (
+                {filteredParticipants.map((p) => {
+                  const rosterNum =
+                    (participants ?? []).findIndex((x) => x.id === p.id) + 1;
+                  return (
                   <tr key={p.id}>
-                    <td>{i + 1}</td>
+                    <td>{rosterNum}</td>
                     <td>{p.name}</td>
                     <td>{p.rating ?? '—'}</td>
                     <td>{p.age}</td>
                     <td>{p.gender ?? '—'}</td>
                     <td>{p.club ?? '—'}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -640,6 +860,17 @@ export default function TournamentPage() {
 
           {pairError && <div className="form-error">{pairError}</div>}
 
+          {boardsForRound.length > 0 && (
+            <TableSearch
+              id="board-search"
+              value={boardSearch}
+              onChange={setBoardSearch}
+              placeholder="Search board number or player name…"
+              resultCount={filteredBoards.length}
+              totalCount={boardsForRound.length}
+            />
+          )}
+
           {boardsForRound.length === 0 ? (
             <div className="empty-state">
               <p>
@@ -648,26 +879,35 @@ export default function TournamentPage() {
                   : 'No pairings for this round.'}
               </p>
             </div>
+          ) : filteredBoards.length === 0 ? (
+            <div className="empty-state">
+              <p>No boards match &ldquo;{boardSearch.trim()}&rdquo;.</p>
+            </div>
           ) : (
             <div className="boards-list">
-              {boardsForRound.map((game) => {
+              {filteredBoards.map((game) => {
                 const white = game.whiteId ? playerById.get(game.whiteId) : null;
                 const black = game.blackId ? playerById.get(game.blackId) : null;
                 return (
                   <div key={game.id} className={`board-card ${game.isBye ? 'board-bye' : ''}`}>
                     <span className="board-num">Board {game.board}</span>
-                    <div className="board-players">
-                      <span className="player-white">
-                        <ColorHorse color="white" />
-                        {white?.name ?? '—'}
-                        {white?.rating && <span className="rating-tag">{white.rating}</span>}
-                      </span>
-                      <span className="vs-sep">vs</span>
-                      <span className="player-black">
-                        <ColorHorse color="black" />
-                        {black?.name ?? (game.isBye ? 'BYE' : '—')}
-                        {black?.rating && <span className="rating-tag">{black.rating}</span>}
-                      </span>
+                    <div className="board-matchup">
+                      <div className="player-row player-row-white">
+                        <ColorSide color="white" />
+                        <span className="player-name">{white?.name ?? '—'}</span>
+                        {white?.rating != null && (
+                          <span className="rating-tag">{white.rating}</span>
+                        )}
+                      </div>
+                      {!game.isBye && (
+                        <div className="player-row player-row-black">
+                          <ColorSide color="black" onDark />
+                          <span className="player-name">{black?.name ?? '—'}</span>
+                          {black?.rating != null && (
+                            <span className="rating-tag">{black.rating}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <ResultSelector
                       value={game.result}
@@ -685,39 +925,71 @@ export default function TournamentPage() {
 
       {tab === 'standings' && (
         <div className="tab-panel">
-          {(!standings || standings.length === 0) ? (
+          {standingsEmptyReason ? (
             <div className="empty-state">
               <p>
-                {caps?.stage === 'completed'
-                  ? 'No standings available.'
-                  : 'No results recorded yet.'}
+                {standingsEmptyReason === 'no-players'
+                  ? 'No players yet — import a roster to build standings.'
+                  : standingsEmptyReason === 'no-category-players'
+                    ? `No players are assigned to ${categoryNames[activeCatId] ?? 'this category'}. Switch tabs or re-import so ages/categories match your filters.`
+                    : caps?.stage === 'completed'
+                      ? 'No standings available.'
+                      : 'No results recorded yet.'}
               </p>
             </div>
           ) : (
-            <table className="data-table standings-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Name</th>
-                  <th>Score</th>
-                  <th>Buchholz</th>
-                  <th>Rating</th>
-                </tr>
-              </thead>
-              <tbody>
-                {standings.map((s) => (
-                  <tr key={s.id} className={s.rank <= 3 ? `rank-${s.rank}` : ''}>
-                    <td className="rank-cell">
-                      {s.rank === 1 ? '🥇' : s.rank === 2 ? '🥈' : s.rank === 3 ? '🥉' : s.rank}
-                    </td>
-                    <td>{s.name}</td>
-                    <td className="score-cell">{s.score}</td>
-                    <td>{s.buchholz.toFixed(1)}</td>
-                    <td>{s.rating || '—'}</td>
+            <>
+              <p className="form-hint standings-prize-hint">
+                Prize places: top {prizePlacesN}
+                {!mix && activeCatId && categoryNames[activeCatId]
+                  ? ` · ${categoryNames[activeCatId]}`
+                  : ''}
+              </p>
+              <table className="data-table standings-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Name</th>
+                    <th>Score</th>
+                    <th>Buchholz</th>
+                    <th>Rating</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {standings.map((s) => {
+                    const isPrize = s.rank <= prizePlacesN;
+                    const rowClass = [
+                      isPrize ? 'rank-prize' : '',
+                      s.rank === 1 ? 'rank-1' : '',
+                      s.rank === 2 ? 'rank-2' : '',
+                      s.rank === 3 ? 'rank-3' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
+                    return (
+                      <tr key={s.id} className={rowClass}>
+                        <td className="rank-cell">
+                          {s.rank === 1
+                            ? '🥇'
+                            : s.rank === 2
+                              ? '🥈'
+                              : s.rank === 3
+                                ? '🥉'
+                                : s.rank}
+                          {isPrize && s.rank > 3 && (
+                            <span className="prize-tag">Prize</span>
+                          )}
+                        </td>
+                        <td>{s.name}</td>
+                        <td className="score-cell">{s.score}</td>
+                        <td>{s.buchholz.toFixed(1)}</td>
+                        <td>{s.rating || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
           )}
         </div>
       )}

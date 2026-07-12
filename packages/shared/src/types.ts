@@ -43,6 +43,8 @@ export const CategorySchema = z.object({
   name: z.string().min(1),
   filter: FilterGroupSchema,
   sortOrder: z.number().int().default(0),
+  /** Override tournament prizePlaces; null/undefined = inherit tournament default. */
+  prizePlaces: z.number().int().min(1).max(20).nullable().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
 });
@@ -77,6 +79,8 @@ export const TournamentSchema = z.object({
    * standings are per category. When true, everyone shares one pool.
    */
   mixCategories: z.boolean().default(false),
+  /** How many top places count as prize winners (podium styling / future prizes). */
+  prizePlaces: z.number().int().min(1).max(20).default(3),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),
@@ -105,12 +109,14 @@ export const CreateTournamentInputSchema = z.object({
   rounds: z.number().int().positive().default(5),
   /** Default false: separate pairing + ranking per category. */
   mixCategories: z.boolean().default(false),
+  prizePlaces: z.number().int().min(1).max(20).default(3),
   categories: z
     .array(
       z.object({
         name: z.string().min(1),
         filter: FilterGroupSchema,
         sortOrder: z.number().int().optional(),
+        prizePlaces: z.number().int().min(1).max(20).nullable().optional(),
       }),
     )
     .default([]),

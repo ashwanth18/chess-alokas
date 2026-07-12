@@ -5,6 +5,14 @@ import Papa from 'papaparse';
 import { matchesFilter } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import { getTournamentCapabilities, isMixedTournament } from '../lib/tournamentProgress';
+import {
+  categoryNameMatchesLabel,
+  findAgeCategoryInRow,
+  findNricInRow,
+  isNumericAgeColumn,
+  normalizeGender,
+  resolveImportAge,
+} from '../lib/importParse';
 
 interface RawRow {
   [key: string]: unknown;
@@ -16,12 +24,13 @@ interface MappedParticipant {
   gender?: string;
   rating?: number;
   club?: string;
+  ageCategoryLabel?: string;
   customFields: Record<string, unknown>;
   [key: string]: unknown;
 }
 
-const REQUIRED_FIELDS = ['name', 'age'] as const;
-const OPTIONAL_FIELDS = ['gender', 'rating', 'club'] as const;
+const REQUIRED_FIELDS = ['name'] as const;
+const OPTIONAL_FIELDS = ['age', 'gender', 'rating', 'club'] as const;
 const ALL_FIELDS = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS] as const;
 
 /** XLSX cells are often numbers; CSV is strings — normalize before trim/parse. */
@@ -42,10 +51,14 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
       const nameCol = mapping['name'] ?? '';
       const ageCol = mapping['age'] ?? '';
       const name = cellText(row[nameCol]);
-      const ageRaw = cellText(row[ageCol]);
-      const age = parseInt(ageRaw, 10) || 0;
+      const ageRaw = ageCol ? cellText(row[ageCol]) : '';
+      const ageCategoryLabel = findAgeCategoryInRow(row, cellText);
+      const nric = findNricInRow(row, cellText);
+      const age = resolveImportAge({ ageRaw, ageCategoryLabel, nric });
       const genderCol = mapping['gender'];
-      const gender = genderCol ? cellText(row[genderCol]) || undefined : undefined;
+      const gender = genderCol
+        ? normalizeGender(cellText(row[genderCol])) || undefined
+        : undefined;
       const ratingCol = mapping['rating'];
       const ratingRaw = ratingCol ? cellText(row[ratingCol]) : '';
       const rating = ratingRaw ? parseInt(ratingRaw, 10) || undefined : undefined;
@@ -61,7 +74,7 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
         }
       }
 
-      return { name, age, gender, rating, club, customFields };
+      return { name, age, gender, rating, club, ageCategoryLabel, customFields };
     });
 }
 
@@ -142,16 +155,21 @@ export default function ImportPage() {
     const detected: Record<string, string> = {};
 
     const matchers: Record<string, string[]> = {
-      name: ['name', 'player', 'full name', 'fullname', 'player name'],
-      age: ['age', 'years', 'yr', 'dob'],
-      gender: ['gender', 'sex', 'm/f', 'male/female'],
+      name: ['name', 'player', 'full name', 'nama', 'player name'],
+      gender: ['gender', 'sex', 'm/f', 'male/female', 'jantina'],
       rating: ['rating', 'elo', 'fide', 'national rating', 'rtg'],
-      club: ['club', 'team', 'school', 'academy', 'federation'],
+      club: ['club', 'team', 'school', 'academy', 'federation', 'sekolah'],
     };
 
     for (const [field, keywords] of Object.entries(matchers)) {
       const idx = lower.findIndex((c) => keywords.some((k) => c.includes(k)));
       if (idx !== -1 && cols[idx] !== undefined) detected[field] = cols[idx]!;
+    }
+
+    // Prefer a true numeric age column; never map "AGE CATEGORY" → age.
+    const ageIdx = cols.findIndex((c) => isNumericAgeColumn(c));
+    if (ageIdx !== -1 && cols[ageIdx] !== undefined) {
+      detected.age = cols[ageIdx]!;
     }
 
     return detected;
@@ -248,7 +266,13 @@ export default function ImportPage() {
         const pid = crypto.randomUUID();
         const catIds =
           categories
-            ?.filter((cat) => matchesFilter(p, cat.filter))
+            ?.filter(
+              (cat) =>
+                matchesFilter(p, cat.filter) ||
+                (p.ageCategoryLabel
+                  ? categoryNameMatchesLabel(cat.name, p.ageCategoryLabel)
+                  : false),
+            )
             .map((cat) => cat.id) ?? [];
 
         await db.participants.put({
@@ -362,7 +386,7 @@ export default function ImportPage() {
               <section className="mapping-section">
                 <h3>Column Mapping</h3>
                 <p className="form-hint">
-                  Map your file&apos;s columns to participant fields. Name and Age are required.
+                  Map your file&apos;s columns to participant fields. Name is required. Age can be inferred from NRIC or AGE CATEGORY.
                 </p>
                 <div className="mapping-grid">
                   {ALL_FIELDS.map((field) => (
