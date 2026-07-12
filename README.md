@@ -86,7 +86,8 @@ pnpm --filter @chess-alokas/pairing-engine test
 | POST | `/tournaments/:id/rounds/:n/pair` | Generate pairings |
 | PATCH | `/games/:id/result` | Set result |
 | GET | `/tournaments/:id/standings` | Standings |
-| GET/POST | `/sync` | Pull / push LWW sync |
+| GET | `/sync/pull?since=` | Pull LWW sync |
+| POST | `/sync/push` | Push LWW sync |
 
 ## Typical flow
 
