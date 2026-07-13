@@ -1,6 +1,7 @@
+import { createRequire } from 'node:module';
 import { app, shell, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
-import { autoUpdater } from 'electron-updater';
+import type { AppUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
 
 export type UpdateStatusPayload = {
   status:
@@ -23,6 +24,18 @@ export type UpdateStatusPayload = {
 const RELEASES_PAGE = 'https://github.com/ashwanth18/chess-alokas/releases/latest';
 const RELEASES_API = 'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
 
+/** electron-updater is CommonJS; ESM named imports break in packaged Electron. */
+function loadAutoUpdater(): AppUpdater | null {
+  try {
+    const require = createRequire(import.meta.url);
+    const mod = require('electron-updater') as { autoUpdater: AppUpdater };
+    return mod.autoUpdater;
+  } catch (err) {
+    log.error('Failed to load electron-updater — using GitHub download page only', err);
+    return null;
+  }
+}
+
 let lastStatus: UpdateStatusPayload = {
   status: 'idle',
   currentVersion: app.getVersion(),
@@ -41,7 +54,8 @@ function isPortableBuild(): boolean {
   );
 }
 
-function canAutoInstall(): boolean {
+function canAutoInstall(updater: AppUpdater | null): boolean {
+  if (!updater) return false;
   if (isPortableBuild()) return false;
   // Unsigned mac updates via electron-updater are unreliable; send users to the release page.
   if (process.platform === 'darwin') return false;
@@ -52,10 +66,11 @@ function send(
   getWindow: () => BrowserWindow | null,
   payload: Omit<UpdateStatusPayload, 'currentVersion' | 'canInstall'> &
     Partial<Pick<UpdateStatusPayload, 'canInstall'>>,
+  updater: AppUpdater | null,
 ) {
   lastStatus = {
     currentVersion: app.getVersion(),
-    canInstall: payload.canInstall ?? canAutoInstall(),
+    canInstall: payload.canInstall ?? canAutoInstall(updater),
     ...payload,
   };
   const win = getWindow();
@@ -84,7 +99,10 @@ function isNewer(remote: string, local: string): boolean {
 }
 
 /** Fallback when GitHub feed / latest.yml is missing: compare release tags via API. */
-async function checkViaGithubApi(getWindow: () => BrowserWindow | null): Promise<boolean> {
+async function checkViaGithubApi(
+  getWindow: () => BrowserWindow | null,
+  updater: AppUpdater | null,
+): Promise<boolean> {
   try {
     const res = await fetch(RELEASES_API, {
       headers: {
@@ -96,16 +114,24 @@ async function checkViaGithubApi(getWindow: () => BrowserWindow | null): Promise
     const body = (await res.json()) as { tag_name?: string; html_url?: string };
     const remote = body.tag_name ? parseTag(body.tag_name) : '';
     if (!remote || !isNewer(remote, app.getVersion())) {
-      send(getWindow, { status: 'not-available', message: 'You’re on the latest version.' });
+      send(
+        getWindow,
+        { status: 'not-available', message: 'You’re on the latest version.' },
+        updater,
+      );
       return true;
     }
-    send(getWindow, {
-      status: 'available',
-      version: remote,
-      message: `Version ${remote} is available.`,
-      downloadPageUrl: body.html_url ?? RELEASES_PAGE,
-      canInstall: false,
-    });
+    send(
+      getWindow,
+      {
+        status: 'available',
+        version: remote,
+        message: `Version ${remote} is available.`,
+        downloadPageUrl: body.html_url ?? RELEASES_PAGE,
+        canInstall: false,
+      },
+      updater,
+    );
     return true;
   } catch (err) {
     log.warn('GitHub release check failed', err);
@@ -114,122 +140,153 @@ async function checkViaGithubApi(getWindow: () => BrowserWindow | null): Promise
 }
 
 export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
-  autoUpdater.logger = log;
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = false;
+  const autoUpdater = loadAutoUpdater();
 
-  autoUpdater.on('checking-for-update', () => {
-    send(getWindow, { status: 'checking', message: 'Checking for updates…' });
-  });
+  if (autoUpdater) {
+    autoUpdater.logger = log;
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.allowPrerelease = false;
 
-  autoUpdater.on('update-available', (info) => {
-    send(getWindow, {
-      status: 'available',
-      version: info.version,
-      message: `Version ${info.version} is available.`,
-      downloadPageUrl: RELEASES_PAGE,
-      canInstall: canAutoInstall(),
+    autoUpdater.on('checking-for-update', () => {
+      send(getWindow, { status: 'checking', message: 'Checking for updates…' }, autoUpdater);
     });
-  });
 
-  autoUpdater.on('update-not-available', () => {
-    send(getWindow, { status: 'not-available', message: 'You’re on the latest version.' });
-  });
-
-  autoUpdater.on('download-progress', (p) => {
-    send(getWindow, {
-      status: 'downloading',
-      percent: Math.round(p.percent),
-      message: `Downloading update… ${Math.round(p.percent)}%`,
-      canInstall: true,
-    });
-  });
-
-  autoUpdater.on('update-downloaded', (info) => {
-    send(getWindow, {
-      status: 'downloaded',
-      version: info.version,
-      message: `Update ${info.version} ready — restart to install.`,
-      canInstall: true,
-    });
-  });
-
-  autoUpdater.on('error', (err) => {
-    log.error('autoUpdater error', err);
-    // Fall back to GitHub API so users still see an update prompt.
-    void checkViaGithubApi(getWindow).then((ok) => {
-      if (!ok) {
-        send(getWindow, {
-          status: 'error',
-          message: err.message || 'Update check failed',
+    autoUpdater.on('update-available', (info: UpdateInfo) => {
+      send(
+        getWindow,
+        {
+          status: 'available',
+          version: info.version,
+          message: `Version ${info.version} is available.`,
           downloadPageUrl: RELEASES_PAGE,
-          canInstall: false,
-        });
-      }
+          canInstall: canAutoInstall(autoUpdater),
+        },
+        autoUpdater,
+      );
     });
-  });
+
+    autoUpdater.on('update-not-available', () => {
+      send(
+        getWindow,
+        { status: 'not-available', message: 'You’re on the latest version.' },
+        autoUpdater,
+      );
+    });
+
+    autoUpdater.on('download-progress', (p: ProgressInfo) => {
+      send(
+        getWindow,
+        {
+          status: 'downloading',
+          percent: Math.round(p.percent),
+          message: `Downloading update… ${Math.round(p.percent)}%`,
+          canInstall: true,
+        },
+        autoUpdater,
+      );
+    });
+
+    autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
+      send(
+        getWindow,
+        {
+          status: 'downloaded',
+          version: info.version,
+          message: `Update ${info.version} ready — restart to install.`,
+          canInstall: true,
+        },
+        autoUpdater,
+      );
+    });
+
+    autoUpdater.on('error', (err: Error) => {
+      log.error('autoUpdater error', err);
+      void checkViaGithubApi(getWindow, autoUpdater).then((ok) => {
+        if (!ok) {
+          send(
+            getWindow,
+            {
+              status: 'error',
+              message: err.message || 'Update check failed',
+              downloadPageUrl: RELEASES_PAGE,
+              canInstall: false,
+            },
+            autoUpdater,
+          );
+        }
+      });
+    });
+  }
 
   return {
     async check() {
-      send(getWindow, { status: 'checking', message: 'Checking for updates…' });
-      if (!app.isPackaged) {
-        // Dev: still allow GitHub comparison so UI can be tested against real releases.
-        const ok = await checkViaGithubApi(getWindow);
+      send(getWindow, { status: 'checking', message: 'Checking for updates…' }, autoUpdater);
+      if (!app.isPackaged || !canAutoInstall(autoUpdater)) {
+        const ok = await checkViaGithubApi(getWindow, autoUpdater);
         if (!ok) {
-          send(getWindow, {
-            status: 'not-available',
-            message: 'Update checks run fully in packaged builds.',
-          });
+          send(
+            getWindow,
+            {
+              status: 'not-available',
+              message: app.isPackaged
+                ? 'Could not check for updates right now.'
+                : 'Update checks run fully in packaged builds.',
+            },
+            autoUpdater,
+          );
         }
         return;
       }
 
-      if (!canAutoInstall()) {
-        await checkViaGithubApi(getWindow);
-        return;
-      }
-
       try {
-        await autoUpdater.checkForUpdates();
+        await autoUpdater!.checkForUpdates();
       } catch (err) {
         log.warn('electron-updater check failed, using GitHub API', err);
-        const ok = await checkViaGithubApi(getWindow);
+        const ok = await checkViaGithubApi(getWindow, autoUpdater);
         if (!ok) {
-          send(getWindow, {
-            status: 'error',
-            message: err instanceof Error ? err.message : 'Update check failed',
-            downloadPageUrl: RELEASES_PAGE,
-            canInstall: false,
-          });
+          send(
+            getWindow,
+            {
+              status: 'error',
+              message: err instanceof Error ? err.message : 'Update check failed',
+              downloadPageUrl: RELEASES_PAGE,
+              canInstall: false,
+            },
+            autoUpdater,
+          );
         }
       }
     },
 
     async download() {
-      if (!canAutoInstall()) {
+      if (!canAutoInstall(autoUpdater)) {
         await shell.openExternal(RELEASES_PAGE);
         return;
       }
       try {
-        await autoUpdater.downloadUpdate();
+        await autoUpdater!.downloadUpdate();
       } catch (err) {
         log.error('downloadUpdate failed', err);
-        send(getWindow, {
-          status: 'error',
-          message: err instanceof Error ? err.message : 'Download failed',
-          downloadPageUrl: RELEASES_PAGE,
-          canInstall: false,
-        });
+        send(
+          getWindow,
+          {
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Download failed',
+            downloadPageUrl: RELEASES_PAGE,
+            canInstall: false,
+          },
+          autoUpdater,
+        );
       }
     },
 
     install() {
-      if (!canAutoInstall()) {
+      if (!canAutoInstall(autoUpdater)) {
         void shell.openExternal(RELEASES_PAGE);
         return;
       }
-      autoUpdater.quitAndInstall(false, true);
+      autoUpdater!.quitAndInstall(false, true);
     },
 
     openDownloadPage(url?: string) {
