@@ -2,6 +2,9 @@
 
 Domain: **`chess-manager.alokas.com`**
 
+> **Day-to-day shipping** (web push, desktop tags, migrations): see [`PIPELINE.md`](./PIPELINE.md).
+> This file is the **one-time** Dokploy / DNS / Auth setup checklist.
+
 ## 1. DNS
 
 Create an **A record** (or CNAME) for `chess-manager.alokas.com` pointing at your VPS IP.

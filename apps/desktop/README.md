@@ -78,12 +78,14 @@ Local artifacts land in `apps/desktop/release/`:
 
 ### GitHub Releases (CI)
 
+See the full checklist in [`deploy/PIPELINE.md`](../../deploy/PIPELINE.md) §2.
+
 Bump `apps/desktop/package.json` `version`, then push a matching tag:
 
 ```bash
-# e.g. version 0.1.3 in package.json
-git tag v0.1.3
-git push origin v0.1.3
+# e.g. version 0.1.8 in package.json
+git tag v0.1.8
+git push origin v0.1.8
 ```
 
 Workflow: `.github/workflows/desktop-release.yml` (Windows + Linux + macOS matrix).

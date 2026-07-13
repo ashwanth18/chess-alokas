@@ -18,7 +18,9 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 
 ## Production host
 
-- Web + API: **`https://chess-manager.alokas.com`** (Dokploy) — see [`deploy/DOKPLOY.md`](deploy/DOKPLOY.md)
+- Web + API: **`https://chess-manager.alokas.com`** (Dokploy)
+- **Deployment pipeline (ship web / desktop / migrations):** [`deploy/PIPELINE.md`](deploy/PIPELINE.md)
+- Dokploy one-time setup: [`deploy/DOKPLOY.md`](deploy/DOKPLOY.md)
 - Agent handoff: [`docs/AGENT_HANDOFF.md`](docs/AGENT_HANDOFF.md)
 
 ## Monorepo
