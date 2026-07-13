@@ -2,11 +2,20 @@ import { Link } from 'react-router-dom';
 import { useEffect, useState, type ReactElement } from 'react';
 import { useAuth } from '../auth/AuthContext';
 
+type PlatformKey = 'windows' | 'linux' | 'macos';
+
 const RELEASES_API =
   import.meta.env.VITE_GITHUB_RELEASES_API ??
   'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
 
-type PlatformKey = 'windows' | 'linux' | 'macos';
+/** Direct download links shown as normal “Download” buttons (not branded as GitHub). */
+const DIRECT_DOWNLOADS: Partial<Record<PlatformKey, string>> = {
+  windows:
+    import.meta.env.VITE_DOWNLOAD_WINDOWS_URL ??
+    'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.0/Chess-Alokas-Setup-win-x64.exe',
+  linux: import.meta.env.VITE_DOWNLOAD_LINUX_URL || undefined,
+  macos: import.meta.env.VITE_DOWNLOAD_MACOS_URL || undefined,
+};
 
 interface PlatformDownload {
   key: PlatformKey;
@@ -105,11 +114,24 @@ const FEATURES = [
 
 export default function LandingPage() {
   const auth = useAuth();
-  const [downloads, setDownloads] = useState<PlatformDownload[]>([
-    { key: 'windows', label: 'Windows', hint: PLATFORM_META.windows.defaultHint, url: null, available: false },
-    { key: 'macos', label: 'macOS', hint: PLATFORM_META.macos.defaultHint, url: null, available: false },
-    { key: 'linux', label: 'Linux', hint: PLATFORM_META.linux.defaultHint, url: null, available: false },
-  ]);
+  const [downloads, setDownloads] = useState<PlatformDownload[]>(() =>
+    (['windows', 'macos', 'linux'] as PlatformKey[]).map((key) => {
+      const direct = DIRECT_DOWNLOADS[key];
+      return {
+        key,
+        label: PLATFORM_META[key].label,
+        hint: direct
+          ? key === 'windows'
+            ? 'Windows installer'
+            : key === 'macos'
+              ? 'macOS disk image'
+              : 'Linux AppImage'
+          : PLATFORM_META[key].defaultHint,
+        url: direct ?? null,
+        available: Boolean(direct),
+      };
+    }),
+  );
   const [loadingDownloads, setLoadingDownloads] = useState(true);
 
   useEffect(() => {
@@ -131,17 +153,13 @@ export default function LandingPage() {
 
         setDownloads((prev) =>
           prev.map((p) => {
+            if (p.available && p.url) return p;
             const matches = assets
               .filter((a) => matchAsset(a.name, p.key))
               .sort((a, b) => preferSetup(a.name, b.name));
             const best = matches[0];
             if (!best) {
-              return {
-                ...p,
-                available: false,
-                hint: 'Coming soon',
-                url: null,
-              };
+              return { ...p, available: false, hint: 'Coming soon', url: null };
             }
             const friendly =
               p.key === 'windows'
@@ -153,7 +171,7 @@ export default function LandingPage() {
           }),
         );
       } catch {
-        /* keep defaults */
+        /* keep direct links / coming soon */
       } finally {
         if (!cancelled) setLoadingDownloads(false);
       }
