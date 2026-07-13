@@ -17,6 +17,8 @@ export type DesktopUpdateStatus = {
 
 export interface DesktopBridge {
   isDesktop: true;
+  /** Node process.platform: win32 | darwin | linux */
+  platform: string;
   apiBaseUrl: string;
   getApiBaseUrl: () => string;
   getAppVersion: () => string;

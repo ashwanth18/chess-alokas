@@ -23,6 +23,14 @@ const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
   import.meta.env.VITE_DESKTOP === '1';
 
+if (typeof document !== 'undefined' && isDesktop) {
+  document.documentElement.classList.add('is-desktop');
+  const platform = window.desktop?.platform;
+  if (platform === 'darwin') document.documentElement.classList.add('is-desktop-mac');
+  else if (platform === 'win32') document.documentElement.classList.add('is-desktop-win');
+  else document.documentElement.classList.add('is-desktop-linux');
+}
+
 const Router = isDesktop ? HashRouter : BrowserRouter;
 
 function RequireAuth({ children }: { children: React.ReactNode }) {

@@ -133,6 +133,35 @@ input, select, textarea { font-family: var(--font-body); }
   box-shadow: 0 2px 12px rgba(0,0,0,0.5);
 }
 
+/* Notion-style Electron chrome: topbar is the window drag region */
+html.is-desktop .topbar,
+html.is-desktop .auth-topbar,
+html.is-desktop .desktop-update-banner {
+  -webkit-app-region: drag;
+}
+html.is-desktop .topbar a,
+html.is-desktop .topbar button,
+html.is-desktop .topbar input,
+html.is-desktop .topbar select,
+html.is-desktop .auth-topbar a,
+html.is-desktop .auth-topbar button,
+html.is-desktop .desktop-update-banner a,
+html.is-desktop .desktop-update-banner button {
+  -webkit-app-region: no-drag;
+}
+html.is-desktop-mac .topbar,
+html.is-desktop-mac .auth-topbar {
+  padding-left: 78px;
+}
+html.is-desktop-win .topbar,
+html.is-desktop-linux .topbar,
+html.is-desktop-win .auth-topbar,
+html.is-desktop-linux .auth-topbar,
+html.is-desktop-win .desktop-update-banner,
+html.is-desktop-linux .desktop-update-banner {
+  padding-right: 140px;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -420,6 +449,40 @@ input, select, textarea { font-family: var(--font-body); }
 }
 .section-header h2 { font-size: 1.4rem; }
 .sync-hint { font-size: 0.75rem; color: var(--ink-300); }
+.tournaments-toolbar {
+  margin-bottom: 0.85rem;
+}
+.tournaments-toolbar .table-search {
+  max-width: 28rem;
+}
+.empty-state-compact {
+  padding: 1.5rem 1rem;
+}
+.list-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--color-border);
+}
+.list-pagination-meta {
+  font-size: 0.8rem;
+  color: var(--ink-300);
+}
+.list-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.list-pagination-page {
+  font-size: 0.8rem;
+  color: var(--ink-500);
+  min-width: 5.5rem;
+  text-align: center;
+}
 
 .tournament-list {
   list-style: none;

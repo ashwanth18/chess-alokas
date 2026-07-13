@@ -4,6 +4,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import log from 'electron-log/main';
 import { startApiSidecar, type SidecarHandle } from './sidecar.js';
 import { getLastUpdateStatus, setupAutoUpdater } from './updater.js';
+import { installAppMenu } from './menu.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,6 +57,8 @@ function registerIpc() {
 }
 
 async function createWindow() {
+  const isMac = process.platform === 'darwin';
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -63,6 +66,18 @@ async function createWindow() {
     minHeight: 640,
     title: `Chess Alokas ${app.getVersion()}`,
     show: false,
+    // Notion-style: content under a hidden titlebar; native controls overlay the UI.
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    ...(isMac
+      ? { trafficLightPosition: { x: 16, y: 18 } }
+      : {
+          titleBarOverlay: {
+            color: '#071f17',
+            symbolColor: '#d4b98a',
+            height: 36,
+          },
+        }),
+    backgroundColor: '#071f17',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -102,6 +117,11 @@ async function createWindow() {
 
 async function boot() {
   registerIpc();
+  installAppMenu({
+    checkForUpdates: () => {
+      void updater.check();
+    },
+  });
 
   if (useLocalSidecar) {
     try {

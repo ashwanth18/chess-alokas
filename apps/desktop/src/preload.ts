@@ -19,6 +19,8 @@ export type DesktopUpdateStatus = {
 
 export interface DesktopBridge {
   isDesktop: true;
+  /** Node process.platform: win32 | darwin | linux */
+  platform: string;
   apiBaseUrl: string;
   getApiBaseUrl: () => string;
   getAppVersion: () => string;
@@ -37,6 +39,7 @@ const userDataPath = ipcRenderer.sendSync('desktop:get-user-data-path') as strin
 
 const bridge: DesktopBridge = {
   isDesktop: true,
+  platform: process.platform,
   apiBaseUrl,
   getApiBaseUrl: () => apiBaseUrl,
   getAppVersion: () => appVersion,
