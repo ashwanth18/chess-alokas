@@ -7,8 +7,10 @@ How Chess Alokas ships to **production web**, **cloud API**, and **desktop insta
 | Surface | Trigger | What runs | Result |
 |---------|---------|-----------|--------|
 | Web + API | Push to the branch Dokploy watches | Docker Compose rebuild (`deploy/docker-compose.yml`) | `https://chess-manager.alokas.com` |
-| Desktop | Git tag `v*` (e.g. `v0.1.8`) | `.github/workflows/desktop-release.yml` | [GitHub Release](https://github.com/ashwanth18/chess-alokas/releases) installers + `latest*.yml` |
+| Desktop | Git tag `v*` (e.g. `v0.1.9`) | `.github/workflows/desktop-release.yml` | [GitHub Release](https://github.com/ashwanth18/chess-alokas/releases) installers + `latest*.yml` |
 | Supabase schema | Manual | Apply SQL in `supabase/migrations/` | Postgres / RLS / Storage |
+
+**Agent shortcut:** typing **`@deploy`** in Cursor runs this full ship flow (see `.cursor/rules/deploy.mdc`).
 
 There is **no** GitHub Action for web/API. Desktop is the only automated CI release path.
 

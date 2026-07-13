@@ -356,6 +356,13 @@ html.is-desktop-linux .desktop-update-banner {
   background: linear-gradient(90deg, rgba(196, 165, 116, 0.16), rgba(196, 165, 116, 0.06));
   color: var(--wood-200);
 }
+.desktop-update-banner.is-success {
+  border-bottom-color: rgba(76, 175, 130, 0.35);
+  background: linear-gradient(90deg, rgba(76, 175, 130, 0.2), rgba(76, 175, 130, 0.06));
+}
+.desktop-update-banner.is-success .desktop-update-banner-copy strong {
+  color: var(--green-100);
+}
 .desktop-update-banner-copy {
   display: flex;
   flex-direction: column;
@@ -2034,9 +2041,10 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   gap: 0.75rem 1.25rem;
   margin-bottom: 1rem;
   padding: 0.85rem 1rem;
-  border: 1px solid var(--border, #d4cfc4);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--surface, #fff) 92%, var(--accent, #8b6914) 8%);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--surface-fg);
 }
 
 .cert-tournament-link.needs-attention {
@@ -2050,15 +2058,46 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   gap: 0.35rem;
   font-size: 0.85rem;
   font-weight: 600;
+  color: var(--surface-fg);
   min-width: min(100%, 22rem);
 }
 
-.cert-tournament-link select {
+.cert-tournament-link .form-hint {
+  color: var(--surface-muted);
+  max-width: 36rem;
+}
+
+.cert-tournament-link select.input,
+.cert-tournament-link .input {
+  color: var(--surface-fg);
+  background-color: #fff;
+  border-color: var(--surface-border);
   font-weight: 400;
+}
+
+.cert-tournament-link select.input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a2e24' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-color: #fff;
+}
+
+.cert-tournament-link select.input:focus,
+.cert-tournament-link .input:focus {
+  background-color: #fff;
+  border-color: var(--green-600);
+  color: var(--surface-fg);
+  box-shadow: 0 0 0 2px rgba(35, 107, 80, 0.2);
+}
+
+.cert-tournament-link select.input option {
+  color: #1a2e24;
+  background: #fff;
 }
 
 .cert-tournament-link code {
   font-size: 0.8em;
+  color: var(--surface-fg);
 }
 
 .certificates-page .page-subtitle a {
@@ -2097,6 +2136,16 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--ink-500);
+}
+
+.cert-settings select.input {
+  color: var(--color-fg);
+  min-width: 12rem;
+}
+
+.cert-settings select.input option {
+  color: #1a2e24;
+  background: #fff;
 }
 
 .cert-workspace {

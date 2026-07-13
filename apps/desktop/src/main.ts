@@ -88,6 +88,8 @@ async function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    // Tell the renderer if this launch followed a silent install.
+    updater.announceJustUpdated();
     // Quiet startup check shortly after UI is ready.
     setTimeout(() => {
       void updater.check();

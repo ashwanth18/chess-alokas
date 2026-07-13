@@ -6,8 +6,11 @@ export type DesktopUpdateStatus = {
     | 'not-available'
     | 'downloading'
     | 'downloaded'
+    | 'just-updated'
     | 'error';
   currentVersion: string;
+  /** Previous version when status is just-updated. */
+  previousVersion?: string;
   version?: string;
   percent?: number;
   message?: string;

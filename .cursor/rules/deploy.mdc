@@ -1,0 +1,28 @@
+---
+description: When the user types @deploy (or asks to ship/deploy web+desktop), run the full Chess Alokas deployment pipeline.
+alwaysApply: true
+---
+
+# @deploy — ship web + desktop
+
+When the user message includes **`@deploy`**, or clearly asks to ship/deploy both web and desktop, execute the full release flow without waiting for extra confirmation (unless secrets or destructive git ops are involved).
+
+## Checklist (do in order)
+
+1. **Review** — `git status`, `git diff`, recent `git log`. Include all intentional feature fixes; skip secrets, lock junk, sample CSVs, `node_modules`.
+2. **Migrations** — If there are new files under `supabase/migrations/`, apply them to production (Supabase MCP/SQL) **before** relying on the new schema. Do not re-apply already-applied migrations.
+3. **Bump desktop** — Increment `apps/desktop/package.json` `version` (patch unless user specifies otherwise). Tag must match: `0.1.9` → `v0.1.9`.
+4. **Commit** — Stage relevant files; commit with a concise message covering web + desktop intent (PowerShell-safe message, no bash heredoc).
+5. **Push branch** — `git push origin HEAD` on the Dokploy-watched branch (usually `feat/auth-cloud-deploy` until merged to `main`). This ships **web + API**.
+6. **Tag desktop** — `git tag vX.Y.Z` then `git push origin vX.Y.Z`. This triggers `.github/workflows/desktop-release.yml`.
+7. **Report** — Give commit SHA, tag, Dokploy note, and links to Actions/Releases. Remind that desktop installers appear when the matrix finishes.
+
+## Do not
+
+- Force-push, amend pushed commits, or skip hooks unless the user explicitly asks.
+- Pass empty `VITE_SUPABASE_*` into desktop CI (breaks auth; `.env.desktop` must win).
+- Create an empty commit or tag if there is nothing to ship — say so instead.
+
+## Reference
+
+Full detail: [`deploy/PIPELINE.md`](../../deploy/PIPELINE.md)

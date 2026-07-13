@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 import type { DesktopUpdateStatus } from '../desktop';
 
 const DISMISS_KEY = 'chess-alokas-dismissed-update';
+const LAST_SEEN_VERSION_KEY = 'chess-alokas-last-seen-version';
+const JUST_UPDATED_KEY = 'chess-alokas-just-updated';
+
+type JustUpdatedNotice = {
+  from: string;
+  to: string;
+};
 
 function dismissedVersion(): string | null {
   try {
@@ -19,16 +26,90 @@ function dismissVersion(version: string) {
   }
 }
 
+function readJustUpdatedNotice(): JustUpdatedNotice | null {
+  try {
+    const raw = localStorage.getItem(JUST_UPDATED_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as JustUpdatedNotice;
+    if (!parsed?.from || !parsed?.to) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearJustUpdatedNotice() {
+  try {
+    localStorage.removeItem(JUST_UPDATED_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Detect version bump after silent install / restart and stash a one-shot notice. */
+function detectVersionBumpNotice(): JustUpdatedNotice | null {
+  if (!window.desktop?.isDesktop) return null;
+  const current = window.desktop.getAppVersion();
+  let previous: string | null = null;
+  try {
+    previous = localStorage.getItem(LAST_SEEN_VERSION_KEY);
+  } catch {
+    previous = null;
+  }
+
+  try {
+    localStorage.setItem(LAST_SEEN_VERSION_KEY, current);
+  } catch {
+    /* ignore */
+  }
+
+  if (!previous || previous === current) {
+    return readJustUpdatedNotice();
+  }
+
+  const notice = { from: previous, to: current };
+  try {
+    localStorage.setItem(JUST_UPDATED_KEY, JSON.stringify(notice));
+  } catch {
+    /* ignore */
+  }
+  return notice;
+}
+
 export default function DesktopUpdateBanner() {
   const [status, setStatus] = useState<DesktopUpdateStatus | null>(null);
   const [hidden, setHidden] = useState(false);
+  const [justUpdated, setJustUpdated] = useState<JustUpdatedNotice | null>(null);
 
   useEffect(() => {
-    if (!window.desktop?.onUpdateStatus) return;
+    if (!window.desktop?.isDesktop) return;
+    setJustUpdated(detectVersionBumpNotice());
+
+    void window.desktop.getUpdateStatus().then((next) => {
+      setStatus(next);
+      if (next.status === 'just-updated' && next.version) {
+        setJustUpdated({
+          from: next.previousVersion ?? next.currentVersion,
+          to: next.version,
+        });
+      }
+    });
+
+    if (!window.desktop.onUpdateStatus) return;
     return window.desktop.onUpdateStatus((next) => {
       setStatus(next);
+      if (next.status === 'just-updated' && next.version) {
+        setJustUpdated({
+          from: next.previousVersion ?? next.currentVersion,
+          to: next.version,
+        });
+        setHidden(false);
+        return;
+      }
       if (
-        (next.status === 'available' || next.status === 'downloading' || next.status === 'downloaded') &&
+        (next.status === 'available' ||
+          next.status === 'downloading' ||
+          next.status === 'downloaded') &&
         next.version &&
         dismissedVersion() === next.version &&
         next.status !== 'downloaded'
@@ -45,7 +126,35 @@ export default function DesktopUpdateBanner() {
     });
   }, []);
 
-  if (!window.desktop?.isDesktop || !status || hidden) return null;
+  if (!window.desktop?.isDesktop || hidden) return null;
+
+  if (justUpdated) {
+    return (
+      <div className="desktop-update-banner is-success" role="status">
+        <div className="desktop-update-banner-copy">
+          <strong>Updated to v{justUpdated.to}</strong>
+          <span>
+            Chess Alokas restarted with the latest build
+            {justUpdated.from !== justUpdated.to ? ` (was v${justUpdated.from})` : ''}.
+          </span>
+        </div>
+        <div className="desktop-update-banner-actions">
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => {
+              clearJustUpdatedNotice();
+              setJustUpdated(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!status) return null;
 
   const show =
     status.status === 'available' ||
