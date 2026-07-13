@@ -182,6 +182,11 @@ export default function AccountPage() {
     <div className="page-container account-page">
       <div className="page-header">
         <div>
+          <p className="page-breadcrumb">
+            <Link to="/app">Tournaments</Link>
+            <span aria-hidden> / </span>
+            <span>Account</span>
+          </p>
           <h1>Account</h1>
           <p className="page-subtitle">Profile, security, and connected sign-in methods</p>
         </div>

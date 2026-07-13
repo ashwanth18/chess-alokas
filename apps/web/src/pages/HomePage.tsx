@@ -85,11 +85,17 @@ export default function HomePage() {
 
         {tournaments !== undefined && isEmpty && (
           <div className="empty-state">
-            <span className="empty-icon">♟</span>
-            <p>No tournaments yet.</p>
-            <Link to="/tournaments/new" className="btn btn-primary">
-              Create your first tournament
-            </Link>
+            <span className="empty-icon">♕</span>
+            <h3>No tournaments yet</h3>
+            <p>Create one here, or hit Sync if you already have cloud tournaments.</p>
+            <div className="empty-actions">
+              <Link to="/tournaments/new" className="btn btn-primary">
+                Create tournament
+              </Link>
+              <Link to="/settings" className="btn btn-outline">
+                Sync settings
+              </Link>
+            </div>
           </div>
         )}
 

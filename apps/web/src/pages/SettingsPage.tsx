@@ -41,6 +41,11 @@ export default function SettingsPage() {
     <div className="page-container settings-page">
       <div className="page-header">
         <div>
+          <p className="page-breadcrumb">
+            <Link to="/app">Tournaments</Link>
+            <span aria-hidden> / </span>
+            <span>Settings</span>
+          </p>
           <h1>Settings</h1>
           <p className="page-subtitle">Cloud connection and sync preferences</p>
         </div>

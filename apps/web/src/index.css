@@ -250,15 +250,65 @@ input, select, textarea { font-family: var(--font-body); }
   font-size: 0.95rem;
   margin-top: 0.25rem;
 }
+.page-breadcrumb {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--ink-300);
+}
+.page-breadcrumb a {
+  color: var(--wood-400);
+  text-decoration: none;
+}
+.page-breadcrumb a:hover { text-decoration: underline; color: var(--wood-200); }
 
 /* ─── Footer ─────────────────────────────────────────────────────────────────── */
 .app-footer {
   border-top: 1px solid var(--color-border);
   padding: 1rem 1.5rem;
-  text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
   font-size: 0.75rem;
   color: var(--ink-300);
   background: var(--green-900);
+}
+.app-footer-links { display: flex; gap: 1rem; }
+.app-footer-link {
+  color: var(--wood-400);
+  text-decoration: none;
+}
+.app-footer-link:hover { color: var(--wood-200); text-decoration: underline; }
+
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  top: 60px;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 98;
+  cursor: pointer;
+}
+.topnav-mobile-actions {
+  display: none;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--color-border);
+  margin-top: 0.35rem;
+}
+.empty-state h3 {
+  margin: 0;
+  color: var(--wood-300);
+  font-size: 1.25rem;
+}
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: center;
+  margin-top: 0.35rem;
 }
 
 /* ─── Hero ───────────────────────────────────────────────────────────────────── */
@@ -1781,6 +1831,9 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   }
   .topnav.open { display: flex; }
   .topnav a { padding: 0.75rem 1rem; width: 100%; border-radius: var(--radius); }
+  .topnav-mobile-actions { display: flex; }
+  .sync-bar .btn-ghost,
+  .sync-bar .btn-sync { display: none; }
   .sync-bar { gap: 0.35rem; }
   .sync-time { display: none; }
 
@@ -2071,12 +2124,67 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 2rem 1rem;
+  padding: 1.25rem 1rem 2rem;
   color: var(--surface-fg);
   background:
     radial-gradient(ellipse at top, color-mix(in srgb, var(--surface-accent) 18%, transparent), transparent 55%),
     linear-gradient(160deg, #e8f0eb 0%, var(--surface) 45%, #f3ebe0 100%);
 }
+.auth-frame {
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.auth-topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+}
+.auth-home-link {
+  justify-self: start;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--forest);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+}
+.auth-home-link:hover {
+  background: color-mix(in srgb, var(--forest) 8%, transparent);
+  text-decoration: underline;
+}
+.auth-top-brand {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--forest);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+.auth-top-spacer { justify-self: end; width: 1px; height: 1px; }
+.auth-brand-mark {
+  display: inline-flex;
+  text-decoration: none;
+  color: inherit;
+}
+.auth-footer-secondary {
+  margin-top: 0.35rem !important;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--surface-border);
+}
+.auth-footer-secondary a {
+  color: var(--surface-muted);
+  font-weight: 500;
+}
+.auth-footer-secondary a:hover { color: var(--forest); }
 .auth-page .form-hint,
 .auth-page .auth-footer,
 .auth-page .auth-brand p {

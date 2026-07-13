@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import AuthShell from '../components/AuthShell';
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -19,20 +20,22 @@ export default function AuthCallbackPage() {
   }, [navigate]);
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <h1>Completing sign-in…</h1>
-        {error ? (
-          <>
-            <div className="form-error">{error}</div>
+    <AuthShell title="Completing sign-in…" subtitle="Finishing your secure session">
+      {error ? (
+        <>
+          <div className="form-error">{error}</div>
+          <div className="empty-actions" style={{ marginTop: '1rem' }}>
             <Link className="btn btn-primary" to="/login">
-              Back to login
+              Back to sign in
             </Link>
-          </>
-        ) : (
-          <p className="form-hint">Please wait</p>
-        )}
-      </div>
-    </div>
+            <Link className="btn btn-outline" to="/">
+              Home
+            </Link>
+          </div>
+        </>
+      ) : (
+        <p className="form-hint">Please wait…</p>
+      )}
+    </AuthShell>
   );
 }

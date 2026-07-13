@@ -41,6 +41,15 @@ export default function Layout() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
   const handleSync = useCallback(async () => {
     if (!online || syncing || !auth.user) return;
     setSyncing(true);
@@ -84,56 +93,98 @@ export default function Layout() {
   }, [auth.user]);
 
   const label = auth.displayName || auth.user?.email?.split('@')[0] || 'Account';
+  const closeMenu = () => setMenuOpen(false);
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <NavLink to="/app" className="brand" onClick={() => setMenuOpen(false)}>
-          <span className="brand-knight">♞</span>
+        <NavLink to="/app" className="brand" onClick={closeMenu}>
+          <span className="brand-knight" aria-hidden>
+            ♕
+          </span>
           <span className="brand-name">Chess Alokas</span>
         </NavLink>
 
         <button
+          type="button"
           className="menu-toggle"
-          aria-label="Toggle menu"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
         >
           <span className={`hamburger ${menuOpen ? 'open' : ''}`} />
         </button>
 
-        <nav className={`topnav ${menuOpen ? 'open' : ''}`}>
-          <NavLink to="/app" end onClick={() => setMenuOpen(false)}>
+        <nav className={`topnav ${menuOpen ? 'open' : ''}`} aria-label="Main">
+          <NavLink to="/app" end onClick={closeMenu}>
             Tournaments
           </NavLink>
-          <NavLink to="/tournaments/new" onClick={() => setMenuOpen(false)}>
-            New Tournament
+          <NavLink to="/tournaments/new" onClick={closeMenu}>
+            New
           </NavLink>
-          <NavLink to="/certificates" onClick={() => setMenuOpen(false)}>
+          <NavLink to="/certificates" onClick={closeMenu}>
             Certificates
           </NavLink>
-          <NavLink to="/simulator" onClick={() => setMenuOpen(false)}>
+          <NavLink to="/simulator" onClick={closeMenu}>
             Simulator
           </NavLink>
-          <NavLink to="/account" onClick={() => setMenuOpen(false)}>
+          <NavLink to="/account" onClick={closeMenu}>
             Account
           </NavLink>
-          <NavLink to="/settings" onClick={() => setMenuOpen(false)}>
+          <NavLink to="/settings" onClick={closeMenu}>
             Settings
           </NavLink>
+          <div className="topnav-mobile-actions">
+            <button
+              type="button"
+              className="btn btn-sm btn-sync"
+              onClick={() => {
+                void handleSync();
+                closeMenu();
+              }}
+              disabled={!online || syncing || !auth.user}
+            >
+              {syncing ? 'Syncing…' : 'Sync now'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => {
+                closeMenu();
+                void auth.signOut('local');
+              }}
+            >
+              Sign out
+            </button>
+            {!window.desktop?.isDesktop && (
+              <Link to="/" className="btn btn-sm btn-outline" onClick={closeMenu}>
+                Marketing home
+              </Link>
+            )}
+          </div>
         </nav>
 
         <div className="sync-bar">
-          <Link to="/account" className="user-chip" title={auth.user?.email ?? ''}>
+          <Link to="/account" className="user-chip" title={auth.user?.email ?? 'Account'}>
             {label}
           </Link>
-          <span className={`status-dot ${online ? 'online' : 'offline'}`} />
+          <span
+            className={`status-dot ${online ? 'online' : 'offline'}`}
+            title={online ? 'API reachable' : 'Offline'}
+          />
           <span className="status-label">{online ? 'Online' : 'Offline'}</span>
-          {lastSync && <span className="sync-time">Synced {formatSyncTime(lastSync)}</span>}
+          {lastSync && (
+            <span className="sync-time" title={lastSync}>
+              Synced {formatSyncTime(lastSync)}
+            </span>
+          )}
           {syncResult && <span className="sync-result">{syncResult}</span>}
           <button
+            type="button"
             className="btn btn-sm btn-sync"
-            onClick={handleSync}
+            onClick={() => void handleSync()}
             disabled={!online || syncing || !auth.user}
+            title={!auth.user ? 'Sign in to sync' : !online ? 'Offline' : 'Sync with cloud'}
           >
             {syncing ? 'Syncing…' : 'Sync'}
           </button>
@@ -147,12 +198,34 @@ export default function Layout() {
         </div>
       </header>
 
+      {menuOpen && (
+        <button
+          type="button"
+          className="nav-backdrop"
+          aria-label="Close menu"
+          onClick={closeMenu}
+        />
+      )}
+
       <main className="page-content">
         <Outlet />
       </main>
 
       <footer className="app-footer">
         <span>Chess Alokas · Offline-first tournament management</span>
+        <span className="app-footer-links">
+          {!window.desktop?.isDesktop && (
+            <Link to="/" className="app-footer-link">
+              Home
+            </Link>
+          )}
+          <Link to="/account" className="app-footer-link">
+            Account
+          </Link>
+          <Link to="/settings" className="app-footer-link">
+            Settings
+          </Link>
+        </span>
       </footer>
     </div>
   );

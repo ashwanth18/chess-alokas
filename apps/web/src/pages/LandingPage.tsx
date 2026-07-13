@@ -154,7 +154,12 @@ export default function LandingPage() {
             Offline-first pairing for clubs and academies — Swiss rounds, certificates, and cloud
             sync when you need it.
           </p>
-          <div className="landing-cta">{appCta}</div>
+          <div className="landing-cta">
+            {appCta}
+            <a href="#download" className="btn btn-ghost btn-lg">
+              Download desktop
+            </a>
+          </div>
         </div>
         <div className="landing-hero-piece" aria-hidden>
           <span className="landing-queen-hero">♕</span>
