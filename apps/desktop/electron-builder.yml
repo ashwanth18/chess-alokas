@@ -38,10 +38,6 @@ linux:
         - x64
   category: Office
   executableName: Chess-Alokas
-  syncDesktopName: true
-  desktop:
-    Name: Chess Alokas
-    StartupWMClass: Chess-Alokas
   artifactName: Chess-Alokas-${os}-${arch}.${ext}
 mac:
   target:
