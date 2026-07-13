@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { STYLE_META } from '@chess-alokas/pairing-engine';
 import { PRESET_FILTERS } from '@chess-alokas/shared';
 import type { FilterGroup, FilterOp, TournamentStyle } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
-import { apiCreateTournament } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import {
   DEFAULT_PRIZE_PLACES,
@@ -62,6 +61,7 @@ export default function CreateTournamentPage() {
   const [categories, setCategories] = useState<CategoryDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   function addCategory() {
     setCategories((cs) => [...cs, newCategory()]);
@@ -136,11 +136,13 @@ export default function CreateTournamentPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current || saving) return;
     if (!name.trim()) {
       setError('Tournament name is required');
       return;
     }
 
+    submittingRef.current = true;
     setSaving(true);
     setError(null);
 
@@ -178,25 +180,15 @@ export default function CreateTournamentPage() {
         });
       }
 
-      // Try API in background (don't block UI)
-      apiCreateTournament({
-        id: tournamentId,
-        name: name.trim(),
-        date: date || null,
-        style,
-        rounds,
-        mixCategories,
-        prizePlaces: clampPrizePlaces(prizePlaces),
-        awardScope,
-        status: 'draft',
-        currentRound: 0,
-      }).catch(() => {});
+      // Cloud persistence is via sync push (same client UUID). Do not also POST
+      // /tournaments — the API ignores client ids and creates a second row.
 
       navigate(`/tournaments/${tournamentId}`);
     } catch (err) {
       setError('Failed to save tournament');
       console.error(err);
     } finally {
+      submittingRef.current = false;
       setSaving(false);
     }
   }

@@ -135,7 +135,63 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
     }
   }
 
+  // Clean empty shell duplicates created by the old dual create (local UUID + POST /tournaments).
+  await softDeleteEmptyDuplicateTournaments();
+
   await setLastSyncAt(serverTime ?? new Date().toISOString());
 
   return { pushed, pulled };
+}
+
+/**
+ * If several active tournaments share the same name, soft-delete empty shells
+ * (no categories / players / games) so the real local copy remains.
+ */
+async function softDeleteEmptyDuplicateTournaments(): Promise<void> {
+  const active = await db.tournaments.filter((t) => !t.deletedAt).toArray();
+  const byName = new Map<string, typeof active>();
+  for (const t of active) {
+    const key = `${t.ownerId ?? ''}|${t.name.trim().toLowerCase()}`;
+    const list = byName.get(key) ?? [];
+    list.push(t);
+    byName.set(key, list);
+  }
+
+  const now = new Date().toISOString();
+  for (const group of byName.values()) {
+    if (group.length < 2) continue;
+
+    const scored = await Promise.all(
+      group.map(async (t) => {
+        const [cats, parts, games] = await Promise.all([
+          db.categories.where('tournamentId').equals(t.id).filter((c) => !c.deletedAt).count(),
+          db.participants.where('tournamentId').equals(t.id).filter((p) => !p.deletedAt).count(),
+          db.games.where('tournamentId').equals(t.id).filter((g) => !g.deletedAt).count(),
+        ]);
+        return { t, weight: cats + parts + games };
+      }),
+    );
+
+    const keepers = scored.filter((s) => s.weight > 0);
+    const empties = scored.filter((s) => s.weight === 0);
+    if (empties.length === 0) continue;
+
+    // Only remove empty shells when at least one non-empty twin exists,
+    // or when there are multiple empties (keep the newest empty).
+    const toRemove =
+      keepers.length > 0
+        ? empties
+        : empties
+            .slice()
+            .sort((a, b) => b.t.updatedAt.localeCompare(a.t.updatedAt))
+            .slice(1);
+
+    for (const { t } of toRemove) {
+      await db.tournaments.update(t.id, {
+        deletedAt: now,
+        updatedAt: now,
+        dirty: 1,
+      });
+    }
+  }
 }
