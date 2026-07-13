@@ -9,6 +9,18 @@ export default defineConfig({
   build: {
     // Use esbuild instead of terser so the build works in restricted envs
     minify: 'esbuild',
+    rollupOptions: {
+      output: {
+        // pdf.js worker must not ship as .mjs — many proxies/nginx map that to octet-stream
+        assetFileNames(assetInfo) {
+          const name = assetInfo.names?.[0] ?? assetInfo.name ?? '';
+          if (name.includes('pdf.worker')) {
+            return 'assets/pdf.worker-[hash].js';
+          }
+          return 'assets/[name]-[hash][extname]';
+        },
+      },
+    },
   },
   plugins: [
     react(),

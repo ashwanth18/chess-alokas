@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { CertificateField, CertificateRow } from '@chess-alokas/certificates';
 
-// Vite-friendly worker
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// Emit as .js (see vite.config) so nginx MIME is always application/javascript
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface CertificateDesignerCanvasProps {
   templateBytes: Uint8Array;
