@@ -1,5 +1,7 @@
 appId: com.chessalokas.desktop
 productName: Chess Alokas
+# Scoped npm name (@chess-alokas/desktop) is unsafe as a binary name; set explicitly.
+executableName: Chess-Alokas
 copyright: Copyright © Chess Alokas
 directories:
   output: release
@@ -35,6 +37,11 @@ linux:
       arch:
         - x64
   category: Office
+  executableName: Chess-Alokas
+  syncDesktopName: true
+  desktop:
+    Name: Chess Alokas
+    StartupWMClass: Chess-Alokas
   artifactName: Chess-Alokas-${os}-${arch}.${ext}
 mac:
   target:
