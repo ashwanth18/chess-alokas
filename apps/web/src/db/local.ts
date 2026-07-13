@@ -15,6 +15,8 @@ export interface LocalTournament {
   prizePlaces?: number;
   /** overall | per_category — winners certificate scope */
   awardScope?: 'overall' | 'per_category';
+  /** Supabase Auth user id (manager) */
+  ownerId?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;
@@ -116,9 +118,9 @@ export class ChessDb extends Dexie {
       games: 'id, tournamentId, categoryId, round, dirty',
       meta: 'key',
     });
-    // v4: participant email + local certificate templates + awardScope
-    this.version(4).stores({
-      tournaments: 'id, updatedAt, dirty',
+    // v5: ownerId on tournaments for multi-tenant sync
+    this.version(5).stores({
+      tournaments: 'id, ownerId, updatedAt, dirty',
       categories: 'id, tournamentId, updatedAt, dirty',
       participants: 'id, tournamentId, updatedAt, dirty',
       games: 'id, tournamentId, categoryId, round, dirty',

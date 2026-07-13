@@ -28,10 +28,11 @@ export interface SyncPullResult {
 
 export interface Store {
   // Tournaments
-  listTournaments(): Promise<Tournament[]>;
+  listTournaments(ownerId?: string | null): Promise<Tournament[]>;
   getTournament(id: string): Promise<Tournament | null>;
   createTournament(t: Tournament): Promise<Tournament>;
   updateTournament(id: string, patch: Partial<Omit<Tournament, 'id'>>): Promise<Tournament | null>;
+  isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean>;
 
   // Categories
   listCategories(tournamentId: string, includeDeleted?: boolean): Promise<Category[]>;
@@ -54,8 +55,8 @@ export interface Store {
   softDeleteGamesForRound(tournamentId: string, round: number, categoryId: string): Promise<void>;
 
   // Sync
-  pullSince(since: string): Promise<SyncPullResult>;
-  pushSync(items: SyncPushItem[]): Promise<void>;
+  pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult>;
+  pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,12 +71,19 @@ export class MemoryStore implements Store {
 
   // ---- Tournaments ----
 
-  async listTournaments(): Promise<Tournament[]> {
-    return [...this.tournaments.values()].filter((t) => !t.deletedAt);
+  async listTournaments(ownerId?: string | null): Promise<Tournament[]> {
+    return [...this.tournaments.values()].filter(
+      (t) => !t.deletedAt && (!ownerId || t.ownerId === ownerId),
+    );
   }
 
   async getTournament(id: string): Promise<Tournament | null> {
     return this.tournaments.get(id) ?? null;
+  }
+
+  async isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean> {
+    const t = this.tournaments.get(tournamentId);
+    return Boolean(t && !t.deletedAt && t.ownerId === ownerId);
   }
 
   async createTournament(t: Tournament): Promise<Tournament> {
@@ -209,17 +217,44 @@ export class MemoryStore implements Store {
 
   // ---- Sync ----
 
-  async pullSince(since: string): Promise<SyncPullResult> {
+  async pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult> {
+    const tournaments = [...this.tournaments.values()].filter(
+      (t) => t.updatedAt > since && (!ownerId || t.ownerId === ownerId),
+    );
+    const ownedIds = ownerId
+      ? new Set(
+          [...this.tournaments.values()]
+            .filter((t) => t.ownerId === ownerId)
+            .map((t) => t.id),
+        )
+      : null;
     return {
-      tournaments: [...this.tournaments.values()].filter((t) => t.updatedAt > since),
-      categories: [...this.categories.values()].filter((c) => c.updatedAt > since),
-      participants: [...this.participants.values()].filter((p) => p.updatedAt > since),
-      games: [...this.games.values()].filter((g) => g.updatedAt > since),
+      tournaments,
+      categories: [...this.categories.values()].filter(
+        (c) => c.updatedAt > since && (!ownedIds || ownedIds.has(c.tournamentId)),
+      ),
+      participants: [...this.participants.values()].filter(
+        (p) => p.updatedAt > since && (!ownedIds || ownedIds.has(p.tournamentId)),
+      ),
+      games: [...this.games.values()].filter(
+        (g) => g.updatedAt > since && (!ownedIds || ownedIds.has(g.tournamentId)),
+      ),
     };
   }
 
-  async pushSync(items: SyncPushItem[]): Promise<void> {
+  async pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void> {
     for (const item of items) {
+      if (item.entity === 'tournament' && ownerId) {
+        item.payload = { ...item.payload, ownerId };
+      }
+      if (item.entity !== 'tournament' && ownerId) {
+        const tid = String(item.payload['tournamentId'] ?? '');
+        const owned = await this.isTournamentOwnedBy(tid, ownerId);
+        const existing = this.tournaments.get(tid);
+        if (!owned && existing) {
+          throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
+        }
+      }
       this.applySyncItem(item);
     }
   }
@@ -249,6 +284,7 @@ export class MemoryStore implements Store {
         mixCategories: Boolean(payload['mixCategories'] ?? false),
         prizePlaces: Number(payload['prizePlaces'] ?? 3),
         awardScope: (payload['awardScope'] as Tournament['awardScope']) ?? 'per_category',
+        ownerId: (payload['ownerId'] as string | null | undefined) ?? null,
         clientId: (payload['clientId'] as string | undefined) ?? undefined,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
@@ -318,6 +354,7 @@ interface TournamentRow {
   mix_categories: boolean | null;
   prize_places: number | null;
   award_scope: string | null;
+  owner_id: string | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
@@ -385,6 +422,7 @@ function rowToTournament(row: TournamentRow): Tournament {
     mixCategories: row.mix_categories ?? false,
     prizePlaces: row.prize_places ?? 3,
     awardScope: (row.award_scope as Tournament['awardScope']) ?? 'per_category',
+    ownerId: row.owner_id ?? null,
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
@@ -456,10 +494,16 @@ export class PostgresStore implements Store {
 
   // ---- Tournaments ----
 
-  async listTournaments(): Promise<Tournament[]> {
-    const rows = await this.sql<TournamentRow[]>`
-      SELECT * FROM tournaments WHERE deleted_at IS NULL ORDER BY updated_at DESC
-    `;
+  async listTournaments(ownerId?: string | null): Promise<Tournament[]> {
+    const rows = ownerId
+      ? await this.sql<TournamentRow[]>`
+          SELECT * FROM tournaments
+          WHERE deleted_at IS NULL AND owner_id = ${ownerId}
+          ORDER BY updated_at DESC
+        `
+      : await this.sql<TournamentRow[]>`
+          SELECT * FROM tournaments WHERE deleted_at IS NULL ORDER BY updated_at DESC
+        `;
     return rows.map(rowToTournament);
   }
 
@@ -469,11 +513,21 @@ export class PostgresStore implements Store {
     return row ? rowToTournament(row) : null;
   }
 
+  async isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean> {
+    const rows = await this.sql<{ ok: boolean }[]>`
+      SELECT true AS ok FROM tournaments
+      WHERE id = ${tournamentId} AND owner_id = ${ownerId} AND deleted_at IS NULL
+      LIMIT 1
+    `;
+    return Boolean(rows[0]);
+  }
+
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
-              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'}, ${t.clientId ?? null},
+              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
+              ${t.ownerId ?? null}, ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
     `;
@@ -494,6 +548,7 @@ export class PostgresStore implements Store {
         mix_categories = ${m.mixCategories ?? false},
         prize_places = ${m.prizePlaces ?? 3},
         award_scope = ${m.awardScope ?? 'per_category'},
+        owner_id = ${m.ownerId ?? null},
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
         deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
@@ -690,7 +745,36 @@ export class PostgresStore implements Store {
 
   // ---- Sync ----
 
-  async pullSince(since: string): Promise<SyncPullResult> {
+  async pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult> {
+    if (ownerId) {
+      const [tournaments, categories, participants, games] = await Promise.all([
+        this.sql<TournamentRow[]>`
+          SELECT * FROM tournaments
+          WHERE updated_at > ${since} AND owner_id = ${ownerId}
+        `,
+        this.sql<CategoryRow[]>`
+          SELECT c.* FROM categories c
+          INNER JOIN tournaments t ON t.id = c.tournament_id
+          WHERE c.updated_at > ${since} AND t.owner_id = ${ownerId}
+        `,
+        this.sql<ParticipantRow[]>`
+          SELECT p.* FROM participants p
+          INNER JOIN tournaments t ON t.id = p.tournament_id
+          WHERE p.updated_at > ${since} AND t.owner_id = ${ownerId}
+        `,
+        this.sql<GameRow[]>`
+          SELECT g.* FROM games g
+          INNER JOIN tournaments t ON t.id = g.tournament_id
+          WHERE g.updated_at > ${since} AND t.owner_id = ${ownerId}
+        `,
+      ]);
+      return {
+        tournaments: tournaments.map(rowToTournament),
+        categories: categories.map(rowToCategory),
+        participants: participants.map(rowToParticipant),
+        games: games.map(rowToGame),
+      };
+    }
     const [tournaments, categories, participants, games] = await Promise.all([
       this.sql<TournamentRow[]>`SELECT * FROM tournaments WHERE updated_at > ${since}`,
       this.sql<CategoryRow[]>`SELECT * FROM categories WHERE updated_at > ${since}`,
@@ -705,12 +789,23 @@ export class PostgresStore implements Store {
     };
   }
 
-  async pushSync(items: SyncPushItem[]): Promise<void> {
+  async pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void> {
     const order = { tournament: 0, category: 1, participant: 2, game: 3 } as const;
     const sorted = [...items].sort(
       (a, b) => (order[a.entity] ?? 9) - (order[b.entity] ?? 9),
     );
     for (const item of sorted) {
+      if (ownerId && item.entity === 'tournament') {
+        item.payload = { ...item.payload, ownerId };
+      }
+      if (ownerId && item.entity !== 'tournament') {
+        const tid = String(item.payload['tournamentId'] ?? '');
+        const owned = await this.isTournamentOwnedBy(tid, ownerId);
+        const existing = await this.getTournament(tid);
+        if (existing && !owned) {
+          throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
+        }
+      }
       await this.applySyncItem(item);
     }
   }
@@ -732,13 +827,14 @@ export class PostgresStore implements Store {
 
     if (entity === 'tournament') {
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
                 ${Boolean(p['mixCategories'] ?? false)},
                 ${Number(p['prizePlaces'] ?? 3)},
                 ${String(p['awardScope'] ?? 'per_category')},
+                ${(p['ownerId'] as string) ?? null},
                 ${(p['clientId'] as string) ?? null}, ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, date = EXCLUDED.date, style = EXCLUDED.style,
@@ -746,6 +842,7 @@ export class PostgresStore implements Store {
           current_round = EXCLUDED.current_round, mix_categories = EXCLUDED.mix_categories,
           prize_places = EXCLUDED.prize_places,
           award_scope = EXCLUDED.award_scope,
+          owner_id = COALESCE(EXCLUDED.owner_id, tournaments.owner_id),
           client_id = EXCLUDED.client_id,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > tournaments.updated_at

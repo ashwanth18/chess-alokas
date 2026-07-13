@@ -6,6 +6,7 @@ import {
   type CertificateIssueStore,
 } from '../certificates/store.js';
 import { readCertificatePdf, saveCertificatePdf } from '../certificates/storage.js';
+import { requireAuth } from '../auth.js';
 
 const IssueItemSchema = z.object({
   participantId: z.string().uuid().nullable().optional(),
@@ -89,11 +90,18 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
 
   app.post<{ Params: { id: string }; Body: unknown }>(
     '/tournaments/:id/certificates/issue',
+    { preHandler: requireAuth },
     async (request, reply) => {
       const tournamentId = request.params.id;
       const tournament = await tournamentStore.getTournament(tournamentId);
       if (!tournament || tournament.deletedAt) {
         return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      if (
+        request.userId &&
+        !(await tournamentStore.isTournamentOwnedBy(tournamentId, request.userId))
+      ) {
+        return reply.code(403).send({ error: 'Forbidden' });
       }
 
       const parsed = IssueBodySchema.safeParse(request.body);
@@ -134,20 +142,37 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
     },
   );
 
-  app.get<{ Params: { id: string } }>('/tournaments/:id/certificates', async (request, reply) => {
-    const tournament = await tournamentStore.getTournament(request.params.id);
-    if (!tournament || tournament.deletedAt) {
-      return reply.code(404).send({ error: 'Tournament not found' });
-    }
-    const issues = await certStore.listIssues(request.params.id);
-    return { issues };
-  });
+  app.get<{ Params: { id: string } }>(
+    '/tournaments/:id/certificates',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const tournament = await tournamentStore.getTournament(request.params.id);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      if (
+        request.userId &&
+        !(await tournamentStore.isTournamentOwnedBy(request.params.id, request.userId))
+      ) {
+        return reply.code(403).send({ error: 'Forbidden' });
+      }
+      const issues = await certStore.listIssues(request.params.id);
+      return { issues };
+    },
+  );
 
   app.get<{ Params: { issueId: string } }>(
     '/certificates/:issueId/download',
+    { preHandler: requireAuth },
     async (request, reply) => {
       const issue = await certStore.getIssue(request.params.issueId);
       if (!issue) return reply.code(404).send({ error: 'Certificate not found' });
+      if (
+        request.userId &&
+        !(await tournamentStore.isTournamentOwnedBy(issue.tournamentId, request.userId))
+      ) {
+        return reply.code(403).send({ error: 'Forbidden' });
+      }
       const pdf = await readCertificatePdf(issue.storagePath);
       if (!pdf) return reply.code(404).send({ error: 'PDF file missing' });
       return reply
@@ -162,11 +187,18 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
 
   app.post<{ Params: { id: string }; Body: unknown }>(
     '/tournaments/:id/certificates/email',
+    { preHandler: requireAuth },
     async (request, reply) => {
       const tournamentId = request.params.id;
       const tournament = await tournamentStore.getTournament(tournamentId);
       if (!tournament || tournament.deletedAt) {
         return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      if (
+        request.userId &&
+        !(await tournamentStore.isTournamentOwnedBy(tournamentId, request.userId))
+      ) {
+        return reply.code(403).send({ error: 'Forbidden' });
       }
 
       const parsed = EmailBodySchema.safeParse(request.body ?? {});

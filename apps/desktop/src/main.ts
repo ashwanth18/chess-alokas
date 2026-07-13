@@ -6,18 +6,22 @@ import { startApiSidecar, type SidecarHandle } from './sidecar.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Friendly userData folder (avoid scoped package path like @chess-alokas/desktop)
 app.setName('Chess Alokas');
 app.setPath('userData', path.join(app.getPath('appData'), 'Chess Alokas'));
 
 log.initialize();
 log.info('Chess Alokas desktop starting', { packaged: app.isPackaged });
 
+const CLOUD_API_URL =
+  process.env['CHESS_ALOKAS_API_URL'] ?? 'https://chess-manager.alokas.com/api';
+
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarHandle | null = null;
-let apiBaseUrl = 'http://127.0.0.1:3001';
+let apiBaseUrl = CLOUD_API_URL;
 
 const isDev = !app.isPackaged && process.env['ELECTRON_DEV'] !== '0';
+/** Packaged builds use the cloud API by default (no secrets on the device). */
+const useLocalSidecar = isDev || process.env['DESKTOP_LOCAL_API'] === '1';
 
 function registerIpc() {
   ipcMain.on('desktop:get-api-base-url', (event) => {
@@ -73,13 +77,19 @@ async function createWindow() {
 async function boot() {
   registerIpc();
 
-  try {
-    sidecar = await startApiSidecar();
-    apiBaseUrl = sidecar.baseUrl;
-    log.info('API sidecar ready at', apiBaseUrl);
-  } catch (err) {
-    log.error('Failed to start API sidecar', err);
-    // Still open UI — Dexie offline mode works; sync/certs need API
+  if (useLocalSidecar) {
+    try {
+      sidecar = await startApiSidecar();
+      apiBaseUrl = sidecar.baseUrl;
+      log.info('API sidecar ready at', apiBaseUrl);
+    } catch (err) {
+      log.error('Failed to start API sidecar', err);
+      apiBaseUrl = CLOUD_API_URL;
+      log.info('Falling back to cloud API', apiBaseUrl);
+    }
+  } else {
+    apiBaseUrl = CLOUD_API_URL;
+    log.info('Using cloud API', apiBaseUrl);
   }
 
   await createWindow();

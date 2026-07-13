@@ -10,6 +10,7 @@ import {
 import type { EnginePlayer, PastGame } from '@chess-alokas/pairing-engine';
 import type { Participant, Game, Category } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
+import { requireAuth } from '../auth.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -17,6 +18,7 @@ interface PluginOptions extends FastifyPluginOptions {
 
 export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
   const { store } = opts;
+  app.addHook('preHandler', requireAuth);
 
   // -------------------------------------------------------------------------
   // POST /tournaments/:id/rounds/:round/pair

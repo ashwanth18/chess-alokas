@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, Link } from 'react-router-dom';
 import { checkOnline } from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { getLastSyncAt } from '../db/local';
+import { useAuth } from '../auth/AuthContext';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -11,6 +12,7 @@ function formatSyncTime(iso: string | null): string {
 }
 
 export default function Layout() {
+  const auth = useAuth();
   const [online, setOnline] = useState(navigator.onLine);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
@@ -27,7 +29,6 @@ export default function Layout() {
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
 
-    // Poll actual API reachability
     const interval = setInterval(async () => {
       const reachable = await checkOnline();
       setOnline(reachable);
@@ -41,7 +42,7 @@ export default function Layout() {
   }, []);
 
   const handleSync = useCallback(async () => {
-    if (!online || syncing) return;
+    if (!online || syncing || !auth.user) return;
     setSyncing(true);
     setSyncResult(null);
     try {
@@ -58,11 +59,10 @@ export default function Layout() {
     } finally {
       setSyncing(false);
     }
-  }, [online, syncing]);
+  }, [online, syncing, auth.user]);
 
-  // Desktop: auto-sync once when the local sidecar becomes reachable
   useEffect(() => {
-    if (!window.desktop?.isDesktop) return;
+    if (!window.desktop?.isDesktop || !auth.user) return;
     let cancelled = false;
     void (async () => {
       const reachable = await checkOnline();
@@ -81,7 +81,9 @@ export default function Layout() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [auth.user]);
+
+  const label = auth.displayName || auth.user?.email?.split('@')[0] || 'Account';
 
   return (
     <div className="app-shell">
@@ -112,21 +114,35 @@ export default function Layout() {
           <NavLink to="/simulator" onClick={() => setMenuOpen(false)}>
             Simulator
           </NavLink>
+          <NavLink to="/account" onClick={() => setMenuOpen(false)}>
+            Account
+          </NavLink>
+          <NavLink to="/settings" onClick={() => setMenuOpen(false)}>
+            Settings
+          </NavLink>
         </nav>
 
         <div className="sync-bar">
+          <Link to="/account" className="user-chip" title={auth.user?.email ?? ''}>
+            {label}
+          </Link>
           <span className={`status-dot ${online ? 'online' : 'offline'}`} />
           <span className="status-label">{online ? 'Online' : 'Offline'}</span>
-          {lastSync && (
-            <span className="sync-time">Synced {formatSyncTime(lastSync)}</span>
-          )}
+          {lastSync && <span className="sync-time">Synced {formatSyncTime(lastSync)}</span>}
           {syncResult && <span className="sync-result">{syncResult}</span>}
           <button
             className="btn btn-sm btn-sync"
             onClick={handleSync}
-            disabled={!online || syncing}
+            disabled={!online || syncing || !auth.user}
           >
             {syncing ? 'Syncing…' : 'Sync'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => void auth.signOut('local')}
+          >
+            Sign out
           </button>
         </div>
       </header>

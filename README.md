@@ -11,9 +11,15 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - **Tournament styles** — Swiss implemented; Round Robin selectable as “coming soon”
 - **CSV / Excel import** — map columns, auto-assign categories
 - **Offline-first** — Dexie (IndexedDB) local store; **Sync online** push/pull (last-write-wins)
+- **Auth** — email/password, OTP/magic link, Google & GitHub; per-manager tournament ownership
 - **Certificates** — PDF designer, print pack, Issue digital → Supabase Storage (or local disk)
-- **Desktop app** — Electron shell with local Fastify sidecar (same UI + API as web)
+- **Desktop app** — Electron shell; production builds use cloud API (no user secrets)
 - **Simulator** — generate players, auto-play rounds, visualize boards/standings/diagnostics
+
+## Production host
+
+- Web + API: **`https://chess-manager.alokas.com`** (Dokploy) — see [`deploy/DOKPLOY.md`](deploy/DOKPLOY.md)
+- Agent handoff: [`docs/AGENT_HANDOFF.md`](docs/AGENT_HANDOFF.md)
 
 ## Monorepo
 

@@ -89,6 +89,8 @@ export const TournamentSchema = z.object({
   prizePlaces: z.number().int().min(1).max(20).default(3),
   /** Whether winners certificates use overall standings or each category. */
   awardScope: AwardScopeSchema.default('per_category'),
+  /** Supabase Auth user id that owns this tournament (manager). */
+  ownerId: z.string().uuid().nullable().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),

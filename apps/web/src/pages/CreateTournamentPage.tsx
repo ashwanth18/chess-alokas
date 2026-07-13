@@ -5,6 +5,7 @@ import { PRESET_FILTERS } from '@chess-alokas/shared';
 import type { FilterGroup, FilterOp, TournamentStyle } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import { apiCreateTournament } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import {
   DEFAULT_PRIZE_PLACES,
   MAX_PRIZE_PLACES,
@@ -50,6 +51,7 @@ function newCategory(): CategoryDraft {
 
 export default function CreateTournamentPage() {
   const navigate = useNavigate();
+  const auth = useAuth();
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
   const [style, setStyle] = useState<TournamentStyle>('swiss');
@@ -157,6 +159,7 @@ export default function CreateTournamentPage() {
         mixCategories,
         prizePlaces: clampPrizePlaces(prizePlaces),
         awardScope,
+        ownerId: auth.user?.id ?? null,
         updatedAt: now,
         dirty: 1,
       });

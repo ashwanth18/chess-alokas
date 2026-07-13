@@ -5,13 +5,21 @@ import type {
   Game,
   SyncPushRequest,
 } from '@chess-alokas/shared';
+import { supabase } from '../lib/supabase';
 
-function resolveApiBaseUrl(): string {
+export function resolveApiBaseUrl(): string {
   if (typeof window !== 'undefined' && window.desktop?.getApiBaseUrl) {
     const fromDesktop = window.desktop.getApiBaseUrl();
     if (fromDesktop) return fromDesktop;
   }
   return import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function req<T>(
@@ -26,11 +34,13 @@ async function req<T>(
       : 8_000;
   const BASE_URL = resolveApiBaseUrl();
   try {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(`${BASE_URL}${path}`, {
       signal: AbortSignal.timeout(timeoutMs ?? defaultTimeout),
       ...fetchOptions,
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
         ...(fetchOptions.headers ?? {}),
       },
     });
@@ -40,9 +50,12 @@ async function req<T>(
         const body = (await res.json()) as { message?: string; error?: string };
         error = body.message ?? body.error ?? error;
       } catch {
-        /* ignore non-JSON error bodies */
+        /* ignore */
       }
       return { data: null, ok: false, error };
+    }
+    if (res.status === 204) {
+      return { data: null as T, ok: true };
     }
     const data = (await res.json()) as T;
     return { data, ok: true };

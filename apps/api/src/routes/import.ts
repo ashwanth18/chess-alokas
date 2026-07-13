@@ -3,6 +3,7 @@ import { ColumnMappingSchema, assignCategories } from '@chess-alokas/shared';
 import type { ParticipantFields } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { parseParticipantsFile } from '../import.js';
+import { requireAuth } from '../auth.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -10,6 +11,7 @@ interface PluginOptions extends FastifyPluginOptions {
 
 export const importPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
   const { store } = opts;
+  app.addHook('preHandler', requireAuth);
 
   /**
    * POST /tournaments/:id/import

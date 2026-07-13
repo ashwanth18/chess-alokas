@@ -1,0 +1,22 @@
+# Chess Alokas API — production image for Dokploy
+FROM node:20-bookworm-slim AS build
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/shared/package.json packages/shared/
+COPY packages/pairing-engine/package.json packages/pairing-engine/
+COPY packages/certificates/package.json packages/certificates/
+RUN pnpm install --frozen-lockfile
+COPY packages ./packages
+COPY apps/api ./apps/api
+RUN pnpm --filter @chess-alokas/api run build:desktop
+
+FROM node:20-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=3001
+COPY --from=build /app/apps/api/desktop-bundle ./
+EXPOSE 3001
+CMD ["node", "index.js"]

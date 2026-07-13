@@ -5,25 +5,35 @@ import {
   FilterGroupSchema,
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
+import { requireAuth } from '../auth.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
 }
 
+async function assertOwner(
+  store: Store,
+  tournamentId: string,
+  userId: string | undefined,
+  reply: { code: (n: number) => { send: (b: unknown) => unknown } },
+): Promise<boolean> {
+  if (!userId) return true;
+  const ok = await store.isTournamentOwnedBy(tournamentId, userId);
+  if (!ok) {
+    reply.code(403).send({ error: 'Forbidden' });
+    return false;
+  }
+  return true;
+}
+
 export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
   const { store } = opts;
 
-  // -------------------------------------------------------------------------
-  // GET /tournaments
-  // -------------------------------------------------------------------------
-  app.get('/tournaments', async () => {
-    return store.listTournaments();
+  app.get('/tournaments', { preHandler: requireAuth }, async (request) => {
+    return store.listTournaments(request.userId ?? null);
   });
 
-  // -------------------------------------------------------------------------
-  // POST /tournaments
-  // -------------------------------------------------------------------------
-  app.post<{ Body: unknown }>('/tournaments', async (request, reply) => {
+  app.post<{ Body: unknown }>('/tournaments', { preHandler: requireAuth }, async (request, reply) => {
     const parsed = CreateTournamentInputSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
@@ -43,6 +53,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       mixCategories: input.mixCategories ?? false,
       prizePlaces: input.prizePlaces ?? 3,
       awardScope: input.awardScope ?? 'per_category',
+      ownerId: request.userId ?? null,
       updatedAt: now,
     });
 
@@ -63,24 +74,23 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     return reply.code(201).send({ ...tournament, categories });
   });
 
-  // -------------------------------------------------------------------------
-  // GET /tournaments/:id
-  // -------------------------------------------------------------------------
-  app.get<{ Params: { id: string } }>('/tournaments/:id', async (request, reply) => {
-    const { id } = request.params;
-    const [tournament, categories, participants, games] = await Promise.all([
-      store.getTournament(id),
-      store.listCategories(id),
-      store.listParticipants(id),
-      store.listGames(id),
-    ]);
-    if (!tournament) return reply.code(404).send({ error: 'Tournament not found' });
-    return { ...tournament, categories, participants, games };
-  });
+  app.get<{ Params: { id: string } }>(
+    '/tournaments/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const [tournament, categories, participants, games] = await Promise.all([
+        store.getTournament(id),
+        store.listCategories(id),
+        store.listParticipants(id),
+        store.listGames(id),
+      ]);
+      if (!tournament) return reply.code(404).send({ error: 'Tournament not found' });
+      return { ...tournament, categories, participants, games };
+    },
+  );
 
-  // -------------------------------------------------------------------------
-  // PATCH /tournaments/:id
-  // -------------------------------------------------------------------------
   const PatchTournamentSchema = z.object({
     name: z.string().min(1).optional(),
     date: z.string().nullable().optional(),
@@ -96,8 +106,10 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
 
   app.patch<{ Params: { id: string }; Body: unknown }>(
     '/tournaments/:id',
+    { preHandler: requireAuth },
     async (request, reply) => {
       const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
       const parsed = PatchTournamentSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
@@ -111,20 +123,19 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     },
   );
 
-  // -------------------------------------------------------------------------
-  // DELETE /tournaments/:id  (soft delete)
-  // -------------------------------------------------------------------------
-  app.delete<{ Params: { id: string } }>('/tournaments/:id', async (request, reply) => {
-    const { id } = request.params;
-    const now = new Date().toISOString();
-    const updated = await store.updateTournament(id, { deletedAt: now, updatedAt: now });
-    if (!updated) return reply.code(404).send({ error: 'Tournament not found' });
-    return reply.code(204).send();
-  });
+  app.delete<{ Params: { id: string } }>(
+    '/tournaments/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const now = new Date().toISOString();
+      const updated = await store.updateTournament(id, { deletedAt: now, updatedAt: now });
+      if (!updated) return reply.code(404).send({ error: 'Tournament not found' });
+      return reply.code(204).send();
+    },
+  );
 
-  // -------------------------------------------------------------------------
-  // POST /tournaments/:id/categories
-  // -------------------------------------------------------------------------
   const CreateCategorySchema = z.object({
     name: z.string().min(1),
     filter: FilterGroupSchema,
@@ -134,8 +145,10 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
 
   app.post<{ Params: { id: string }; Body: unknown }>(
     '/tournaments/:id/categories',
+    { preHandler: requireAuth },
     async (request, reply) => {
       const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
       const tournament = await store.getTournament(id);
       if (!tournament || tournament.deletedAt) {
         return reply.code(404).send({ error: 'Tournament not found' });
@@ -159,9 +172,6 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     },
   );
 
-  // -------------------------------------------------------------------------
-  // PATCH /categories/:id
-  // -------------------------------------------------------------------------
   const PatchCategorySchema = z.object({
     name: z.string().min(1).optional(),
     filter: FilterGroupSchema.optional(),
@@ -171,8 +181,12 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
 
   app.patch<{ Params: { id: string }; Body: unknown }>(
     '/categories/:id',
+    { preHandler: requireAuth },
     async (request, reply) => {
       const { id } = request.params;
+      const existing = await store.getCategory(id);
+      if (!existing) return reply.code(404).send({ error: 'Category not found' });
+      if (!(await assertOwner(store, existing.tournamentId, request.userId, reply))) return;
       const parsed = PatchCategorySchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
@@ -186,14 +200,18 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     },
   );
 
-  // -------------------------------------------------------------------------
-  // DELETE /categories/:id  (soft delete)
-  // -------------------------------------------------------------------------
-  app.delete<{ Params: { id: string } }>('/categories/:id', async (request, reply) => {
-    const { id } = request.params;
-    const now = new Date().toISOString();
-    const updated = await store.updateCategory(id, { deletedAt: now, updatedAt: now });
-    if (!updated) return reply.code(404).send({ error: 'Category not found' });
-    return reply.code(204).send();
-  });
+  app.delete<{ Params: { id: string } }>(
+    '/categories/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      const existing = await store.getCategory(id);
+      if (!existing) return reply.code(404).send({ error: 'Category not found' });
+      if (!(await assertOwner(store, existing.tournamentId, request.userId, reply))) return;
+      const now = new Date().toISOString();
+      const updated = await store.updateCategory(id, { deletedAt: now, updatedAt: now });
+      if (!updated) return reply.code(404).send({ error: 'Category not found' });
+      return reply.code(204).send();
+    },
+  );
 };

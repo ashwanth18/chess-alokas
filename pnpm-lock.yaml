@@ -93,6 +93,9 @@ importers:
       '@chess-alokas/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@supabase/supabase-js':
+        specifier: ^2.110.2
+        version: 2.110.2
       dexie:
         specifier: ^4.0.11
         version: 4.4.4

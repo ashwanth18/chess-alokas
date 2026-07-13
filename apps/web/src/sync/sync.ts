@@ -90,6 +90,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
         mixCategories: remote.mixCategories ?? false,
         prizePlaces: remote.prizePlaces ?? 3,
         awardScope: remote.awardScope ?? 'per_category',
+        ownerId: remote.ownerId ?? null,
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalTournament);
