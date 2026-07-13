@@ -6,19 +6,32 @@ import type {
   SyncPushRequest,
 } from '@chess-alokas/shared';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+function resolveApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.desktop?.getApiBaseUrl) {
+    const fromDesktop = window.desktop.getApiBaseUrl();
+    if (fromDesktop) return fromDesktop;
+  }
+  return import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+}
 
 async function req<T>(
   path: string,
-  options?: RequestInit,
+  options?: RequestInit & { timeoutMs?: number },
 ): Promise<{ data: T; ok: true } | { data: null; ok: false; error: string }> {
+  const { timeoutMs, ...fetchOptions } = options ?? {};
+  const defaultTimeout = path.startsWith('/sync')
+    ? 60_000
+    : path.includes('/certificates/')
+      ? 120_000
+      : 8_000;
+  const BASE_URL = resolveApiBaseUrl();
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
-      signal: AbortSignal.timeout(path.startsWith('/sync') ? 60_000 : 8_000),
-      ...options,
+      signal: AbortSignal.timeout(timeoutMs ?? defaultTimeout),
+      ...fetchOptions,
       headers: {
         'Content-Type': 'application/json',
-        ...(options?.headers ?? {}),
+        ...(fetchOptions.headers ?? {}),
       },
     });
     if (!res.ok) {
@@ -125,4 +138,73 @@ export async function apiSyncPush(body: SyncPushRequest) {
 
 export async function apiSyncPull(since: string) {
   return req<SyncPullResponse>(`/sync/pull?since=${encodeURIComponent(since)}`);
+}
+
+// ── Certificates ─────────────────────────────────────────────────────────────
+type CertificateIssueItem = {
+  participantId?: string | null;
+  type: 'participation' | 'winner';
+  rank?: number | null;
+  categoryId?: string | null;
+  recipientEmail?: string | null;
+  recipientName: string;
+  pdfBase64: string;
+};
+
+/** Post certificates in small batches so PDF payloads stay under body limits. */
+export async function apiIssueCertificates(
+  tournamentId: string,
+  items: CertificateIssueItem[],
+  batchSize = 5,
+) {
+  let issued = 0;
+  let storageBackend: 'supabase' | 'local' | undefined;
+  const issues: unknown[] = [];
+
+  for (let i = 0; i < items.length; i += batchSize) {
+    const chunk = items.slice(i, i + batchSize);
+    const res = await req<{
+      issued: number;
+      issues: unknown[];
+      storageBackend?: 'supabase' | 'local';
+    }>(`/tournaments/${tournamentId}/certificates/issue`, {
+      method: 'POST',
+      body: JSON.stringify({ items: chunk }),
+    });
+    if (!res.ok) {
+      return {
+        data: null,
+        ok: false as const,
+        error:
+          i === 0
+            ? res.error
+            : `${res.error} (stored ${issued} of ${items.length} before failure)`,
+      };
+    }
+    issued += res.data.issued;
+    issues.push(...res.data.issues);
+    storageBackend = res.data.storageBackend ?? storageBackend;
+  }
+
+  return {
+    data: { issued, issues, storageBackend },
+    ok: true as const,
+  };
+}
+
+export async function apiListCertificates(tournamentId: string) {
+  return req<{ issues: unknown[] }>(`/tournaments/${tournamentId}/certificates`);
+}
+
+export async function apiEmailCertificates(
+  tournamentId: string,
+  body: { issueIds?: string[]; allPending?: boolean },
+) {
+  return req<{ sent: number; failed: number; results: unknown[] }>(
+    `/tournaments/${tournamentId}/certificates/email`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
 }

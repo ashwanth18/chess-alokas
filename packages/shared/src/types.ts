@@ -58,6 +58,9 @@ export const ParticipantSchema = z.object({
   gender: z.string().nullable().optional(),
   rating: z.number().int().nullable().optional(),
   club: z.string().nullable().optional(),
+  email: z
+    .union([z.string().email(), z.literal(''), z.null()])
+    .optional(),
   customFields: z.record(z.unknown()).default({}),
   categoryIds: z.array(z.string().uuid()).default([]),
   seed: z.number().int().optional(),
@@ -65,6 +68,9 @@ export const ParticipantSchema = z.object({
   deletedAt: z.string().datetime().nullable().optional(),
 });
 export type Participant = z.infer<typeof ParticipantSchema>;
+
+export const AwardScopeSchema = z.enum(['overall', 'per_category']);
+export type AwardScope = z.infer<typeof AwardScopeSchema>;
 
 export const TournamentSchema = z.object({
   id: z.string().uuid(),
@@ -79,8 +85,10 @@ export const TournamentSchema = z.object({
    * standings are per category. When true, everyone shares one pool.
    */
   mixCategories: z.boolean().default(false),
-  /** How many top places count as prize winners (podium styling / future prizes). */
+  /** How many top places count as prize winners (podium / certificates). */
   prizePlaces: z.number().int().min(1).max(20).default(3),
+  /** Whether winners certificates use overall standings or each category. */
+  awardScope: AwardScopeSchema.default('per_category'),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),
@@ -110,6 +118,7 @@ export const CreateTournamentInputSchema = z.object({
   /** Default false: separate pairing + ranking per category. */
   mixCategories: z.boolean().default(false),
   prizePlaces: z.number().int().min(1).max(20).default(3),
+  awardScope: AwardScopeSchema.default('per_category'),
   categories: z
     .array(
       z.object({
@@ -129,8 +138,39 @@ export const ColumnMappingSchema = z.object({
   gender: z.string().optional(),
   rating: z.string().optional(),
   club: z.string().optional(),
+  email: z.string().optional(),
 });
 export type ColumnMapping = z.infer<typeof ColumnMappingSchema>;
+
+export const CertificateIssueTypeSchema = z.enum(['participation', 'winner']);
+export type CertificateIssueType = z.infer<typeof CertificateIssueTypeSchema>;
+
+export const CertificateIssueStatusSchema = z.enum([
+  'pending',
+  'stored',
+  'emailed',
+  'failed',
+]);
+export type CertificateIssueStatus = z.infer<typeof CertificateIssueStatusSchema>;
+
+export const CertificateIssueSchema = z.object({
+  id: z.string().uuid(),
+  tournamentId: z.string().uuid(),
+  participantId: z.string().uuid().nullable().optional(),
+  type: CertificateIssueTypeSchema,
+  rank: z.number().int().positive().nullable().optional(),
+  categoryId: z.string().uuid().nullable().optional(),
+  recipientEmail: z.string().nullable().optional(),
+  recipientName: z.string(),
+  storagePath: z.string(),
+  contentSha256: z.string(),
+  byteSize: z.number().int().nonnegative(),
+  status: CertificateIssueStatusSchema,
+  emailedAt: z.string().datetime().nullable().optional(),
+  error: z.string().nullable().optional(),
+  createdAt: z.string().datetime(),
+});
+export type CertificateIssue = z.infer<typeof CertificateIssueSchema>;
 
 export const SyncPushItemSchema = z.object({
   entity: z.enum(['tournament', 'category', 'participant', 'game']),

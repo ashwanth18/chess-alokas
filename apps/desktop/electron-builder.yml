@@ -1,0 +1,32 @@
+appId: com.chessalokas.desktop
+productName: Chess Alokas
+copyright: Copyright © Chess Alokas
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: ../web/dist
+    to: web
+  - from: ../api/desktop-bundle
+    to: api
+  - from: resources/api.env.example
+    to: api.env.example
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: ${productName}-Setup-${version}-${os}-${arch}.${ext}
+portable:
+  artifactName: ${productName}-Portable-${version}-${os}-${arch}.${ext}
+asar: true

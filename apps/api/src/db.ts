@@ -248,6 +248,7 @@ export class MemoryStore implements Store {
         currentRound: Number(payload['currentRound'] ?? 0),
         mixCategories: Boolean(payload['mixCategories'] ?? false),
         prizePlaces: Number(payload['prizePlaces'] ?? 3),
+        awardScope: (payload['awardScope'] as Tournament['awardScope']) ?? 'per_category',
         clientId: (payload['clientId'] as string | undefined) ?? undefined,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
@@ -275,6 +276,7 @@ export class MemoryStore implements Store {
         gender: (payload['gender'] as string | null | undefined) ?? null,
         rating: payload['rating'] != null ? Number(payload['rating']) : null,
         club: (payload['club'] as string | null | undefined) ?? null,
+        email: (payload['email'] as string | null | undefined) || null,
         customFields: (payload['customFields'] as Record<string, unknown>) ?? {},
         categoryIds: (payload['categoryIds'] as string[]) ?? [],
         seed: payload['seed'] != null ? Number(payload['seed']) : undefined,
@@ -315,6 +317,7 @@ interface TournamentRow {
   current_round: number;
   mix_categories: boolean | null;
   prize_places: number | null;
+  award_scope: string | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
@@ -339,6 +342,7 @@ interface ParticipantRow {
   gender: string | null;
   rating: number | null;
   club: string | null;
+  email: string | null;
   custom_fields: Record<string, unknown>;
   category_ids: string[];
   seed: number | null;
@@ -380,6 +384,7 @@ function rowToTournament(row: TournamentRow): Tournament {
     currentRound: row.current_round,
     mixCategories: row.mix_categories ?? false,
     prizePlaces: row.prize_places ?? 3,
+    awardScope: (row.award_scope as Tournament['awardScope']) ?? 'per_category',
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
@@ -408,6 +413,7 @@ function rowToParticipant(row: ParticipantRow): Participant {
     gender: row.gender ?? undefined,
     rating: row.rating ?? undefined,
     club: row.club ?? undefined,
+    email: row.email ?? undefined,
     customFields: row.custom_fields ?? {},
     categoryIds: row.category_ids ?? [],
     seed: row.seed ?? undefined,
@@ -465,9 +471,9 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
-              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.clientId ?? null},
+              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'}, ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
     `;
@@ -487,6 +493,7 @@ export class PostgresStore implements Store {
         rounds = ${m.rounds}, status = ${m.status}, current_round = ${m.currentRound},
         mix_categories = ${m.mixCategories ?? false},
         prize_places = ${m.prizePlaces ?? 3},
+        award_scope = ${m.awardScope ?? 'per_category'},
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
         deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
@@ -562,10 +569,10 @@ export class PostgresStore implements Store {
   async createParticipant(p: Participant): Promise<Participant> {
     const rows = await this.sql<ParticipantRow[]>`
       INSERT INTO participants
-        (id, tournament_id, name, age, gender, rating, club, custom_fields, category_ids, seed, updated_at, deleted_at)
+        (id, tournament_id, name, age, gender, rating, club, email, custom_fields, category_ids, seed, updated_at, deleted_at)
       VALUES
         (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
-         ${p.rating ?? null}, ${p.club ?? null}, ${this.j(p.customFields)},
+         ${p.rating ?? null}, ${p.club ?? null}, ${p.email ?? null}, ${this.j(p.customFields)},
            ${p.categoryIds}, ${p.seed ?? null}, ${p.updatedAt}, ${p.deletedAt ?? null})
       RETURNING *
     `;
@@ -578,14 +585,14 @@ export class PostgresStore implements Store {
     for (const p of participants) {
       const rows = await this.sql<ParticipantRow[]>`
         INSERT INTO participants
-          (id, tournament_id, name, age, gender, rating, club, custom_fields, category_ids, seed, updated_at, deleted_at)
+          (id, tournament_id, name, age, gender, rating, club, email, custom_fields, category_ids, seed, updated_at, deleted_at)
         VALUES
           (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
-           ${p.rating ?? null}, ${p.club ?? null}, ${this.j(p.customFields)},
+           ${p.rating ?? null}, ${p.club ?? null}, ${p.email ?? null}, ${this.j(p.customFields)},
            ${p.categoryIds}, ${p.seed ?? null}, ${p.updatedAt}, ${p.deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, age = EXCLUDED.age, gender = EXCLUDED.gender,
-          rating = EXCLUDED.rating, club = EXCLUDED.club,
+          rating = EXCLUDED.rating, club = EXCLUDED.club, email = EXCLUDED.email,
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
           seed = EXCLUDED.seed, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
@@ -725,18 +732,20 @@ export class PostgresStore implements Store {
 
     if (entity === 'tournament') {
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
                 ${Boolean(p['mixCategories'] ?? false)},
                 ${Number(p['prizePlaces'] ?? 3)},
+                ${String(p['awardScope'] ?? 'per_category')},
                 ${(p['clientId'] as string) ?? null}, ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, date = EXCLUDED.date, style = EXCLUDED.style,
           rounds = EXCLUDED.rounds, status = EXCLUDED.status,
           current_round = EXCLUDED.current_round, mix_categories = EXCLUDED.mix_categories,
           prize_places = EXCLUDED.prize_places,
+          award_scope = EXCLUDED.award_scope,
           client_id = EXCLUDED.client_id,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > tournaments.updated_at
@@ -761,17 +770,18 @@ export class PostgresStore implements Store {
       const categoryIds = (p['categoryIds'] as string[]) ?? [];
       await this.sql`
         INSERT INTO participants
-          (id, tournament_id, name, age, gender, rating, club, custom_fields, category_ids, seed, updated_at, deleted_at)
+          (id, tournament_id, name, age, gender, rating, club, email, custom_fields, category_ids, seed, updated_at, deleted_at)
         VALUES
           (${id}, ${String(p['tournamentId'] ?? '')}, ${String(p['name'] ?? '')},
            ${Number(p['age'] ?? 0)}, ${(p['gender'] as string) ?? null},
            ${p['rating'] != null ? Number(p['rating']) : null},
-           ${(p['club'] as string) ?? null}, ${this.j(customFields)},
+           ${(p['club'] as string) ?? null}, ${(p['email'] as string) ?? null}, ${this.j(customFields)},
            ${categoryIds}, ${p['seed'] != null ? Number(p['seed']) : null},
            ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           tournament_id = EXCLUDED.tournament_id, name = EXCLUDED.name, age = EXCLUDED.age,
           gender = EXCLUDED.gender, rating = EXCLUDED.rating, club = EXCLUDED.club,
+          email = EXCLUDED.email,
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
           seed = EXCLUDED.seed, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at

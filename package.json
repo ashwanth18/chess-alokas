@@ -2,8 +2,10 @@
   "name": "chess-alokas",
   "private": true,
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
-    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel --filter @chess-alokas/api --filter @chess-alokas/web dev",
+    "dev:desktop": "pnpm --filter @chess-alokas/desktop run build:main && pnpm --filter @chess-alokas/desktop run dev",
+    "build": "pnpm -r --filter=!@chess-alokas/desktop build",
+    "build:desktop": "pnpm --filter @chess-alokas/web run build:desktop && pnpm --filter @chess-alokas/api run build:desktop && pnpm --filter @chess-alokas/desktop run dist",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   }

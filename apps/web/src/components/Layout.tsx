@@ -60,6 +60,29 @@ export default function Layout() {
     }
   }, [online, syncing]);
 
+  // Desktop: auto-sync once when the local sidecar becomes reachable
+  useEffect(() => {
+    if (!window.desktop?.isDesktop) return;
+    let cancelled = false;
+    void (async () => {
+      const reachable = await checkOnline();
+      if (cancelled || !reachable) return;
+      setOnline(true);
+      try {
+        const { pushed, pulled } = await syncOnline();
+        if (cancelled) return;
+        setLastSync(new Date().toISOString());
+        setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
+        setTimeout(() => setSyncResult(null), 4000);
+      } catch (err) {
+        console.warn('[desktop auto-sync]', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -82,6 +105,9 @@ export default function Layout() {
           </NavLink>
           <NavLink to="/tournaments/new" onClick={() => setMenuOpen(false)}>
             New Tournament
+          </NavLink>
+          <NavLink to="/certificates" onClick={() => setMenuOpen(false)}>
+            Certificates
           </NavLink>
           <NavLink to="/simulator" onClick={() => setMenuOpen(false)}>
             Simulator

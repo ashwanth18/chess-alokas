@@ -13,6 +13,8 @@ export interface LocalTournament {
   mixCategories?: boolean;
   /** Top N places highlighted as prize winners (default 3). */
   prizePlaces?: number;
+  /** overall | per_category — winners certificate scope */
+  awardScope?: 'overall' | 'per_category';
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;
@@ -40,6 +42,7 @@ export interface LocalParticipant {
   gender?: string | null;
   rating?: number | null;
   club?: string | null;
+  email?: string | null;
   customFields: Record<string, unknown>;
   categoryIds: string[];
   seed?: number;
@@ -63,6 +66,18 @@ export interface LocalGame {
   dirty: 1 | 0;
 }
 
+export interface LocalCertificateTemplate {
+  id: string;
+  tournamentId?: string | null;
+  name: string;
+  certType: 'participation' | 'winner';
+  /** Base64 PDF bytes */
+  pdfBase64: string;
+  layoutJson: string;
+  updatedAt: string;
+  dirty: 1 | 0;
+}
+
 export interface LocalMeta {
   key: string;
   value: string;
@@ -73,6 +88,7 @@ export class ChessDb extends Dexie {
   categories!: Table<LocalCategory>;
   participants!: Table<LocalParticipant>;
   games!: Table<LocalGame>;
+  certificateTemplates!: Table<LocalCertificateTemplate>;
   meta!: Table<LocalMeta>;
 
   constructor() {
@@ -98,6 +114,15 @@ export class ChessDb extends Dexie {
       categories: 'id, tournamentId, updatedAt, dirty',
       participants: 'id, tournamentId, updatedAt, dirty',
       games: 'id, tournamentId, categoryId, round, dirty',
+      meta: 'key',
+    });
+    // v4: participant email + local certificate templates + awardScope
+    this.version(4).stores({
+      tournaments: 'id, updatedAt, dirty',
+      categories: 'id, tournamentId, updatedAt, dirty',
+      participants: 'id, tournamentId, updatedAt, dirty',
+      games: 'id, tournamentId, categoryId, round, dirty',
+      certificateTemplates: 'id, tournamentId, updatedAt, dirty',
       meta: 'key',
     });
   }

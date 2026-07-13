@@ -42,6 +42,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       currentRound: 0,
       mixCategories: input.mixCategories ?? false,
       prizePlaces: input.prizePlaces ?? 3,
+      awardScope: input.awardScope ?? 'per_category',
       updatedAt: now,
     });
 
@@ -89,6 +90,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     currentRound: z.number().int().nonnegative().optional(),
     mixCategories: z.boolean().optional(),
     prizePlaces: z.number().int().min(1).max(20).optional(),
+    awardScope: z.enum(['overall', 'per_category']).optional(),
     clientId: z.string().optional(),
   });
 

@@ -55,6 +55,7 @@ export default function CreateTournamentPage() {
   const [style, setStyle] = useState<TournamentStyle>('swiss');
   const [rounds, setRounds] = useState(5);
   const [prizePlaces, setPrizePlaces] = useState(DEFAULT_PRIZE_PLACES);
+  const [awardScope, setAwardScope] = useState<'overall' | 'per_category'>('per_category');
   const [mixCategories, setMixCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryDraft[]>([]);
   const [saving, setSaving] = useState(false);
@@ -155,6 +156,7 @@ export default function CreateTournamentPage() {
         currentRound: 0,
         mixCategories,
         prizePlaces: clampPrizePlaces(prizePlaces),
+        awardScope,
         updatedAt: now,
         dirty: 1,
       });
@@ -182,6 +184,7 @@ export default function CreateTournamentPage() {
         rounds,
         mixCategories,
         prizePlaces: clampPrizePlaces(prizePlaces),
+        awardScope,
         status: 'draft',
         currentRound: 0,
       }).catch(() => {});
@@ -256,9 +259,22 @@ export default function CreateTournamentPage() {
               }
             />
             <span className="form-hint-sm">
-              Top {prizePlaces} in each ranking get podium styling (prizes later).
+              Top {prizePlaces} get podium styling and winner certificates.
             </span>
           </div>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="awardScope">Winner certificate scope</label>
+          <select
+            id="awardScope"
+            className="input"
+            value={awardScope}
+            onChange={(e) => setAwardScope(e.target.value as 'overall' | 'per_category')}
+          >
+            <option value="per_category">Per category</option>
+            <option value="overall">Overall standings</option>
+          </select>
         </div>
 
         <div className="form-group">

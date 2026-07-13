@@ -7,3 +7,8 @@ dist
 coverage
 .vite
 dist-ssr
+apps/api/data
+apps/api/desktop-bundle
+apps/desktop/out
+apps/desktop/release
+.~lock.*

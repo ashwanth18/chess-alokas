@@ -570,6 +570,9 @@ export default function TournamentPage() {
               {caps.importRequiresLateWarning ? 'Late entry' : 'Import Players'}
             </Link>
           )}
+          <Link to={`/certificates?tournament=${id}`} className="btn btn-outline">
+            Certificates
+          </Link>
           <button
             type="button"
             className="btn btn-ghost btn-danger"

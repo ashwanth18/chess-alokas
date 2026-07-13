@@ -24,13 +24,14 @@ interface MappedParticipant {
   gender?: string;
   rating?: number;
   club?: string;
+  email?: string;
   ageCategoryLabel?: string;
   customFields: Record<string, unknown>;
   [key: string]: unknown;
 }
 
 const REQUIRED_FIELDS = ['name'] as const;
-const OPTIONAL_FIELDS = ['age', 'gender', 'rating', 'club'] as const;
+const OPTIONAL_FIELDS = ['age', 'gender', 'rating', 'club', 'email'] as const;
 const ALL_FIELDS = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS] as const;
 
 /** XLSX cells are often numbers; CSV is strings — normalize before trim/parse. */
@@ -64,6 +65,8 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
       const rating = ratingRaw ? parseInt(ratingRaw, 10) || undefined : undefined;
       const clubCol = mapping['club'];
       const club = clubCol ? cellText(row[clubCol]) || undefined : undefined;
+      const emailCol = mapping['email'];
+      const email = emailCol ? cellText(row[emailCol]) || undefined : undefined;
 
       const customFields: Record<string, unknown> = {};
       for (const [col, val] of Object.entries(row)) {
@@ -74,7 +77,7 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
         }
       }
 
-      return { name, age, gender, rating, club, ageCategoryLabel, customFields };
+      return { name, age, gender, rating, club, email, ageCategoryLabel, customFields };
     });
 }
 
@@ -159,6 +162,7 @@ export default function ImportPage() {
       gender: ['gender', 'sex', 'm/f', 'male/female', 'jantina'],
       rating: ['rating', 'elo', 'fide', 'national rating', 'rtg'],
       club: ['club', 'team', 'school', 'academy', 'federation', 'sekolah'],
+      email: ['email', 'e-mail', 'mail', 'email address', 'e_mail'],
     };
 
     for (const [field, keywords] of Object.entries(matchers)) {
@@ -283,6 +287,7 @@ export default function ImportPage() {
           gender: p.gender ?? null,
           rating: p.rating ?? null,
           club: p.club ?? null,
+          email: p.email ?? null,
           customFields: p.customFields,
           categoryIds: catIds,
           updatedAt: now,

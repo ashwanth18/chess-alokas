@@ -89,6 +89,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
         ...remote,
         mixCategories: remote.mixCategories ?? false,
         prizePlaces: remote.prizePlaces ?? 3,
+        awardScope: remote.awardScope ?? 'per_category',
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalTournament);
@@ -114,6 +115,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
         ...remote,
         customFields: (remote.customFields ?? {}) as Record<string, unknown>,
         categoryIds: remote.categoryIds ?? [],
+        email: remote.email ?? null,
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalParticipant);
