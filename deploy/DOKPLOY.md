@@ -40,6 +40,36 @@ Web build args are wired in compose from `SUPABASE_URL` / `SUPABASE_ANON_KEY`.
    - GitHub OAuth: Client ID/secret from GitHub Developer Settings
 3. Confirm migration `005_auth_owners.sql` is applied (`owner_id`, `profiles`, RLS).
 
+## 4b. Branded auth emails (hide Supabase)
+
+Default Supabase SMTP sends from Supabase and looks generic. For production:
+
+### A. Custom SMTP (From address)
+
+1. In [Resend](https://resend.com) (you may already use it for certificates): verify domain `alokas.com` (or a subdomain like `mail.alokas.com`) and create an API key.
+2. Supabase → **Authentication → SMTP Settings** → enable custom SMTP:
+
+| Field | Value |
+|-------|--------|
+| Sender email | e.g. `Chess Alokas <noreply@alokas.com>` |
+| Host | `smtp.resend.com` |
+| Port | `465` (or `587`) |
+| Username | `resend` |
+| Password | your Resend API key |
+
+3. Raise **Auth rate limits** if needed (custom SMTP starts ~30/hour).
+
+### B. Email templates
+
+1. Open **Authentication → Email Templates**.
+2. Paste HTML from `deploy/email-templates/`:
+   - **Magic Link** → `magic-link.html` — subject: `Sign in to Chess Alokas`
+   - **Confirm sign up** → `confirm-signup.html` — subject: `Confirm your Chess Alokas email`
+   - **Reset password** → `reset-password.html` — subject: `Reset your Chess Alokas password`
+3. In Resend, disable **click tracking** for auth mail so magic-link URLs are not rewritten.
+
+Note: the verify link host may still be `*.supabase.co` until you add a [custom Auth domain](https://supabase.com/docs/guides/auth/auth-smtp#additional-best-practices). The visible From name/address is what most users notice.
+
 ## 5. Verify
 
 ```bash
