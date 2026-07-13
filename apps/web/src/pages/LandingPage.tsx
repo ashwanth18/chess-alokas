@@ -12,7 +12,7 @@ const RELEASES_API =
 const DIRECT_DOWNLOADS: Partial<Record<PlatformKey, string>> = {
   windows:
     import.meta.env.VITE_DOWNLOAD_WINDOWS_URL ??
-    'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.0/Chess-Alokas-Setup-win-x64.exe',
+    'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.1/Chess-Alokas-Setup-win-x64.exe',
   linux: import.meta.env.VITE_DOWNLOAD_LINUX_URL || undefined,
   macos: import.meta.env.VITE_DOWNLOAD_MACOS_URL || undefined,
 };
