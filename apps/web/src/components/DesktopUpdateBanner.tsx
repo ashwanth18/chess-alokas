@@ -27,9 +27,19 @@ export default function DesktopUpdateBanner() {
     if (!window.desktop?.onUpdateStatus) return;
     return window.desktop.onUpdateStatus((next) => {
       setStatus(next);
-      if (next.status === 'available' && next.version && dismissedVersion() === next.version) {
+      if (
+        (next.status === 'available' || next.status === 'downloading' || next.status === 'downloaded') &&
+        next.version &&
+        dismissedVersion() === next.version &&
+        next.status !== 'downloaded'
+      ) {
+        // Allow dismissing mid-download; once ready, show again so they can restart.
         setHidden(true);
-      } else if (next.status === 'available' || next.status === 'downloaded' || next.status === 'downloading') {
+      } else if (
+        next.status === 'available' ||
+        next.status === 'downloaded' ||
+        next.status === 'downloading'
+      ) {
         setHidden(false);
       }
     });
@@ -52,6 +62,7 @@ export default function DesktopUpdateBanner() {
       return;
     }
     if (status?.canInstall) {
+      // Auto-download is usually already running; this is a fallback.
       await window.desktop.downloadUpdate();
       return;
     }
@@ -60,7 +71,7 @@ export default function DesktopUpdateBanner() {
 
   const primaryLabel =
     status.status === 'downloaded'
-      ? 'Restart to update'
+      ? 'Restart & update'
       : status.status === 'downloading'
         ? `Downloading… ${status.percent ?? 0}%`
         : status.canInstall
@@ -70,22 +81,53 @@ export default function DesktopUpdateBanner() {
   return (
     <div className="desktop-update-banner" role="status">
       <div className="desktop-update-banner-copy">
-        <strong>Update available</strong>
+        <strong>
+          {status.status === 'downloaded'
+            ? 'Update ready'
+            : status.status === 'downloading'
+              ? 'Updating'
+              : 'Update available'}
+        </strong>
         <span>
           {status.message ||
             `${versionLabel} is ready. You’re on v${status.currentVersion}.`}
         </span>
+        {status.status === 'downloading' && (
+          <div
+            className="desktop-update-progress"
+            role="progressbar"
+            aria-valuenow={status.percent ?? 0}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className="desktop-update-progress-bar"
+              style={{ width: `${Math.min(100, Math.max(0, status.percent ?? 0))}%` }}
+            />
+          </div>
+        )}
       </div>
       <div className="desktop-update-banner-actions">
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          disabled={status.status === 'downloading'}
-          onClick={() => void primaryAction()}
-        >
-          {primaryLabel}
-        </button>
-        {status.status === 'available' && (
+        {status.status === 'downloaded' || !status.canInstall ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={() => void primaryAction()}
+          >
+            {primaryLabel}
+          </button>
+        ) : status.status === 'downloading' ? (
+          <span className="desktop-update-pct">{status.percent ?? 0}%</span>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={() => void primaryAction()}
+          >
+            {primaryLabel}
+          </button>
+        )}
+        {(status.status === 'available' || status.status === 'downloading') && (
           <button
             type="button"
             className="btn btn-sm btn-ghost"

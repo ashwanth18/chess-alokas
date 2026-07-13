@@ -68,6 +68,34 @@
 
 html { scroll-behavior: smooth; }
 
+/* Desktop scrollbars — thin wood/green track matching the shell */
+html.is-desktop {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(196, 165, 116, 0.45) rgba(7, 31, 23, 0.85);
+}
+html.is-desktop ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+html.is-desktop ::-webkit-scrollbar-track {
+  background: rgba(7, 31, 23, 0.9);
+  border-left: 1px solid rgba(196, 165, 116, 0.12);
+}
+html.is-desktop ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(196, 165, 116, 0.55), rgba(139, 106, 56, 0.65));
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+html.is-desktop ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(212, 185, 138, 0.75), rgba(196, 165, 116, 0.8));
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+html.is-desktop ::-webkit-scrollbar-corner {
+  background: rgba(7, 31, 23, 0.9);
+}
+
 body {
   background-color: var(--color-bg);
   background-image:
@@ -344,6 +372,27 @@ html.is-desktop-linux .desktop-update-banner {
   flex-wrap: wrap;
   gap: 0.45rem;
   align-items: center;
+}
+.desktop-update-progress {
+  margin-top: 0.45rem;
+  height: 4px;
+  width: min(100%, 18rem);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.desktop-update-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--wood-600), var(--wood-400));
+  transition: width 0.25s ease;
+}
+.desktop-update-pct {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--wood-400);
+  min-width: 2.5rem;
+  text-align: right;
 }
 
 .nav-backdrop {

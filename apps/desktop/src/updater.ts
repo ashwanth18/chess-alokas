@@ -144,7 +144,8 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
 
   if (autoUpdater) {
     autoUpdater.logger = log;
-    autoUpdater.autoDownload = false;
+    // Download as soon as an update is found — user only confirms restart.
+    autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowPrerelease = false;
 
@@ -156,9 +157,10 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
       send(
         getWindow,
         {
-          status: 'available',
+          status: 'downloading',
           version: info.version,
-          message: `Version ${info.version} is available.`,
+          percent: 0,
+          message: `Downloading v${info.version}…`,
           downloadPageUrl: RELEASES_PAGE,
           canInstall: canAutoInstall(autoUpdater),
         },
@@ -193,7 +195,7 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
         {
           status: 'downloaded',
           version: info.version,
-          message: `Update ${info.version} ready — restart to install.`,
+          message: `v${info.version} ready — restart to install silently.`,
           canInstall: true,
         },
         autoUpdater,
@@ -286,7 +288,8 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
         void shell.openExternal(RELEASES_PAGE);
         return;
       }
-      autoUpdater!.quitAndInstall(false, true);
+      // Silent NSIS (/S) — no Next/Next wizard; relaunch after install.
+      autoUpdater!.quitAndInstall(true, true);
     },
 
     openDownloadPage(url?: string) {

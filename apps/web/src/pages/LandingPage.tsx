@@ -17,7 +17,7 @@ const RELEASES_API =
 
 const RELEASE_BASE =
   import.meta.env.VITE_DOWNLOAD_RELEASE_BASE ??
-  'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.6';
+  'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.7';
 
 interface DownloadOptionDef {
   id: OptionId;

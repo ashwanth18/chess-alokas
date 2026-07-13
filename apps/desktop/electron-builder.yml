@@ -30,9 +30,14 @@ win:
       arch:
         - x64
 nsis:
+  # Assisted first install; in-app updates use silent /S via quitAndInstall(true).
   oneClick: false
   allowToChangeInstallationDirectory: true
+  allowElevation: true
   createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
   artifactName: Chess-Alokas-Setup-${os}-${arch}.${ext}
 portable:
   artifactName: Chess-Alokas-Portable-${os}-${arch}.${ext}
