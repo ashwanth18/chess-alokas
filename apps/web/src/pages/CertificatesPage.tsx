@@ -16,6 +16,15 @@ import {
 } from '@chess-alokas/certificates';
 import type { GameResult } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
+import NumberField from '../components/NumberField';
+import {
+  certificateColumnLabel,
+  certificateColumnSample,
+} from '../lib/certificateColumns';
+import {
+  MIN_PRIZE_PLACES,
+  MAX_PRIZE_PLACES,
+} from '../lib/prizePlaces';
 import {
   apiIssueCertificates,
   apiEmailCertificates,
@@ -570,22 +579,19 @@ export default function CertificatesPage() {
 
       {tournament && (
         <div className="cert-settings">
-          <label>
-            Top N
-            <input
-              className="input input-sm"
-              type="number"
-              min={1}
-              max={20}
-              value={tournament.prizePlaces ?? 3}
-              onChange={(e) =>
-                void updateAwardSettings(
-                  Number(e.target.value) || 3,
-                  tournament.awardScope ?? 'per_category',
-                )
-              }
-            />
-          </label>
+          <NumberField
+            className="cert-topn-field"
+            label="Top N"
+            inputClassName="input input-sm"
+            value={tournament.prizePlaces ?? 3}
+            onChange={(n) => {
+              if (n == null) return;
+              void updateAwardSettings(n, tournament.awardScope ?? 'per_category');
+            }}
+            min={MIN_PRIZE_PLACES}
+            max={MAX_PRIZE_PLACES}
+            required
+          />
           <label>
             Award scope
             <select
@@ -608,32 +614,60 @@ export default function CertificatesPage() {
 
       <div className="cert-workspace">
         <aside className="cert-sidebar">
-          <h3>Columns</h3>
-          <p className="form-hint">Select a column, then click the template to place it.</p>
-          <div className="cert-column-list">
-            {columns.length === 0 && <p className="form-hint">Load tournament data or a CSV first.</p>}
-            {columns.map((col) => (
-              <button
-                key={col}
-                type="button"
-                className={`cert-col-chip ${selectedColumn === col ? 'active' : ''}`}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('text/plain', col);
-                  setSelectedColumn(col);
-                }}
-                onClick={() => setSelectedColumn(col)}
-              >
-                {col}
-              </button>
-            ))}
+          <h3>Data columns</h3>
+          <p className="cert-sidebar-lead">
+            Pick a column below, then click the certificate to place it. Selected column is
+            highlighted.
+          </p>
+          <div className="cert-column-list" role="listbox" aria-label="Certificate data columns">
+            {columns.length === 0 && (
+              <p className="cert-sidebar-lead">
+                Load a tournament or import a CSV to see available columns.
+              </p>
+            )}
+            {columns.map((col) => {
+              const example = certificateColumnSample(col, sample);
+              return (
+                <button
+                  key={col}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedColumn === col}
+                  className={`cert-col-item ${selectedColumn === col ? 'active' : ''}`}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', col);
+                    setSelectedColumn(col);
+                  }}
+                  onClick={() => setSelectedColumn(col)}
+                >
+                  <span className="cert-col-title">{certificateColumnLabel(col)}</span>
+                  <span className="cert-col-key">{col}</span>
+                  <span className="cert-col-sample">
+                    {example ? (
+                      <>
+                        Example: <em>{example}</em>
+                      </>
+                    ) : (
+                      'No sample value yet'
+                    )}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          <h3>Placed fields</h3>
+          <h3>Placed on template</h3>
           <ul className="cert-field-list">
+            {fields.length === 0 && (
+              <li className="cert-field-empty">No fields placed yet</li>
+            )}
             {fields.map((f) => (
               <li key={f.id}>
-                <span>{f.sourceColumn}</span>
+                <span>
+                  <span className="cert-field-name">{certificateColumnLabel(f.sourceColumn)}</span>
+                  <span className="cert-field-key">{f.sourceColumn}</span>
+                </span>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"

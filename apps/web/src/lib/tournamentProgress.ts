@@ -9,6 +9,11 @@ export interface TournamentLike {
   rounds: number;
   status: string;
   currentRound: number;
+  /**
+   * Highest round the director has confirmed finished.
+   * Missing on legacy local rows — see resolvedConfirmedRounds().
+   */
+  confirmedRounds?: number;
   mixCategories?: boolean;
 }
 
@@ -24,6 +29,12 @@ export interface TournamentCapabilities {
   allResultsDone: boolean;
   /** Round that must be scored before the next pairing can run. */
   pendingResultsRound: number | null;
+  /** Round with all results entered that still needs director confirmation. */
+  pendingConfirmRound: number | null;
+  /** Confirming the last round finishes the tournament. */
+  canConfirmRound: boolean;
+  /** Undo last confirm when the next round has not been paired yet. */
+  canUndoConfirm: boolean;
 }
 
 export interface CompletionBlocker {
@@ -187,7 +198,7 @@ export function getTournamentInstructions(
       : 'Open the Pairings tab and click Generate Round 1';
   } else if (caps.pendingResultsRound != null && nextRound != null) {
     playTitle = `Enter Round ${caps.pendingResultsRound} results`;
-    playDescription = `Score every game in Round ${caps.pendingResultsRound} before generating Round ${nextRound}.`;
+    playDescription = `Score every game in Round ${caps.pendingResultsRound} before confirming the round.`;
     const pendingDetail = summarizePendingResults(
       tournament,
       cats,
@@ -196,12 +207,18 @@ export function getTournamentInstructions(
       categoryNames,
     );
     if (pendingDetail) playDescription += ` ${pendingDetail}`;
+  } else if (caps.pendingConfirmRound != null) {
+    playTitle = `Confirm Round ${caps.pendingConfirmRound} complete`;
+    playDescription =
+      caps.pendingConfirmRound === tournament.rounds
+        ? 'All results are in — confirm the final round to finish the tournament'
+        : `Confirm Round ${caps.pendingConfirmRound} when scores are final, then generate Round ${caps.pendingConfirmRound + 1}`;
   } else if (nextRound != null) {
     playTitle = `Generate Round ${nextRound} pairings`;
     playDescription =
       nextRound === tournament.rounds
-        ? 'Final round — generate pairings, then enter all results to finish'
-        : `Round ${nextRound - 1} is complete — pair the next round on the Pairings tab`;
+        ? 'Final round — generate pairings, enter results, then confirm to finish'
+        : `Round ${nextRound - 1} is confirmed — pair the next round on the Pairings tab`;
   } else if (!caps.allResultsDone) {
     playTitle = 'Enter remaining results';
     playDescription =
@@ -210,7 +227,7 @@ export function getTournamentInstructions(
   } else {
     playStatus = 'done';
     playTitle = 'All rounds played';
-    playDescription = `${tournament.rounds} rounds paired and scored`;
+    playDescription = `${tournament.rounds} rounds paired, scored, and confirmed`;
   }
 
   instructions.push({
@@ -221,14 +238,14 @@ export function getTournamentInstructions(
   });
 
   // 4 — Complete
-  const fullyDone = caps.allRoundsPaired && caps.allResultsDone;
+  const fullyDone = caps.allRoundsPaired && caps.allResultsDone && caps.pendingConfirmRound == null;
   instructions.push({
     id: 'complete',
     status: fullyDone ? 'done' : 'upcoming',
     title: fullyDone ? 'Tournament complete' : 'Complete tournament',
     description: fullyDone
       ? 'Pairings and results are locked'
-      : `All ${tournament.rounds} rounds must be paired and every result entered`,
+      : `All ${tournament.rounds} rounds must be paired, scored, and confirmed`,
   });
 
   return instructions;
@@ -395,6 +412,65 @@ export function allResultsEntered(
   return active.every((g) => g.isBye || g.result === 'bye' || g.result !== 'pending');
 }
 
+/** Highest confirmed round; legacy local rows without the field use a safe default. */
+export function resolvedConfirmedRounds(tournament: TournamentLike): number {
+  if (tournament.confirmedRounds != null) return tournament.confirmedRounds;
+  // Completed events without the field: treat every round as confirmed.
+  if (tournament.status === 'completed') return tournament.rounds;
+  // In-progress legacy rows: prior rounds were implicitly confirmed to unlock pairing.
+  return Math.max(0, tournament.currentRound - 1);
+}
+
+/** True when every non-bye game in `round` has a result (and the round exists). */
+export function roundResultsEntered(
+  tournament: TournamentLike,
+  categories: CategoryLike[] | null | undefined,
+  participants: LocalParticipant[] | null | undefined,
+  games: LocalGame[] | null | undefined,
+  round: number,
+): boolean {
+  const roundGames = relevantCompletionGames(tournament, categories, participants, games).filter(
+    (g) => g.round === round,
+  );
+  if (roundGames.length === 0) return false;
+  return roundGames.every((g) => g.isBye || g.result === 'bye' || g.result !== 'pending');
+}
+
+/**
+ * First round that has all results entered but is not yet director-confirmed.
+ * Confirmation is sequential (round N before N+1).
+ */
+export function firstRoundPendingConfirm(
+  tournament: TournamentLike,
+  categories: CategoryLike[] | null | undefined,
+  participants: LocalParticipant[] | null | undefined,
+  games: LocalGame[] | null | undefined,
+): number | null {
+  const confirmed = resolvedConfirmedRounds(tournament);
+  const highest = highestPairedRound(games);
+  for (let r = confirmed + 1; r <= highest; r++) {
+    if (roundResultsEntered(tournament, categories, participants, games, r)) return r;
+    // Stop at the first incomplete round so confirmation stays in order.
+    return null;
+  }
+  return null;
+}
+
+export function canEditRoundResults(tournament: TournamentLike, round: number): boolean {
+  return round > resolvedConfirmedRounds(tournament);
+}
+
+/** Undo is allowed only when the next round after the last confirm has not been paired. */
+export function canUndoRoundConfirm(
+  tournament: TournamentLike,
+  games: LocalGame[] | null | undefined,
+): boolean {
+  const confirmed = resolvedConfirmedRounds(tournament);
+  if (confirmed <= 0) return false;
+  const nextPaired = asList(games).some((g) => !g.deletedAt && g.round === confirmed + 1);
+  return !nextPaired;
+}
+
 /** First round (before `beforeRound`) that still has pending non-bye results, or null. */
 export function firstRoundMissingResults(
   games: LocalGame[] | null | undefined,
@@ -427,7 +503,7 @@ export function isAllRoundsPaired(
   );
 }
 
-/** Fully complete: all rounds paired and all non-bye results entered. */
+/** Fully complete: all rounds paired, all results entered, and last round confirmed. */
 export function isTournamentComplete(
   tournament: TournamentLike,
   categories: CategoryLike[] | null | undefined,
@@ -436,7 +512,8 @@ export function isTournamentComplete(
 ): boolean {
   return (
     isAllRoundsPaired(tournament, categories, participants, games) &&
-    allResultsEntered(tournament, categories, participants, games)
+    allResultsEntered(tournament, categories, participants, games) &&
+    resolvedConfirmedRounds(tournament) >= tournament.rounds
   );
 }
 
@@ -500,9 +577,21 @@ export function getTournamentCapabilities(
   const completionGames = relevantCompletionGames(tournament, cats, players, activeGames);
   const pendingResultsRound =
     nextRound !== null ? firstRoundMissingResults(completionGames, nextRound) : null;
+  const pendingConfirmRound = firstRoundPendingConfirm(
+    tournament,
+    cats,
+    players,
+    activeGames,
+  );
+  const confirmed = resolvedConfirmedRounds(tournament);
+  const priorRoundConfirmed =
+    nextRound === null || confirmed >= nextRound - 1;
 
   const completed = stage === 'completed';
   const live = stage === 'in_progress';
+  const editableRoundsExist = activeGames.some(
+    (g) => !g.deletedAt && canEditRoundResults(tournament, g.round),
+  );
 
   return {
     stage,
@@ -512,13 +601,17 @@ export function getTournamentCapabilities(
       !completed &&
       enoughPlayers &&
       nextRound !== null &&
-      pendingResultsRound === null,
-    canEditResults: !completed && activeGames.some((g) => !g.deletedAt),
+      pendingResultsRound === null &&
+      priorRoundConfirmed,
+    canEditResults: !completed && editableRoundsExist,
     canMarkReady: stage === 'draft' && enoughPlayers,
     showStartHint: (stage === 'draft' || stage === 'ready') && enoughPlayers,
     allRoundsPaired,
     allResultsDone,
     pendingResultsRound,
+    pendingConfirmRound,
+    canConfirmRound: pendingConfirmRound != null,
+    canUndoConfirm: canUndoRoundConfirm(tournament, activeGames),
   };
 }
 

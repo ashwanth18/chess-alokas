@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { CertificateField, CertificateRow } from '@chess-alokas/certificates';
+import { certificateColumnLabel } from '../lib/certificateColumns';
 
 // Emit as .js (see vite.config) so nginx MIME is always application/javascript
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -257,7 +258,7 @@ export default function CertificateDesignerCanvas({
                     onClick={(e) => e.stopPropagation()}
                     title="Drag to reposition"
                   >
-                    <span className="cert-field-label">{f.sourceColumn}</span>
+                    <span className="cert-field-label">{certificateColumnLabel(f.sourceColumn)}</span>
                     <span className="cert-field-sample" style={{ fontSize: 'inherit' }}>
                       {sample}
                     </span>

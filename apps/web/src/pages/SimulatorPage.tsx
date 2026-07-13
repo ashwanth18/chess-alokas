@@ -14,11 +14,12 @@ import type {
 } from '@chess-alokas/pairing-engine';
 import type { GameResult } from '@chess-alokas/shared';
 import ColorSide from '../components/ColorSide';
+import NumberField from '../components/NumberField';
 
 const DEFAULT_CONFIG = {
-  playerCount: 12,
-  rounds: 5,
-  seed: 42,
+  playerCount: 12 as number | null,
+  rounds: 5 as number | null,
+  seed: 42 as number | null,
   splitCategories: true,
   mixCategories: false,
   resultMode: 'rating_biased' as ResultMode,
@@ -189,8 +190,27 @@ export default function SimulatorPage() {
 
   const handleGenerate = useCallback(() => {
     clearError();
+    if (config.playerCount == null) {
+      setError('Players must be between 2 and 64');
+      return;
+    }
+    if (config.rounds == null) {
+      setError('Rounds must be between 1 and 15');
+      return;
+    }
+    if (config.seed == null) {
+      setError('Enter a valid seed number');
+      return;
+    }
     try {
-      const sim = createSimulation(config);
+      const sim = createSimulation({
+        playerCount: config.playerCount,
+        rounds: config.rounds,
+        seed: config.seed,
+        splitCategories: config.splitCategories,
+        mixCategories: config.mixCategories,
+        resultMode: config.resultMode,
+      });
       setState(sim);
       setManualOverrides([]);
       setStandingsTab('all');
@@ -292,37 +312,31 @@ export default function SimulatorPage() {
       {/* Controls */}
       <section className="sim-controls">
         <div className="sim-controls-grid">
-          <div className="form-group">
-            <label>Players</label>
-            <input
-              type="number"
-              className="input input-sm"
-              min={2}
-              max={64}
-              value={config.playerCount}
-              onChange={(e) => cfg({ playerCount: Math.max(2, parseInt(e.target.value) || 8) })}
-            />
-          </div>
-          <div className="form-group">
-            <label>Rounds</label>
-            <input
-              type="number"
-              className="input input-sm"
-              min={1}
-              max={15}
-              value={config.rounds}
-              onChange={(e) => cfg({ rounds: Math.max(1, parseInt(e.target.value) || 5) })}
-            />
-          </div>
-          <div className="form-group">
-            <label>Seed</label>
-            <input
-              type="number"
-              className="input input-sm"
-              value={config.seed}
-              onChange={(e) => cfg({ seed: parseInt(e.target.value) || 42 })}
-            />
-          </div>
+          <NumberField
+            label="Players"
+            inputClassName="input input-sm"
+            value={config.playerCount}
+            onChange={(n) => cfg({ playerCount: n })}
+            min={2}
+            max={64}
+            required
+          />
+          <NumberField
+            label="Rounds"
+            inputClassName="input input-sm"
+            value={config.rounds}
+            onChange={(n) => cfg({ rounds: n })}
+            min={1}
+            max={15}
+            required
+          />
+          <NumberField
+            label="Seed"
+            inputClassName="input input-sm"
+            value={config.seed}
+            onChange={(n) => cfg({ seed: n })}
+            required
+          />
           <div className="form-group">
             <label>Result Mode</label>
             <select

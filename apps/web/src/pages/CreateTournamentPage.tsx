@@ -11,6 +11,7 @@ import {
   MIN_PRIZE_PLACES,
   clampPrizePlaces,
 } from '../lib/prizePlaces';
+import NumberField from '../components/NumberField';
 
 interface CategoryDraft {
   id: string;
@@ -54,8 +55,8 @@ export default function CreateTournamentPage() {
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
   const [style, setStyle] = useState<TournamentStyle>('swiss');
-  const [rounds, setRounds] = useState(5);
-  const [prizePlaces, setPrizePlaces] = useState(DEFAULT_PRIZE_PLACES);
+  const [rounds, setRounds] = useState<number | null>(5);
+  const [prizePlaces, setPrizePlaces] = useState<number | null>(DEFAULT_PRIZE_PLACES);
   const [awardScope, setAwardScope] = useState<'overall' | 'per_category'>('per_category');
   const [mixCategories, setMixCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryDraft[]>([]);
@@ -141,6 +142,23 @@ export default function CreateTournamentPage() {
       setError('Tournament name is required');
       return;
     }
+    if (rounds == null) {
+      setError('Rounds must be a whole number between 1 and 20');
+      return;
+    }
+    if (prizePlaces == null) {
+      setError(`Prize places must be between ${MIN_PRIZE_PLACES} and ${MAX_PRIZE_PLACES}`);
+      return;
+    }
+    const invalidCatPrize = categories.find(
+      (c) =>
+        c.prizePlaces != null &&
+        (c.prizePlaces < MIN_PRIZE_PLACES || c.prizePlaces > MAX_PRIZE_PLACES),
+    );
+    if (invalidCatPrize) {
+      setError(`Category prize places must be between ${MIN_PRIZE_PLACES} and ${MAX_PRIZE_PLACES}`);
+      return;
+    }
 
     submittingRef.current = true;
     setSaving(true);
@@ -158,6 +176,7 @@ export default function CreateTournamentPage() {
         rounds,
         status: 'draft',
         currentRound: 0,
+        confirmedRounds: 0,
         mixCategories,
         prizePlaces: clampPrizePlaces(prizePlaces),
         awardScope,
@@ -227,36 +246,30 @@ export default function CreateTournamentPage() {
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="rounds">Rounds</label>
-            <input
-              id="rounds"
-              type="number"
-              className="input"
-              min={1}
-              max={20}
-              value={rounds}
-              onChange={(e) => setRounds(Math.max(1, parseInt(e.target.value) || 5))}
-            />
-          </div>
+          <NumberField
+            id="rounds"
+            label="Rounds"
+            value={rounds}
+            onChange={setRounds}
+            min={1}
+            max={20}
+            required
+          />
 
-          <div className="form-group">
-            <label htmlFor="prizePlaces">Prize places (top N)</label>
-            <input
-              id="prizePlaces"
-              type="number"
-              className="input"
-              min={MIN_PRIZE_PLACES}
-              max={MAX_PRIZE_PLACES}
-              value={prizePlaces}
-              onChange={(e) =>
-                setPrizePlaces(clampPrizePlaces(parseInt(e.target.value, 10) || DEFAULT_PRIZE_PLACES))
-              }
-            />
-            <span className="form-hint-sm">
-              Top {prizePlaces} get podium styling and winner certificates.
-            </span>
-          </div>
+          <NumberField
+            id="prizePlaces"
+            label="Prize places (top N)"
+            value={prizePlaces}
+            onChange={setPrizePlaces}
+            min={MIN_PRIZE_PLACES}
+            max={MAX_PRIZE_PLACES}
+            required
+            hint={
+              prizePlaces != null
+                ? `Top ${prizePlaces} get podium styling and winner certificates.`
+                : `Enter a number from ${MIN_PRIZE_PLACES} to ${MAX_PRIZE_PLACES}.`
+            }
+          />
         </div>
 
         <div className="form-group">
@@ -333,24 +346,17 @@ export default function CreateTournamentPage() {
                   value={cat.name}
                   onChange={(e) => updateCategory(cat.id, { name: e.target.value })}
                 />
-                <label className="category-prize-override">
-                  <span className="preset-label">Prize places</span>
-                  <input
-                    type="number"
-                    className="input input-xs"
-                    min={MIN_PRIZE_PLACES}
-                    max={MAX_PRIZE_PLACES}
-                    placeholder={String(prizePlaces)}
-                    value={cat.prizePlaces ?? ''}
-                    onChange={(e) => {
-                      const raw = e.target.value.trim();
-                      updateCategory(cat.id, {
-                        prizePlaces: raw === '' ? null : clampPrizePlaces(parseInt(raw, 10)),
-                      });
-                    }}
-                    title="Leave blank to use tournament default"
-                  />
-                </label>
+                <NumberField
+                  className="category-prize-override"
+                  inputClassName="input input-xs"
+                  label="Prize places"
+                  value={cat.prizePlaces}
+                  onChange={(n) => updateCategory(cat.id, { prizePlaces: n })}
+                  min={MIN_PRIZE_PLACES}
+                  max={MAX_PRIZE_PLACES}
+                  allowEmpty
+                  placeholder={prizePlaces != null ? String(prizePlaces) : String(DEFAULT_PRIZE_PLACES)}
+                />
                 <button
                   type="button"
                   className="btn btn-sm btn-ghost btn-danger"

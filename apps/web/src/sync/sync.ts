@@ -88,6 +88,8 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
       await db.tournaments.put({
         ...remote,
         mixCategories: remote.mixCategories ?? false,
+        confirmedRounds:
+          remote.confirmedRounds ?? Math.max(0, (remote.currentRound ?? 0) - 1),
         prizePlaces: remote.prizePlaces ?? 3,
         awardScope: remote.awardScope ?? 'per_category',
         ownerId: remote.ownerId ?? null,

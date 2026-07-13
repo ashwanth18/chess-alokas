@@ -282,6 +282,7 @@ export class MemoryStore implements Store {
         rounds: Number(payload['rounds'] ?? 1),
         status: (payload['status'] as TournamentStatus) ?? 'draft',
         currentRound: Number(payload['currentRound'] ?? 0),
+        confirmedRounds: Number(payload['confirmedRounds'] ?? 0),
         mixCategories: Boolean(payload['mixCategories'] ?? false),
         prizePlaces: Number(payload['prizePlaces'] ?? 3),
         awardScope: (payload['awardScope'] as Tournament['awardScope']) ?? 'per_category',
@@ -352,6 +353,7 @@ interface TournamentRow {
   rounds: number;
   status: string;
   current_round: number;
+  confirmed_rounds: number | null;
   mix_categories: boolean | null;
   prize_places: number | null;
   award_scope: string | null;
@@ -420,6 +422,7 @@ function rowToTournament(row: TournamentRow): Tournament {
     rounds: row.rounds,
     status: row.status as TournamentStatus,
     currentRound: row.current_round,
+    confirmedRounds: row.confirmed_rounds ?? 0,
     mixCategories: row.mix_categories ?? false,
     prizePlaces: row.prize_places ?? 3,
     awardScope: (row.award_scope as Tournament['awardScope']) ?? 'per_category',
@@ -525,9 +528,9 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
-              ${t.status}, ${t.currentRound}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
+              ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
               ${t.ownerId ?? null}, ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
@@ -546,6 +549,7 @@ export class PostgresStore implements Store {
       UPDATE tournaments SET
         name = ${m.name}, date = ${m.date ?? null}, style = ${m.style},
         rounds = ${m.rounds}, status = ${m.status}, current_round = ${m.currentRound},
+        confirmed_rounds = ${m.confirmedRounds ?? 0},
         mix_categories = ${m.mixCategories ?? false},
         prize_places = ${m.prizePlaces ?? 3},
         award_scope = ${m.awardScope ?? 'per_category'},
@@ -833,10 +837,11 @@ export class PostgresStore implements Store {
 
     if (entity === 'tournament') {
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
+                ${Number(p['confirmedRounds'] ?? 0)},
                 ${Boolean(p['mixCategories'] ?? false)},
                 ${Number(p['prizePlaces'] ?? 3)},
                 ${String(p['awardScope'] ?? 'per_category')},
@@ -845,7 +850,9 @@ export class PostgresStore implements Store {
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, date = EXCLUDED.date, style = EXCLUDED.style,
           rounds = EXCLUDED.rounds, status = EXCLUDED.status,
-          current_round = EXCLUDED.current_round, mix_categories = EXCLUDED.mix_categories,
+          current_round = EXCLUDED.current_round,
+          confirmed_rounds = EXCLUDED.confirmed_rounds,
+          mix_categories = EXCLUDED.mix_categories,
           prize_places = EXCLUDED.prize_places,
           award_scope = EXCLUDED.award_scope,
           owner_id = COALESCE(EXCLUDED.owner_id, tournaments.owner_id),

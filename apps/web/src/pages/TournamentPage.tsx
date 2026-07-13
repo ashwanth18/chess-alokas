@@ -14,6 +14,8 @@ import {
   highestPairedRound,
   isMixedTournament,
   isTournamentComplete,
+  canEditRoundResults,
+  resolvedConfirmedRounds,
 } from '../lib/tournamentProgress';
 import TournamentInstructions from '../components/TournamentInstructions';
 import TableSearch from '../components/TableSearch';
@@ -212,8 +214,7 @@ export default function TournamentPage() {
 
     if (
       caps.stage === 'in_progress' &&
-      tournament.status === 'completed' &&
-      !caps.allResultsDone
+      tournament.status === 'completed'
     ) {
       void db.tournaments.update(id, {
         status: 'in_progress',
@@ -294,6 +295,10 @@ export default function TournamentPage() {
       if (caps?.pendingResultsRound != null) {
         setPairError(
           `Enter all results for Round ${caps.pendingResultsRound} before generating Round ${nextPairingRound ?? '—'}.`,
+        );
+      } else if (caps?.pendingConfirmRound != null) {
+        setPairError(
+          `Confirm Round ${caps.pendingConfirmRound} complete before generating Round ${nextPairingRound ?? '—'}.`,
         );
       } else {
         setPairError(
@@ -441,31 +446,54 @@ export default function TournamentPage() {
 
   const updateGameResult = useCallback(
     async (gameId: string, result: GameResult) => {
-      if (!id || !caps?.canEditResults) return;
+      if (!id || !tournament) return;
+      const game = (games ?? []).find((g) => g.id === gameId);
+      if (!game || !canEditRoundResults(tournament, game.round)) return;
       const now = nowIso();
       await db.games.update(gameId, { result, updatedAt: now, dirty: 1 });
-
-      if (!tournament || !categories || !participants) return;
-      const updatedGames = await db.games
-        .where('tournamentId')
-        .equals(id)
-        .filter((g) => !g.deletedAt)
-        .toArray();
-      if (isTournamentComplete(tournament, categories, participants, updatedGames)) {
-        await db.tournaments.update(id, {
-          status: 'completed',
-          currentRound: Math.max(
-            tournament.currentRound,
-            highestPairedRound(updatedGames),
-            tournament.rounds,
-          ),
-          updatedAt: now,
-          dirty: 1,
-        });
-      }
     },
-    [id, caps?.canEditResults, tournament, categories, participants],
+    [id, tournament, games],
   );
+
+  const confirmRoundComplete = useCallback(async () => {
+    if (!id || !tournament || !categories || !participants || !games || !caps?.canConfirmRound) {
+      return;
+    }
+    const round = caps.pendingConfirmRound;
+    if (round == null) return;
+    const now = nowIso();
+    const nextConfirmed = round;
+    const fullyDone = isTournamentComplete(
+      { ...tournament, confirmedRounds: nextConfirmed },
+      categories,
+      participants,
+      games,
+    );
+    await db.tournaments.update(id, {
+      confirmedRounds: nextConfirmed,
+      status: fullyDone ? 'completed' : 'in_progress',
+      currentRound: Math.max(
+        tournament.currentRound,
+        highestPairedRound(games),
+        fullyDone ? tournament.rounds : 0,
+      ),
+      updatedAt: now,
+      dirty: 1,
+    });
+  }, [id, tournament, categories, participants, games, caps?.canConfirmRound, caps?.pendingConfirmRound]);
+
+  const undoRoundConfirm = useCallback(async () => {
+    if (!id || !tournament || !caps?.canUndoConfirm) return;
+    const confirmed = resolvedConfirmedRounds(tournament);
+    if (confirmed <= 0) return;
+    const now = nowIso();
+    await db.tournaments.update(id, {
+      confirmedRounds: confirmed - 1,
+      status: 'in_progress',
+      updatedAt: now,
+      dirty: 1,
+    });
+  }, [id, tournament, caps?.canUndoConfirm]);
 
   const standings = useMemo(() => {
     if (!participants || !games) return [];
@@ -830,36 +858,73 @@ export default function TournamentPage() {
                 </>
               )}
             </div>
-            <button
-              className="btn btn-primary"
-              onClick={generatePairings}
-              disabled={pairing || !caps?.canPair}
-            >
-              {pairing
-                ? 'Pairing…'
-                : caps?.stage === 'completed'
-                  ? 'Tournament complete'
-                  : caps?.allRoundsPaired
-                    ? 'All rounds paired'
-                    : `Generate Round ${nextPairingRound ?? '—'}`}
-            </button>
+            <div className="pairings-actions">
+              <button
+                className="btn btn-primary"
+                onClick={generatePairings}
+                disabled={pairing || !caps?.canPair}
+              >
+                {pairing
+                  ? 'Pairing…'
+                  : caps?.stage === 'completed'
+                    ? 'Tournament complete'
+                    : caps?.allRoundsPaired
+                      ? 'All rounds paired'
+                      : `Generate Round ${nextPairingRound ?? '—'}`}
+              </button>
+              {caps?.canConfirmRound && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void confirmRoundComplete()}
+                >
+                  Confirm Round {caps.pendingConfirmRound} complete
+                </button>
+              )}
+              {caps?.canUndoConfirm && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => void undoRoundConfirm()}
+                >
+                  Undo Round {resolvedConfirmedRounds(tournament!)} confirm
+                </button>
+              )}
+            </div>
           </div>
 
           {caps?.pendingResultsRound != null && !caps.allRoundsPaired && (
             <p className="form-hint stage-banner-warn">
-              Enter all Round {caps.pendingResultsRound} results before generating Round{' '}
-              {nextPairingRound ?? '—'}.
+              Enter all Round {caps.pendingResultsRound} results before confirming the round.
+            </p>
+          )}
+          {caps?.pendingConfirmRound != null && (
+            <p className="form-hint stage-banner-warn">
+              Round {caps.pendingConfirmRound} results are in. Confirm when scores are final
+              {caps.pendingConfirmRound < maxRounds
+                ? ` — then you can generate Round ${caps.pendingConfirmRound + 1}`
+                : ' to complete the tournament'}
+              .
             </p>
           )}
           {caps?.allRoundsPaired && !caps.allResultsDone && (
             <p className="form-hint">
-              All {maxRounds} rounds are paired. Enter remaining results to complete the
-              tournament.
+              All {maxRounds} rounds are paired. Enter remaining results, then confirm the final
+              round.
             </p>
           )}
           {caps?.stage === 'completed' && (
             <p className="form-hint">Results are locked for this completed tournament.</p>
           )}
+          {tournament &&
+            caps?.stage !== 'completed' &&
+            displayRound <= resolvedConfirmedRounds(tournament) &&
+            boardsForRound.length > 0 && (
+              <p className="form-hint">
+                Round {displayRound} is confirmed — results are locked. Undo confirm if you need
+                to change a score (only before the next round is paired).
+              </p>
+            )}
 
           {pairError && <div className="form-error">{pairError}</div>}
 
@@ -916,7 +981,9 @@ export default function TournamentPage() {
                       value={game.result}
                       onChange={(r) => updateGameResult(game.id, r)}
                       isBye={game.isBye}
-                      readOnly={!caps?.canEditResults}
+                      readOnly={
+                        !tournament || !canEditRoundResults(tournament, game.round)
+                      }
                     />
                   </div>
                 );

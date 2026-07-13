@@ -81,6 +81,11 @@ export const TournamentSchema = z.object({
   status: TournamentStatusSchema,
   currentRound: z.number().int().nonnegative().default(0),
   /**
+   * Highest round the director has confirmed as finished.
+   * Round N+1 cannot be paired until confirmedRounds >= N.
+   */
+  confirmedRounds: z.number().int().nonnegative().default(0),
+  /**
    * When false (default), players only pair within their category and
    * standings are per category. When true, everyone shares one pool.
    */

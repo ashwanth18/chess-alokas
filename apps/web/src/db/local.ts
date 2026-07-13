@@ -9,6 +9,8 @@ export interface LocalTournament {
   rounds: number;
   status: string;
   currentRound: number;
+  /** Highest round explicitly confirmed finished by the director (default 0). */
+  confirmedRounds?: number;
   /** false = pair/rank within each category (default); true = one mixed pool */
   mixCategories?: boolean;
   /** Top N places highlighted as prize winners (default 3). */
