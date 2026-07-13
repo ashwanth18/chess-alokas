@@ -27,7 +27,23 @@ const Router = isDesktop ? HashRouter : BrowserRouter;
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
-  if (!auth.configured) return <>{children}</>;
+  if (!auth.configured) {
+    // Packaged desktop must never silently skip login.
+    if (isDesktop) {
+      return (
+        <div className="auth-page">
+          <div className="auth-card">
+            <h1>Sign-in unavailable</h1>
+            <p className="form-hint">
+              This desktop build is missing auth configuration. Please download the latest installer
+              from chess-manager.alokas.com.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return <>{children}</>;
+  }
   if (auth.loading) {
     return (
       <div className="auth-page">

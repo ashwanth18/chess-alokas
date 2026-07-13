@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:desktop": "cross-env VITE_DESKTOP=1 vite build",
+    "build:desktop": "cross-env VITE_DESKTOP=1 vite build --mode desktop",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
