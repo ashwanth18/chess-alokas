@@ -1,14 +1,10 @@
 import { Link } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useAuth } from '../auth/AuthContext';
 
 const RELEASES_API =
   import.meta.env.VITE_GITHUB_RELEASES_API ??
   'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
-
-const RELEASES_FALLBACK =
-  import.meta.env.VITE_DESKTOP_RELEASES_BASE ??
-  'https://github.com/ashwanth18/chess-alokas/releases/latest';
 
 type PlatformKey = 'windows' | 'linux' | 'macos';
 
@@ -17,13 +13,13 @@ interface PlatformDownload {
   label: string;
   hint: string;
   url: string | null;
-  filenameHint: string;
+  available: boolean;
 }
 
 function matchAsset(name: string, platform: PlatformKey): boolean {
-  const n = name.toLowerCase();
+  const n = name.toLowerCase().replace(/\s+/g, '-');
   if (platform === 'windows') {
-    return (n.includes('setup') || n.includes('nsis') || n.endsWith('.exe')) && n.includes('win');
+    return n.endsWith('.exe') && (n.includes('win') || n.includes('setup') || n.includes('portable'));
   }
   if (platform === 'linux') {
     return n.includes('appimage') || (n.includes('linux') && (n.endsWith('.appimage') || n.endsWith('.deb')));
@@ -42,31 +38,79 @@ function preferSetup(a: string, b: string): number {
   return score(a) - score(b);
 }
 
+function WindowsIcon() {
+  return (
+    <svg className="landing-os-icon" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 13 7.5 1.1v-7.2H3v6.1ZM11.5 4.25 21 3v8.5h-9.5V4.25ZM11.5 21 21 21.75V12.5h-9.5V21Z"
+      />
+    </svg>
+  );
+}
+
+function AppleIcon() {
+  return (
+    <svg className="landing-os-icon" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M16.4 12.7c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.7 0-1.7-.7-2.8-.7-1.4 0-2.8.9-3.5 2.2-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.8-.7s1.6.7 2.8.7c1.2 0 1.9-1 2.6-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.2-.8-2.2-3.7Zm-2-6.2c.6-.7 1-1.7.9-2.7-0.9.1-1.9.6-2.5 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 1.9-.4 2.5-1.2Z"
+      />
+    </svg>
+  );
+}
+
+function LinuxIcon() {
+  return (
+    <svg className="landing-os-icon" viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M12.5 2.2c-1.4 0-2.4 1.5-2.2 3 .1.8.4 1.5.4 2.3 0 .4-.3.6-.7.8-1.7.7-3.1 2.2-3.1 4.3 0 1.3.6 2.4 1.4 3.2l-.4 1.4c-.4 1.4.2 2.4 1.4 2.8.5.2 1 .1 1.4-.1.5.8 1.3 1.4 2.3 1.4s1.8-.6 2.3-1.4c.4.2.9.3 1.4.1 1.2-.4 1.8-1.4 1.4-2.8l-.4-1.4c.8-.8 1.4-1.9 1.4-3.2 0-2.1-1.4-3.6-3.1-4.3-.4-.2-.7-.4-.7-.8 0-.8.3-1.5.4-2.3.2-1.5-.8-3-2.2-3Zm-1.8 4.6c.3 0 .6.3.6.6s-.3.6-.6.6-.6-.3-.6-.6.3-.6.6-.6Zm3.6 0c.3 0 .6.3.6.6s-.3.6-.6.6-.6-.3-.6-.6.3-.6.6-.6Zm-4.2 3.1c.8.4 1.6.6 2.4.6s1.6-.2 2.4-.6c.2 1.1-.3 2.1-1.1 2.6-.4.2-.8.4-1.3.4s-.9-.1-1.3-.4c-.8-.5-1.3-1.5-1.1-2.6Z"
+      />
+    </svg>
+  );
+}
+
+const PLATFORM_META: Record<
+  PlatformKey,
+  { label: string; defaultHint: string; Icon: () => ReactElement }
+> = {
+  windows: { label: 'Windows', defaultHint: 'Installer for Windows 10/11', Icon: WindowsIcon },
+  macos: { label: 'macOS', defaultHint: 'App for Apple Silicon & Intel', Icon: AppleIcon },
+  linux: { label: 'Linux', defaultHint: 'AppImage for most distributions', Icon: LinuxIcon },
+};
+
+const FEATURES = [
+  {
+    title: 'Offline-first',
+    body: 'Run pairings without internet. Sync when you’re back online.',
+    glyph: ' downstream',
+  },
+  {
+    title: 'FIDE Swiss',
+    body: 'Score groups, color balance, and rematch avoidance built in.',
+    glyph: '⚔',
+  },
+  {
+    title: 'Certificates',
+    body: 'Design templates, print packs, and issue digital PDFs.',
+    glyph: '📜',
+  },
+  {
+    title: 'Your account',
+    body: 'Sign in once — web and desktop share the same tournaments.',
+    glyph: '♛',
+  },
+];
+
 export default function LandingPage() {
   const auth = useAuth();
   const [downloads, setDownloads] = useState<PlatformDownload[]>([
-    {
-      key: 'windows',
-      label: 'Windows',
-      hint: 'Installer (.exe)',
-      url: null,
-      filenameHint: 'Setup win-x64',
-    },
-    {
-      key: 'linux',
-      label: 'Linux',
-      hint: 'AppImage',
-      url: null,
-      filenameHint: 'linux AppImage',
-    },
-    {
-      key: 'macos',
-      label: 'macOS',
-      hint: 'Unsigned DMG — right-click → Open',
-      url: null,
-      filenameHint: 'mac dmg',
-    },
+    { key: 'windows', label: 'Windows', hint: PLATFORM_META.windows.defaultHint, url: null, available: false },
+    { key: 'macos', label: 'macOS', hint: PLATFORM_META.macos.defaultHint, url: null, available: false },
+    { key: 'linux', label: 'Linux', hint: PLATFORM_META.linux.defaultHint, url: null, available: false },
   ]);
+  const [loadingDownloads, setLoadingDownloads] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,13 +119,15 @@ export default function LandingPage() {
         const res = await fetch(RELEASES_API, {
           headers: { Accept: 'application/vnd.github+json' },
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (!cancelled) setLoadingDownloads(false);
+          return;
+        }
         const body = (await res.json()) as {
           assets?: { name: string; browser_download_url: string }[];
-          html_url?: string;
         };
         const assets = body.assets ?? [];
-        if (cancelled || assets.length === 0) return;
+        if (cancelled) return;
 
         setDownloads((prev) =>
           prev.map((p) => {
@@ -89,13 +135,27 @@ export default function LandingPage() {
               .filter((a) => matchAsset(a.name, p.key))
               .sort((a, b) => preferSetup(a.name, b.name));
             const best = matches[0];
-            return best
-              ? { ...p, url: best.browser_download_url, hint: best.name }
-              : { ...p, url: body.html_url ?? RELEASES_FALLBACK };
+            if (!best) {
+              return {
+                ...p,
+                available: false,
+                hint: 'Coming soon',
+                url: null,
+              };
+            }
+            const friendly =
+              p.key === 'windows'
+                ? 'Windows installer'
+                : p.key === 'macos'
+                  ? 'macOS disk image'
+                  : 'Linux AppImage';
+            return { ...p, url: best.browser_download_url, hint: friendly, available: true };
           }),
         );
       } catch {
-        /* keep fallbacks */
+        /* keep defaults */
+      } finally {
+        if (!cancelled) setLoadingDownloads(false);
       }
     })();
     return () => {
@@ -128,6 +188,12 @@ export default function LandingPage() {
           Chess Alokas
         </span>
         <nav className="landing-nav">
+          <a href="#features" className="btn btn-sm btn-ghost">
+            Features
+          </a>
+          <a href="#download" className="btn btn-sm btn-ghost">
+            Download
+          </a>
           {auth.user ? (
             <Link to="/app" className="btn btn-sm btn-primary">
               Dashboard
@@ -148,16 +214,16 @@ export default function LandingPage() {
       <section className="landing-hero">
         <div className="landing-hero-board" aria-hidden />
         <div className="landing-hero-copy">
-          <p className="landing-eyebrow">Tournament manager</p>
+          <p className="landing-eyebrow">Chess tournament manager</p>
           <h1 className="landing-brand">Chess Alokas</h1>
           <p className="landing-lede">
-            Offline-first pairing for clubs and academies — Swiss rounds, certificates, and cloud
-            sync when you need it.
+            Pair rounds, track standings, and print certificates — in the browser or as a desktop
+            app. Works offline; syncs when you connect.
           </p>
           <div className="landing-cta">
             {appCta}
             <a href="#download" className="btn btn-ghost btn-lg">
-              Download desktop
+              Get the desktop app
             </a>
           </div>
         </div>
@@ -166,36 +232,90 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="landing-downloads" id="download">
-        <h2>Desktop apps</h2>
+      <section className="landing-features" id="features">
+        <h2>Built for tournament day</h2>
         <p className="landing-section-lede">
-          Run locally with the same cloud account. Installers publish on GitHub Releases.
+          Everything directors need at the boards — without fighting spreadsheets.
         </p>
-        <div className="landing-download-grid">
-          {downloads.map((d) => (
-            <a
-              key={d.key}
-              className="landing-download-card"
-              href={d.url ?? RELEASES_FALLBACK}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <span className="landing-download-os">{d.label}</span>
-              <span className="landing-download-hint">{d.url ? d.hint : 'View releases'}</span>
-            </a>
+        <div className="landing-feature-grid">
+          {FEATURES.map((f) => (
+            <article key={f.title} className="landing-feature-card">
+              <span className="landing-feature-glyph" aria-hidden>
+                {f.glyph}
+              </span>
+              <h3>{f.title}</h3>
+              <p>{f.body}</p>
+            </article>
           ))}
         </div>
-        <p className="landing-footnote">
-          macOS builds are unsigned until notarization is set up — open via Finder → right-click →
-          Open.
+      </section>
+
+      <section className="landing-downloads" id="download">
+        <h2>Download for your computer</h2>
+        <p className="landing-section-lede">
+          Same sign-in as the website. Choose your system — install and go.
         </p>
+        <div className="landing-download-grid">
+          {downloads.map((d) => {
+            const meta = PLATFORM_META[d.key];
+            const Icon = meta.Icon;
+            const disabled = !d.available || !d.url;
+            const className = `landing-download-card${disabled ? ' is-disabled' : ''}`;
+            const content = (
+              <>
+                <span className="landing-download-icon-wrap">
+                  <Icon />
+                </span>
+                <span className="landing-download-os">{d.label}</span>
+                <span className="landing-download-hint">
+                  {loadingDownloads ? 'Checking…' : d.hint}
+                </span>
+                <span className="landing-download-cta">
+                  {disabled ? (loadingDownloads ? '…' : 'Coming soon') : 'Download'}
+                </span>
+              </>
+            );
+            return disabled ? (
+              <div key={d.key} className={className} aria-disabled="true">
+                {content}
+              </div>
+            ) : (
+              <a key={d.key} className={className} href={d.url!} download>
+                {content}
+              </a>
+            );
+          })}
+        </div>
+        <p className="landing-footnote">
+          Prefer the browser? <Link to="/signup">Create a free account</Link> and run everything at
+          chess-manager.alokas.com — no install required.
+        </p>
+        <p className="landing-footnote">
+          On Mac, if the app is blocked the first time: Finder → right-click the app → Open.
+        </p>
+      </section>
+
+      <section className="landing-howto">
+        <h2>How it works</h2>
+        <ol className="landing-steps">
+          <li>
+            <strong>Sign up</strong> — email magic link, password, or Google / GitHub.
+          </li>
+          <li>
+            <strong>Create a tournament</strong> — import players, pair Swiss rounds, enter results.
+          </li>
+          <li>
+            <strong>Sync</strong> — push to the cloud or keep working offline on desktop.
+          </li>
+        </ol>
       </section>
 
       <footer className="landing-footer">
         <span>© Chess Alokas</span>
-        <a href={RELEASES_FALLBACK} target="_blank" rel="noreferrer">
-          All releases
-        </a>
+        <div className="landing-footer-links">
+          <Link to="/login">Sign in</Link>
+          <a href="#download">Downloads</a>
+        </div>
       </footer>
     </div>
   );
