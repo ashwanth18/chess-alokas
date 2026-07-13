@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
+import postgres, { type Sql } from 'postgres';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -9,6 +10,7 @@ declare module 'fastify' {
 }
 
 let supabaseAuth: SupabaseClient | null = null;
+let sessionsSql: Sql | null | undefined;
 
 export function authEnabled(): boolean {
   if (process.env['AUTH_DISABLED'] === '1') return false;
@@ -45,6 +47,32 @@ export function getServiceSupabase(): SupabaseClient | null {
   });
 }
 
+function getSessionsSql(): Sql | null {
+  if (sessionsSql !== undefined) return sessionsSql;
+  const dbUrl = process.env['DATABASE_URL'];
+  if (!dbUrl) {
+    sessionsSql = null;
+    return null;
+  }
+  sessionsSql = postgres(dbUrl, { max: 2 });
+  return sessionsSql;
+}
+
+function sessionIdFromBearer(request: FastifyRequest): string | null {
+  const header = request.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return null;
+  const token = header.slice('Bearer '.length).trim();
+  const parts = token.split('.');
+  if (parts.length < 2 || !parts[1]) return null;
+  try {
+    const json = Buffer.from(parts[1], 'base64url').toString('utf8');
+    const payload = JSON.parse(json) as { session_id?: string };
+    return typeof payload.session_id === 'string' ? payload.session_id : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (!authEnabled()) return;
 
@@ -63,6 +91,16 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   }
   request.user = data.user;
   request.userId = data.user.id;
+}
+
+export interface AuthSessionRow {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  refreshedAt: string | null;
+  userAgent: string | null;
+  ip: string | null;
+  current: boolean;
 }
 
 export const authPlugin: FastifyPluginAsync = async (app) => {
@@ -93,6 +131,84 @@ export const authPlugin: FastifyPluginAsync = async (app) => {
       })),
     };
   });
+
+  app.get('/me/sessions', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.userId) return reply.code(401).send({ error: 'Unauthorized' });
+    const sql = getSessionsSql();
+    if (!sql) {
+      return {
+        sessions: [] as AuthSessionRow[],
+        unavailable: true,
+        message:
+          'Session list requires DATABASE_URL (auth.sessions). Use Sign out all devices instead.',
+      };
+    }
+    const currentId = sessionIdFromBearer(request);
+    try {
+      const rows = await sql<
+        {
+          id: string;
+          created_at: string;
+          updated_at: string;
+          refreshed_at: string | null;
+          user_agent: string | null;
+          ip: string | null;
+        }[]
+      >`
+        SELECT id::text,
+               created_at,
+               updated_at,
+               refreshed_at,
+               user_agent,
+               ip::text AS ip
+        FROM auth.sessions
+        WHERE user_id = ${request.userId}::uuid
+        ORDER BY COALESCE(refreshed_at, updated_at, created_at) DESC
+      `;
+      const sessions: AuthSessionRow[] = rows.map((r) => ({
+        id: r.id,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+        refreshedAt: r.refreshed_at,
+        userAgent: r.user_agent,
+        ip: r.ip,
+        current: Boolean(currentId && r.id === currentId),
+      }));
+      return { sessions, unavailable: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to list sessions';
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>(
+    '/me/sessions/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      if (!request.userId) return reply.code(401).send({ error: 'Unauthorized' });
+      const sessionId = request.params.id;
+      const currentId = sessionIdFromBearer(request);
+      if (currentId && sessionId === currentId) {
+        return reply.code(400).send({
+          error: 'Cannot revoke the current session here — use Sign out this browser instead.',
+        });
+      }
+      const sql = getSessionsSql();
+      if (!sql) return reply.code(503).send({ error: 'Session admin requires DATABASE_URL' });
+      try {
+        const deleted = await sql`
+          DELETE FROM auth.sessions
+          WHERE id = ${sessionId}::uuid AND user_id = ${request.userId}::uuid
+          RETURNING id
+        `;
+        if (deleted.length === 0) return reply.code(404).send({ error: 'Session not found' });
+        return reply.code(204).send();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to revoke session';
+        return reply.code(500).send({ error: message });
+      }
+    },
+  );
 
   app.patch<{ Body: { displayName?: string } }>(
     '/me',

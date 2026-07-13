@@ -12,7 +12,7 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  if (!auth.loading && auth.user) return <Navigate to="/" replace />;
+  if (!auth.loading && auth.user) return <Navigate to="/app" replace />;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

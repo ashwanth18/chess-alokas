@@ -1,7 +1,36 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { resolveApiBaseUrl } from '../api/client';
+
+interface SessionRow {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  refreshedAt: string | null;
+  userAgent: string | null;
+  ip: string | null;
+  current: boolean;
+}
+
+function formatWhen(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function shortAgent(ua: string | null): string {
+  if (!ua) return 'Unknown device';
+  if (/Edg\//i.test(ua)) return 'Edge';
+  if (/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) return 'Chrome';
+  if (/Firefox\//i.test(ua)) return 'Firefox';
+  if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) return 'Safari';
+  if (/Electron/i.test(ua)) return 'Desktop app';
+  return ua.slice(0, 48) + (ua.length > 48 ? '…' : '');
+}
 
 export default function AccountPage() {
   const auth = useAuth();
@@ -11,6 +40,9 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [sessionsUnavailable, setSessionsUnavailable] = useState<string | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
 
   const providers = useMemo(() => {
     const ids = auth.user?.identities ?? [];
@@ -27,26 +59,87 @@ export default function AccountPage() {
     .slice(0, 2)
     .toUpperCase();
 
+  const loadSessions = useCallback(async () => {
+    if (!auth.user) return;
+    setSessionsLoading(true);
+    try {
+      const token = await auth.getAccessToken();
+      const res = await fetch(`${resolveApiBaseUrl()}/me/sessions`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        sessions?: SessionRow[];
+        unavailable?: boolean;
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setSessionsUnavailable(body.error ?? `Could not load sessions (${res.status})`);
+        setSessions([]);
+        return;
+      }
+      if (body.unavailable) {
+        setSessionsUnavailable(body.message ?? 'Sessions unavailable');
+        setSessions([]);
+      } else {
+        setSessionsUnavailable(null);
+        setSessions(body.sessions ?? []);
+      }
+    } catch (err) {
+      setSessionsUnavailable(err instanceof Error ? err.message : 'Could not load sessions');
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, [auth]);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
   async function saveProfile(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setMessage(null);
     const res = await auth.updateDisplayName(name);
     setBusy(false);
     if (res.error) setError(res.error);
-    else setMessage('Profile saved');
+    else setMessage('Profile saved.');
   }
 
   async function savePassword(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setMessage(null);
     const res = await auth.updatePassword(password);
     setBusy(false);
     if (res.error) setError(res.error);
     else {
       setPassword('');
-      setMessage('Password updated');
+      setMessage('Password updated. You can keep using this browser session.');
+    }
+  }
+
+  async function revokeSession(id: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const token = await auth.getAccessToken();
+      const res = await fetch(`${resolveApiBaseUrl()}/me/sessions/${id}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok && res.status !== 204) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Revoke failed (${res.status})`);
+      }
+      setMessage('Session revoked.');
+      await loadSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Revoke failed');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -153,16 +246,60 @@ export default function AccountPage() {
               className="btn btn-ghost"
               onClick={() => void auth.signOut('local')}
             >
-              Sign out this device
+              Sign out this browser
             </button>
             <button
               type="button"
               className="btn btn-ghost"
               onClick={() => void auth.signOut('global')}
             >
-              Sign out everywhere
+              Sign out all devices
             </button>
           </div>
+        </section>
+
+        <section className="account-panel">
+          <h3>Connected devices</h3>
+          {sessionsLoading && <p className="form-hint">Loading sessions…</p>}
+          {sessionsUnavailable && <p className="form-hint">{sessionsUnavailable}</p>}
+          {!sessionsLoading && !sessionsUnavailable && sessions.length === 0 && (
+            <p className="form-hint">No active sessions found.</p>
+          )}
+          <ul className="account-sessions">
+            {sessions.map((s) => (
+              <li key={s.id}>
+                <div className="account-sessions-row">
+                  <div>
+                    <strong>{shortAgent(s.userAgent)}</strong>
+                    {s.current && <span className="account-session-current"> This browser</span>}
+                    <div className="account-sessions-meta">
+                      <span>Last active: {formatWhen(s.refreshedAt ?? s.updatedAt)}</span>
+                      <span>Signed in: {formatWhen(s.createdAt)}</span>
+                      {s.ip && <span>IP: {s.ip}</span>}
+                    </div>
+                  </div>
+                  {!s.current && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy}
+                      onClick={() => void revokeSession(s.id)}
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            disabled={sessionsLoading}
+            onClick={() => void loadSessions()}
+          >
+            Refresh
+          </button>
         </section>
 
         <section className="account-panel">
@@ -227,7 +364,7 @@ export default function AccountPage() {
       </div>
 
       {error && <div className="form-error">{error}</div>}
-      {message && <p className="form-hint">{message}</p>}
+      {message && <p className="form-hint account-success">{message}</p>}
     </div>
   );
 }

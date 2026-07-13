@@ -57,7 +57,7 @@ export default function HomePage() {
         <div className="hero-board-bg" aria-hidden="true" />
         <div className="hero-content">
           <h1 className="hero-title">
-            <span className="hero-knight">♞</span>
+            <span className="hero-knight">♕</span>
             Chess Alokas
           </h1>
           <p className="hero-tagline">

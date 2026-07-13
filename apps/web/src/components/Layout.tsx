@@ -88,7 +88,7 @@ export default function Layout() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <NavLink to="/" className="brand" onClick={() => setMenuOpen(false)}>
+        <NavLink to="/app" className="brand" onClick={() => setMenuOpen(false)}>
           <span className="brand-knight">♞</span>
           <span className="brand-name">Chess Alokas</span>
         </NavLink>
@@ -102,7 +102,7 @@ export default function Layout() {
         </button>
 
         <nav className={`topnav ${menuOpen ? 'open' : ''}`}>
-          <NavLink to="/" end onClick={() => setMenuOpen(false)}>
+          <NavLink to="/app" end onClick={() => setMenuOpen(false)}>
             Tournaments
           </NavLink>
           <NavLink to="/tournaments/new" onClick={() => setMenuOpen(false)}>

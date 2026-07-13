@@ -16,7 +16,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  if (!auth.loading && auth.user) return <Navigate to="/" replace />;
+  if (!auth.loading && auth.user) return <Navigate to="/app" replace />;
 
   async function onPassword(e: FormEvent) {
     e.preventDefault();
@@ -25,7 +25,7 @@ export default function LoginPage() {
     const res = await auth.signInWithPassword(email.trim(), password);
     setBusy(false);
     if (res.error) setError(res.error);
-    else navigate('/');
+    else navigate('/app');
   }
 
   async function onSendOtp(e: FormEvent) {
@@ -48,7 +48,7 @@ export default function LoginPage() {
     const res = await auth.verifyOtp(email.trim(), otp.trim());
     setBusy(false);
     if (res.error) setError(res.error);
-    else navigate('/');
+    else navigate('/app');
   }
 
   return (

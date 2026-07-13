@@ -13,7 +13,7 @@ export default function AuthCallbackPage() {
     }
     void supabase.auth.getSession().then(({ data, error: err }) => {
       if (err) setError(err.message);
-      else if (data.session) navigate('/', { replace: true });
+      else if (data.session) navigate('/app', { replace: true });
       else setError('No session returned. Try signing in again.');
     });
   }, [navigate]);

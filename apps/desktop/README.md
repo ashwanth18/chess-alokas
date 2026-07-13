@@ -61,14 +61,33 @@ Edit that file for:
 
 Certificates without Supabase keys go to `%APPDATA%\Chess Alokas\certificates\`.
 
-## Production build (Windows)
+## Production build
 
 ```bash
 # From repo root — builds web (relative base), API esbuild bundle, then electron-builder
 pnpm run build:desktop
 ```
 
-Artifacts: `apps/desktop/release/` (NSIS installer + portable).
+Local artifacts land in `apps/desktop/release/`:
+
+| Platform | Artifact |
+|----------|----------|
+| Windows | `Chess-Alokas-Setup-win-x64.exe`, `Chess-Alokas-Portable-win-x64.exe` |
+| Linux | `Chess-Alokas-linux-x64.AppImage` |
+| macOS | `Chess-Alokas-mac-x64.dmg`, `Chess-Alokas-mac-arm64.dmg` (unsigned) |
+
+### GitHub Releases (CI)
+
+Push a version tag to publish installers and power the landing-page download buttons:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Workflow: `.github/workflows/desktop-release.yml` (Windows + Linux + macOS matrix).
+
+Landing page fetches `https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest`.
 
 Packaged layout under `resources/`:
 

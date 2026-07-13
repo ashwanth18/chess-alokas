@@ -17,6 +17,7 @@ import AuthCallbackPage from './pages/AuthCallbackPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import AccountPage from './pages/AccountPage';
 import SettingsPage from './pages/SettingsPage';
+import LandingPage from './pages/LandingPage';
 
 const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
@@ -38,11 +39,28 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Guests see marketing landing; signed-in users go to the tournament dashboard. */
+function RootEntry() {
+  const auth = useAuth();
+  if (isDesktop) return <Navigate to="/app" replace />;
+  if (!auth.configured) return <Navigate to="/app" replace />;
+  if (auth.loading) {
+    return (
+      <div className="auth-page">
+        <p className="form-hint">Loading…</p>
+      </div>
+    );
+  }
+  if (auth.user) return <Navigate to="/app" replace />;
+  return <LandingPage />;
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>
       <Router>
         <Routes>
+          <Route path="/" element={<RootEntry />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
@@ -54,7 +72,7 @@ createRoot(document.getElementById('root')!).render(
               </RequireAuth>
             }
           >
-            <Route path="/" element={<HomePage />} />
+            <Route path="/app" element={<HomePage />} />
             <Route path="/tournaments/new" element={<CreateTournamentPage />} />
             <Route path="/tournaments/:id" element={<TournamentPage />} />
             <Route path="/tournaments/:id/import" element={<ImportPage />} />

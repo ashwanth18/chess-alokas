@@ -228,17 +228,18 @@ export class MemoryStore implements Store {
             .map((t) => t.id),
         )
       : null;
+    const tournamentUpdated = new Set(tournaments.map((t) => t.id));
+    const childOk = (tournamentId: string, updatedAt: string) => {
+      if (ownedIds && !ownedIds.has(tournamentId)) return false;
+      return updatedAt > since || tournamentUpdated.has(tournamentId);
+    };
     return {
       tournaments,
-      categories: [...this.categories.values()].filter(
-        (c) => c.updatedAt > since && (!ownedIds || ownedIds.has(c.tournamentId)),
+      categories: [...this.categories.values()].filter((c) => childOk(c.tournamentId, c.updatedAt)),
+      participants: [...this.participants.values()].filter((p) =>
+        childOk(p.tournamentId, p.updatedAt),
       ),
-      participants: [...this.participants.values()].filter(
-        (p) => p.updatedAt > since && (!ownedIds || ownedIds.has(p.tournamentId)),
-      ),
-      games: [...this.games.values()].filter(
-        (g) => g.updatedAt > since && (!ownedIds || ownedIds.has(g.tournamentId)),
-      ),
+      games: [...this.games.values()].filter((g) => childOk(g.tournamentId, g.updatedAt)),
     };
   }
 
@@ -747,6 +748,8 @@ export class PostgresStore implements Store {
 
   async pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult> {
     if (ownerId) {
+      // When a tournament row is pulled (e.g. after owner claim), also return all of
+      // its children even if child updated_at is older than `since`.
       const [tournaments, categories, participants, games] = await Promise.all([
         this.sql<TournamentRow[]>`
           SELECT * FROM tournaments
@@ -755,17 +758,20 @@ export class PostgresStore implements Store {
         this.sql<CategoryRow[]>`
           SELECT c.* FROM categories c
           INNER JOIN tournaments t ON t.id = c.tournament_id
-          WHERE c.updated_at > ${since} AND t.owner_id = ${ownerId}
+          WHERE t.owner_id = ${ownerId}
+            AND (c.updated_at > ${since} OR t.updated_at > ${since})
         `,
         this.sql<ParticipantRow[]>`
           SELECT p.* FROM participants p
           INNER JOIN tournaments t ON t.id = p.tournament_id
-          WHERE p.updated_at > ${since} AND t.owner_id = ${ownerId}
+          WHERE t.owner_id = ${ownerId}
+            AND (p.updated_at > ${since} OR t.updated_at > ${since})
         `,
         this.sql<GameRow[]>`
           SELECT g.* FROM games g
           INNER JOIN tournaments t ON t.id = g.tournament_id
-          WHERE g.updated_at > ${since} AND t.owner_id = ${ownerId}
+          WHERE t.owner_id = ${ownerId}
+            AND (g.updated_at > ${since} OR t.updated_at > ${since})
         `,
       ]);
       return {

@@ -43,8 +43,21 @@ export default defineConfig({
           theme_color: '#0f3d2e',
           background_color: '#0f3d2e',
           display: 'standalone',
-          start_url: '/',
-          icons: [],
+          start_url: '/app',
+          icons: [
+            {
+              src: '/favicon.svg',
+              sizes: 'any',
+              type: 'image/svg+xml',
+              purpose: 'any',
+            },
+            {
+              src: '/icon-512.svg',
+              sizes: '512x512',
+              type: 'image/svg+xml',
+              purpose: 'any maskable',
+            },
+          ],
         },
       }),
   ].filter(Boolean),

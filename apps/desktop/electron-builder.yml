@@ -26,7 +26,23 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  artifactName: ${productName}-Setup-${version}-${os}-${arch}.${ext}
+  artifactName: Chess-Alokas-Setup-${os}-${arch}.${ext}
 portable:
-  artifactName: ${productName}-Portable-${version}-${os}-${arch}.${ext}
+  artifactName: Chess-Alokas-Portable-${os}-${arch}.${ext}
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Office
+  artifactName: Chess-Alokas-${os}-${arch}.${ext}
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.sports
+  artifactName: Chess-Alokas-${os}-${arch}.${ext}
+  identity: null
 asar: true

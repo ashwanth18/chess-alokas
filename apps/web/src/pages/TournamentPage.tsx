@@ -231,7 +231,7 @@ export default function TournamentPage() {
 
   useEffect(() => {
     if (tournament?.deletedAt) {
-      navigate('/', { replace: true });
+      navigate('/app', { replace: true });
     }
   }, [tournament?.deletedAt, navigate]);
 
@@ -283,7 +283,7 @@ export default function TournamentPage() {
     setDeleting(true);
     try {
       const removed = await softDeleteTournament(id);
-      if (removed) navigate('/', { replace: true });
+      if (removed) navigate('/app', { replace: true });
     } finally {
       setDeleting(false);
     }

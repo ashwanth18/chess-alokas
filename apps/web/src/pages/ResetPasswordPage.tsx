@@ -79,7 +79,7 @@ export default function ResetPasswordPage() {
           {recovering && (
             <>
               {' · '}
-              <Link to="/">Tournaments</Link>
+              <Link to="/app">Tournaments</Link>
             </>
           )}
         </p>
