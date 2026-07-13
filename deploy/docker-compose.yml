@@ -27,5 +27,7 @@ services:
     restart: unless-stopped
     depends_on:
       - api
-    ports:
-      - "80:80"
+    # Do not bind host :80 — Dokploy's Traefik already owns 80/443.
+    # Attach domain to this service on container port 80 in the Dokploy UI.
+    expose:
+      - "80"

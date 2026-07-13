@@ -42,8 +42,8 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 
 ## Prerequisites
 
-- Node.js 20+
-- [pnpm](https://pnpm.io) 9+
+- Node.js 22+ (matches Docker / Dokploy; see `.nvmrc`)
+- [pnpm](https://pnpm.io) 11 (`packageManager` in root `package.json`)
 - Optional: [Supabase](https://supabase.com) project for cloud Postgres + Storage
 - Desktop builds: Windows (NSIS / portable via electron-builder)
 

@@ -10,7 +10,8 @@ Create an **A record** (or CNAME) for `chess-manager.alokas.com` pointing at you
 
 1. Create a new **Docker Compose** application from this repo.
 2. Set compose path to `deploy/docker-compose.yml` (build context is repo root).
-3. Attach domain `chess-manager.alokas.com` with HTTPS (Let’s Encrypt / Dokploy certs) to the `web` service (port 80).
+3. Attach domain `chess-manager.alokas.com` with HTTPS (Let’s Encrypt / Dokploy certs) to the **`web`** service, container port **80**.
+4. Do **not** publish host ports 80/443 in compose — Dokploy’s proxy already binds them. Compose only `expose`s port 80 on `web`.
 
 ## 3. Environment variables (Dokploy UI — never commit)
 

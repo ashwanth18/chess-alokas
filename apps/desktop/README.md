@@ -29,7 +29,7 @@ Long-lived “electron UI” vs “web UI” branches diverge. Keep **one** Reac
 
 ## Dev
 
-Prerequisites: Node 20+, pnpm, from repo root.
+Prerequisites: Node 22+ (see repo `.nvmrc`), pnpm 11, from repo root.
 
 ```bash
 pnpm install
