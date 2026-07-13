@@ -1,6 +1,7 @@
 {
   "name": "chess-alokas",
   "private": true,
+  "packageManager": "pnpm@11.12.0",
   "scripts": {
     "dev": "pnpm -r --parallel --filter @chess-alokas/api --filter @chess-alokas/web dev",
     "dev:desktop": "pnpm --filter @chess-alokas/desktop run build:main && pnpm --filter @chess-alokas/desktop run dev",
