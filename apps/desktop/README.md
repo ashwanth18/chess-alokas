@@ -78,14 +78,17 @@ Local artifacts land in `apps/desktop/release/`:
 
 ### GitHub Releases (CI)
 
-Push a version tag to publish installers and power the landing-page download buttons:
+Bump `apps/desktop/package.json` `version`, then push a matching tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+# e.g. version 0.1.3 in package.json
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 Workflow: `.github/workflows/desktop-release.yml` (Windows + Linux + macOS matrix).
+
+Packaged apps check GitHub Releases for updates on startup (and from Settings). Windows **installer** builds can download + restart in place via `electron-updater`. Portable and unsigned macOS builds open the release download page instead.
 
 Landing page fetches `https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest`.
 

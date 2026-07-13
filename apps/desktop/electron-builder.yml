@@ -16,6 +16,11 @@ extraResources:
     to: api
   - from: resources/api.env.example
     to: api.env.example
+publish:
+  provider: github
+  owner: ashwanth18
+  repo: chess-alokas
+  releaseType: release
 win:
   target:
     - target: nsis

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import log from 'electron-log/main';
 import { startApiSidecar, type SidecarHandle } from './sidecar.js';
+import { getLastUpdateStatus, setupAutoUpdater } from './updater.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10,7 +11,10 @@ app.setName('Chess Alokas');
 app.setPath('userData', path.join(app.getPath('appData'), 'Chess Alokas'));
 
 log.initialize();
-log.info('Chess Alokas desktop starting', { packaged: app.isPackaged });
+log.info('Chess Alokas desktop starting', {
+  packaged: app.isPackaged,
+  version: app.getVersion(),
+});
 
 const CLOUD_API_URL =
   process.env['CHESS_ALOKAS_API_URL'] ?? 'https://chess-manager.alokas.com/api';
@@ -23,6 +27,8 @@ const isDev = !app.isPackaged && process.env['ELECTRON_DEV'] !== '0';
 /** Packaged builds use the cloud API by default (no secrets on the device). */
 const useLocalSidecar = isDev || process.env['DESKTOP_LOCAL_API'] === '1';
 
+const updater = setupAutoUpdater(() => mainWindow);
+
 function registerIpc() {
   ipcMain.on('desktop:get-api-base-url', (event) => {
     event.returnValue = apiBaseUrl;
@@ -33,6 +39,20 @@ function registerIpc() {
   ipcMain.on('desktop:get-user-data-path', (event) => {
     event.returnValue = app.getPath('userData');
   });
+
+  ipcMain.handle('desktop:check-for-updates', async () => {
+    await updater.check();
+  });
+  ipcMain.handle('desktop:download-update', async () => {
+    await updater.download();
+  });
+  ipcMain.handle('desktop:install-update', () => {
+    updater.install();
+  });
+  ipcMain.handle('desktop:open-download-page', (_event, url?: string) => {
+    updater.openDownloadPage(typeof url === 'string' ? url : undefined);
+  });
+  ipcMain.handle('desktop:get-update-status', () => getLastUpdateStatus());
 }
 
 async function createWindow() {
@@ -41,7 +61,7 @@ async function createWindow() {
     height: 840,
     minWidth: 960,
     minHeight: 640,
-    title: 'Chess Alokas',
+    title: `Chess Alokas ${app.getVersion()}`,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -51,7 +71,13 @@ async function createWindow() {
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+    // Quiet startup check shortly after UI is ready.
+    setTimeout(() => {
+      void updater.check();
+    }, 2500);
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);

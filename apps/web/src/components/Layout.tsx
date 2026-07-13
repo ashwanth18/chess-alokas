@@ -4,6 +4,7 @@ import { checkOnline } from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { getLastSyncAt } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
+import DesktopUpdateBanner from './DesktopUpdateBanner';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -207,12 +208,22 @@ export default function Layout() {
         />
       )}
 
+      <DesktopUpdateBanner />
+
       <main className="page-content">
         <Outlet />
       </main>
 
       <footer className="app-footer">
-        <span>Chess Alokas · Offline-first tournament management</span>
+        <span>
+          Chess Alokas · Offline-first tournament management
+          {window.desktop?.isDesktop ? (
+            <>
+              {' '}
+              · <span className="app-footer-version">v{window.desktop.getAppVersion()}</span>
+            </>
+          ) : null}
+        </span>
         <span className="app-footer-links">
           {!window.desktop?.isDesktop && (
             <Link to="/" className="app-footer-link">

@@ -1,50 +1,122 @@
 import { Link } from 'react-router-dom';
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useAuth } from '../auth/AuthContext';
 
 type PlatformKey = 'windows' | 'linux' | 'macos';
+
+type OptionId =
+  | 'win-setup'
+  | 'win-portable'
+  | 'mac-arm64'
+  | 'mac-x64'
+  | 'linux-appimage';
 
 const RELEASES_API =
   import.meta.env.VITE_GITHUB_RELEASES_API ??
   'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
 
-/** Direct download links shown as normal “Download” buttons (not branded as GitHub). */
-const DIRECT_DOWNLOADS: Partial<Record<PlatformKey, string>> = {
-  windows:
-    import.meta.env.VITE_DOWNLOAD_WINDOWS_URL ??
-    'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.2/Chess-Alokas-Setup-win-x64.exe',
-  linux: import.meta.env.VITE_DOWNLOAD_LINUX_URL || undefined,
-  macos: import.meta.env.VITE_DOWNLOAD_MACOS_URL || undefined,
-};
+const RELEASE_BASE =
+  import.meta.env.VITE_DOWNLOAD_RELEASE_BASE ??
+  'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.3';
 
-interface PlatformDownload {
-  key: PlatformKey;
+interface DownloadOptionDef {
+  id: OptionId;
+  platform: PlatformKey;
   label: string;
-  hint: string;
+  detail: string;
+  /** Used when GitHub API is unavailable */
+  fallbackUrl: string;
+  match: (assetName: string) => boolean;
+}
+
+const DOWNLOAD_OPTIONS: DownloadOptionDef[] = [
+  {
+    id: 'win-setup',
+    platform: 'windows',
+    label: 'Installer',
+    detail: 'Recommended · Windows 10/11',
+    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-Setup-win-x64.exe`,
+    match: (n) => n.includes('setup') && n.includes('win') && n.endsWith('.exe'),
+  },
+  {
+    id: 'win-portable',
+    platform: 'windows',
+    label: 'Portable',
+    detail: 'No install · run from a folder',
+    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-Portable-win-x64.exe`,
+    match: (n) => n.includes('portable') && n.includes('win') && n.endsWith('.exe'),
+  },
+  {
+    id: 'mac-arm64',
+    platform: 'macos',
+    label: 'Apple Silicon',
+    detail: 'M1, M2, M3, M4',
+    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-mac-arm64.dmg`,
+    match: (n) =>
+      (n.includes('mac') || n.includes('darwin')) &&
+      n.includes('arm64') &&
+      n.endsWith('.dmg') &&
+      !n.includes('blockmap'),
+  },
+  {
+    id: 'mac-x64',
+    platform: 'macos',
+    label: 'Intel',
+    detail: 'Intel Macs',
+    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-mac-x64.dmg`,
+    match: (n) =>
+      (n.includes('mac') || n.includes('darwin')) &&
+      (n.includes('x64') || n.includes('x86_64') || n.includes('intel')) &&
+      n.endsWith('.dmg') &&
+      !n.includes('blockmap') &&
+      !n.includes('arm64'),
+  },
+  {
+    id: 'linux-appimage',
+    platform: 'linux',
+    label: 'AppImage',
+    detail: 'Most distributions · x86_64',
+    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-linux-x86_64.AppImage`,
+    match: (n) => n.includes('appimage') || (n.includes('linux') && n.endsWith('.appimage')),
+  },
+];
+
+interface ResolvedOption {
+  id: OptionId;
+  platform: PlatformKey;
+  label: string;
+  detail: string;
   url: string | null;
   available: boolean;
 }
 
-function matchAsset(name: string, platform: PlatformKey): boolean {
-  const n = name.toLowerCase().replace(/\s+/g, '-');
-  if (platform === 'windows') {
-    return n.endsWith('.exe') && (n.includes('win') || n.includes('setup') || n.includes('portable'));
+function detectClientHints(): { platform: PlatformKey | null; preferArm: boolean } {
+  if (typeof navigator === 'undefined') return { platform: null, preferArm: false };
+  const ua = navigator.userAgent.toLowerCase();
+  const platform = navigator.platform?.toLowerCase() ?? '';
+  const arch = (
+    navigator as Navigator & { userAgentData?: { architecture?: string } }
+  ).userAgentData?.architecture?.toLowerCase();
+  const preferArm = arch === 'arm' || ua.includes('arm64') || ua.includes('aarch64');
+
+  if (ua.includes('win')) return { platform: 'windows', preferArm: false };
+  if (ua.includes('linux') && !ua.includes('android')) {
+    return { platform: 'linux', preferArm };
   }
-  if (platform === 'linux') {
-    return n.includes('appimage') || (n.includes('linux') && (n.endsWith('.appimage') || n.endsWith('.deb')));
+  if (ua.includes('mac') || platform.includes('mac')) {
+    // Most Mac browsers still report "MacIntel"; default to Apple Silicon when unknown.
+    return { platform: 'macos', preferArm: arch ? preferArm : true };
   }
-  return n.includes('mac') || n.includes('darwin') || n.endsWith('.dmg');
+  return { platform: null, preferArm: false };
 }
 
-function preferSetup(a: string, b: string): number {
-  const score = (n: string) => {
-    const x = n.toLowerCase();
-    if (x.includes('setup') || x.includes('nsis')) return 0;
-    if (x.includes('portable')) return 2;
-    if (x.endsWith('.dmg') && x.includes('arm64')) return 0;
-    return 1;
-  };
-  return score(a) - score(b);
+function isRecommended(option: ResolvedOption, hints: ReturnType<typeof detectClientHints>): boolean {
+  if (!hints.platform || option.platform !== hints.platform) return false;
+  if (option.id === 'win-setup') return true;
+  if (option.id === 'linux-appimage') return true;
+  if (option.id === 'mac-arm64') return hints.preferArm;
+  if (option.id === 'mac-x64') return !hints.preferArm;
+  return false;
 }
 
 function WindowsIcon() {
@@ -82,18 +154,20 @@ function LinuxIcon() {
 
 const PLATFORM_META: Record<
   PlatformKey,
-  { label: string; defaultHint: string; Icon: () => ReactElement }
+  { label: string; Icon: () => ReactElement }
 > = {
-  windows: { label: 'Windows', defaultHint: 'Installer for Windows 10/11', Icon: WindowsIcon },
-  macos: { label: 'macOS', defaultHint: 'App for Apple Silicon & Intel', Icon: AppleIcon },
-  linux: { label: 'Linux', defaultHint: 'AppImage for most distributions', Icon: LinuxIcon },
+  windows: { label: 'Windows', Icon: WindowsIcon },
+  macos: { label: 'macOS', Icon: AppleIcon },
+  linux: { label: 'Linux', Icon: LinuxIcon },
 };
+
+const PLATFORM_ORDER: PlatformKey[] = ['windows', 'macos', 'linux'];
 
 const FEATURES = [
   {
     title: 'Offline-first',
     body: 'Run pairings without internet. Sync when you’re back online.',
-    glyph: ' downstream',
+    glyph: '♟',
   },
   {
     title: 'FIDE Swiss',
@@ -112,26 +186,21 @@ const FEATURES = [
   },
 ];
 
+function fallbackOptions(): ResolvedOption[] {
+  return DOWNLOAD_OPTIONS.map((o) => ({
+    id: o.id,
+    platform: o.platform,
+    label: o.label,
+    detail: o.detail,
+    url: o.fallbackUrl,
+    available: Boolean(o.fallbackUrl),
+  }));
+}
+
 export default function LandingPage() {
   const auth = useAuth();
-  const [downloads, setDownloads] = useState<PlatformDownload[]>(() =>
-    (['windows', 'macos', 'linux'] as PlatformKey[]).map((key) => {
-      const direct = DIRECT_DOWNLOADS[key];
-      return {
-        key,
-        label: PLATFORM_META[key].label,
-        hint: direct
-          ? key === 'windows'
-            ? 'Windows installer'
-            : key === 'macos'
-              ? 'macOS disk image'
-              : 'Linux AppImage'
-          : PLATFORM_META[key].defaultHint,
-        url: direct ?? null,
-        available: Boolean(direct),
-      };
-    }),
-  );
+  const clientHints = useMemo(() => detectClientHints(), []);
+  const [options, setOptions] = useState<ResolvedOption[]>(fallbackOptions);
   const [loadingDownloads, setLoadingDownloads] = useState(true);
 
   useEffect(() => {
@@ -151,27 +220,21 @@ export default function LandingPage() {
         const assets = body.assets ?? [];
         if (cancelled) return;
 
-        setDownloads((prev) =>
-          prev.map((p) => {
-            if (p.available && p.url) return p;
-            const matches = assets
-              .filter((a) => matchAsset(a.name, p.key))
-              .sort((a, b) => preferSetup(a.name, b.name));
-            const best = matches[0];
-            if (!best) {
-              return { ...p, available: false, hint: 'Coming soon', url: null };
-            }
-            const friendly =
-              p.key === 'windows'
-                ? 'Windows installer'
-                : p.key === 'macos'
-                  ? 'macOS disk image'
-                  : 'Linux AppImage';
-            return { ...p, url: best.browser_download_url, hint: friendly, available: true };
+        setOptions(
+          DOWNLOAD_OPTIONS.map((def) => {
+            const hit = assets.find((a) => def.match(a.name.toLowerCase()));
+            return {
+              id: def.id,
+              platform: def.platform,
+              label: def.label,
+              detail: def.detail,
+              url: hit?.browser_download_url ?? def.fallbackUrl,
+              available: Boolean(hit?.browser_download_url || def.fallbackUrl),
+            };
           }),
         );
       } catch {
-        /* keep direct links / coming soon */
+        /* keep fallbacks */
       } finally {
         if (!cancelled) setLoadingDownloads(false);
       }
@@ -180,6 +243,13 @@ export default function LandingPage() {
       cancelled = true;
     };
   }, []);
+
+  const platforms = PLATFORM_ORDER.map((key) => ({
+    key,
+    ...PLATFORM_META[key],
+    options: options.filter((o) => o.platform === key),
+    isClientOs: clientHints.platform === key,
+  })).sort((a, b) => Number(b.isClientOs) - Number(a.isClientOs));
 
   const appCta = auth.user ? (
     <Link to="/app" className="btn btn-primary btn-lg">
@@ -271,36 +341,72 @@ export default function LandingPage() {
       <section className="landing-downloads" id="download">
         <h2>Download for your computer</h2>
         <p className="landing-section-lede">
-          Same sign-in as the website. Choose your system — install and go.
+          Same sign-in as the website. Pick your system and the build that fits.
         </p>
         <div className="landing-download-grid">
-          {downloads.map((d) => {
-            const meta = PLATFORM_META[d.key];
-            const Icon = meta.Icon;
-            const disabled = !d.available || !d.url;
-            const className = `landing-download-card${disabled ? ' is-disabled' : ''}`;
-            const content = (
-              <>
-                <span className="landing-download-icon-wrap">
-                  <Icon />
-                </span>
-                <span className="landing-download-os">{d.label}</span>
-                <span className="landing-download-hint">
-                  {loadingDownloads ? 'Checking…' : d.hint}
-                </span>
-                <span className="landing-download-cta">
-                  {disabled ? (loadingDownloads ? '…' : 'Coming soon') : 'Download'}
-                </span>
-              </>
-            );
-            return disabled ? (
-              <div key={d.key} className={className} aria-disabled="true">
-                {content}
+          {platforms.map((p) => {
+            const Icon = p.Icon;
+            return (
+              <div
+                key={p.key}
+                className={`landing-download-card${p.isClientOs ? ' is-current-os' : ''}`}
+              >
+                <div className="landing-download-card-head">
+                  <span className="landing-download-icon-wrap">
+                    <Icon />
+                  </span>
+                  <div>
+                    <span className="landing-download-os">{p.label}</span>
+                    {p.isClientOs ? (
+                      <span className="landing-download-detected">Your system</span>
+                    ) : null}
+                  </div>
+                </div>
+                <ul className="landing-download-options">
+                  {p.options.map((opt) => {
+                    const recommended = isRecommended(opt, clientHints);
+                    const disabled = !opt.available || !opt.url;
+                    const rowClass = [
+                      'landing-download-option',
+                      recommended ? 'is-recommended' : '',
+                      disabled ? 'is-disabled' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
+                    const inner = (
+                      <>
+                        <span className="landing-download-option-text">
+                          <span className="landing-download-option-label">
+                            {opt.label}
+                            {recommended ? (
+                              <span className="landing-download-badge">Recommended</span>
+                            ) : null}
+                          </span>
+                          <span className="landing-download-option-detail">
+                            {loadingDownloads ? 'Checking latest…' : opt.detail}
+                          </span>
+                        </span>
+                        <span className="landing-download-option-cta">
+                          {disabled ? (loadingDownloads ? '…' : 'Soon') : 'Download'}
+                        </span>
+                      </>
+                    );
+                    return (
+                      <li key={opt.id}>
+                        {disabled ? (
+                          <div className={rowClass} aria-disabled="true">
+                            {inner}
+                          </div>
+                        ) : (
+                          <a className={rowClass} href={opt.url!} download>
+                            {inner}
+                          </a>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
-            ) : (
-              <a key={d.key} className={className} href={d.url!} download>
-                {content}
-              </a>
             );
           })}
         </div>
@@ -309,7 +415,9 @@ export default function LandingPage() {
           chess-manager.alokas.com — no install required.
         </p>
         <p className="landing-footnote">
-          On Mac, if the app is blocked the first time: Finder → right-click the app → Open.
+          On Mac, if the app is blocked the first time: Finder → right-click the app → Open. On
+          Windows, SmartScreen may warn until the app builds reputation — choose More info → Run
+          anyway.
         </p>
       </section>
 

@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext';
 import { checkOnline } from '../api/client';
 import { getLastSyncAt } from '../db/local';
 import { syncOnline } from '../sync/sync';
+import type { DesktopUpdateStatus } from '../desktop';
 
 export default function SettingsPage() {
   const auth = useAuth();
@@ -12,10 +13,22 @@ export default function SettingsPage() {
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<DesktopUpdateStatus | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const isDesktop = Boolean(window.desktop?.isDesktop);
+  const desktopVersion = isDesktop ? window.desktop!.getAppVersion() : null;
 
   useEffect(() => {
     void checkOnline().then(setOnline);
     void getLastSyncAt().then(setLastSync);
+  }, []);
+
+  useEffect(() => {
+    if (!window.desktop?.onUpdateStatus) return;
+    return window.desktop.onUpdateStatus((status) => {
+      setUpdateStatus(status);
+      if (status.status !== 'checking') setCheckingUpdate(false);
+    });
   }, []);
 
   async function runSync() {
@@ -66,10 +79,10 @@ export default function SettingsPage() {
             <dt>Last sync</dt>
             <dd>{lastSync ? new Date(lastSync).toLocaleString() : 'Never'}</dd>
           </div>
-          {window.desktop?.isDesktop && (
+          {isDesktop && (
             <div>
               <dt>Desktop version</dt>
-              <dd>{window.desktop.getAppVersion()}</dd>
+              <dd>v{desktopVersion}</dd>
             </div>
           )}
         </dl>
@@ -91,6 +104,71 @@ export default function SettingsPage() {
         {error && <div className="form-error">{error}</div>}
         {message && <p className="form-hint">{message}</p>}
       </section>
+
+      {isDesktop && (
+        <section className="account-panel">
+          <h3>Desktop updates</h3>
+          <p className="form-hint">
+            Installed version <strong>v{desktopVersion}</strong>. The app checks GitHub Releases on
+            startup. Windows installer builds can download and restart in place; portable / macOS
+            builds open the download page instead.
+          </p>
+          <dl className="settings-dl">
+            <div>
+              <dt>Status</dt>
+              <dd>
+                {updateStatus?.message ||
+                  (checkingUpdate ? 'Checking…' : 'No update check yet — click below.')}
+              </dd>
+            </div>
+            {updateStatus?.version && (
+              <div>
+                <dt>Latest</dt>
+                <dd>v{updateStatus.version}</dd>
+              </div>
+            )}
+          </dl>
+          <div className="account-actions">
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={checkingUpdate || updateStatus?.status === 'downloading'}
+              onClick={() => {
+                setCheckingUpdate(true);
+                void window.desktop?.checkForUpdates();
+              }}
+            >
+              {checkingUpdate || updateStatus?.status === 'checking'
+                ? 'Checking…'
+                : 'Check for updates'}
+            </button>
+            {updateStatus?.status === 'available' && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  if (updateStatus.canInstall) void window.desktop?.downloadUpdate();
+                  else void window.desktop?.openDownloadPage(updateStatus.downloadPageUrl);
+                }}
+              >
+                {updateStatus.canInstall ? 'Download update' : 'Get update'}
+              </button>
+            )}
+            {updateStatus?.status === 'downloading' && (
+              <span className="form-hint">{updateStatus.percent ?? 0}%</span>
+            )}
+            {updateStatus?.status === 'downloaded' && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void window.desktop?.installUpdate()}
+              >
+                Restart to update
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="account-panel">
         <h3>About</h3>
