@@ -299,13 +299,37 @@ export async function apiPublicTableResult(
   slug: string,
   sessionToken: string,
   result: string,
+  arbiterName: string,
 ) {
   return req<{ ok: true; table: FloorTableView }>(
     `/public/tables/${encodeURIComponent(slug)}/result`,
     {
       method: 'POST',
       headers: { 'X-Arbiter-Session': sessionToken },
-      body: JSON.stringify({ result, confirm: true }),
+      body: JSON.stringify({ result, confirm: true, arbiterName }),
     },
   );
+}
+
+export async function apiDirectorSetGameResult(
+  gameId: string,
+  body: {
+    result: string;
+    confirm?: true;
+    note?: string;
+    actorName?: string;
+  },
+) {
+  return req<{
+    id: string;
+    result: string;
+    resultEnteredByName?: string | null;
+    resultEnteredByRole?: string | null;
+    resultOverrideCount?: number;
+    resultLockedAt?: string | null;
+    updatedAt: string;
+  }>(`/games/${gameId}/result`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
 }

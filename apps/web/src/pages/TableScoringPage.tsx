@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import type { ArbiterScorableResult } from '@chess-alokas/shared';
 import {
   apiPublicTableGet,
@@ -7,6 +7,13 @@ import {
   apiPublicTableSession,
   type FloorTableView,
 } from '../api/client';
+import ColorSide from '../components/ColorSide';
+import TableQrScanner from '../components/TableQrScanner';
+import {
+  clearFloorPin,
+  loadFloorCredentials,
+  saveFloorCredentials,
+} from '../lib/floorCredentials';
 
 const SESSION_KEY = (slug: string) => `chess-alokas-arbiter-session:${slug}`;
 
@@ -49,34 +56,74 @@ function resultLabel(result: string | null): string {
   return opt ? `${opt.label} (${opt.hint})` : result;
 }
 
+function Matchup({
+  whiteName,
+  blackName,
+}: {
+  whiteName: string | null;
+  blackName: string | null;
+}) {
+  return (
+    <div className="table-score-matchup">
+      <div className="table-score-player table-score-player-white">
+        <ColorSide color="white" />
+        <strong className="table-score-player-name">{whiteName ?? '—'}</strong>
+      </div>
+      <div className="table-score-vs" aria-hidden>
+        vs
+      </div>
+      <div className="table-score-player table-score-player-black">
+        <ColorSide color="black" onDark />
+        <strong className="table-score-player-name">{blackName ?? '—'}</strong>
+      </div>
+    </div>
+  );
+}
+
 export default function TableScoringPage() {
   const { slug = '' } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
   const [view, setView] = useState<FloorTableView | null>(null);
   const [token, setToken] = useState<string | null>(() => (slug ? loadSession(slug) : null));
+  const [arbiterName, setArbiterName] = useState('');
   const [pin, setPin] = useState('');
   const [selected, setSelected] = useState<ArbiterScorableResult | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
 
-  const refresh = useCallback(async (session = token) => {
-    if (!slug) return;
-    setLoading(true);
-    setError(null);
-    const res = await apiPublicTableGet(slug, session);
-    setLoading(false);
-    if (!res.ok) {
-      setError(res.error);
-      setView(null);
-      return;
-    }
-    setView(res.data);
-    if (res.data.status === 'needs_pin' && session) {
-      clearSession(slug);
-      setToken(null);
-    }
-  }, [slug, token]);
+  const refresh = useCallback(
+    async (session = token) => {
+      if (!slug) return;
+      setLoading(true);
+      setError(null);
+      const res = await apiPublicTableGet(slug, session);
+      setLoading(false);
+      if (!res.ok) {
+        setError(res.error);
+        setView(null);
+        return;
+      }
+      setView(res.data);
+      const creds = loadFloorCredentials(res.data.tournamentId);
+      if (creds) {
+        setArbiterName((n) => n || creds.arbiterName);
+        if (creds.pinRound != null && res.data.pinRound != null && creds.pinRound !== res.data.pinRound) {
+          clearFloorPin(res.data.tournamentId);
+          setPin('');
+        } else if (creds.pin && !session) {
+          setPin(creds.pin);
+        }
+      }
+      if (res.data.status === 'needs_pin' && session) {
+        clearSession(slug);
+        setToken(null);
+      }
+    },
+    [slug, token],
+  );
 
   useEffect(() => {
     void refresh();
@@ -85,6 +132,11 @@ export default function TableScoringPage() {
   async function submitPin(e: React.FormEvent) {
     e.preventDefault();
     if (!slug || busy) return;
+    const name = arbiterName.trim();
+    if (name.length < 1) {
+      setError('Enter your name');
+      return;
+    }
     setBusy(true);
     setError(null);
     const res = await apiPublicTableSession(slug, pin.trim());
@@ -96,14 +148,23 @@ export default function TableScoringPage() {
     saveSession(slug, res.data.token);
     setToken(res.data.token);
     setView(res.data.table);
-    setPin('');
+    saveFloorCredentials(res.data.table.tournamentId, {
+      arbiterName: name,
+      pin: pin.trim(),
+      pinRound: res.data.table.pinRound,
+    });
   }
 
   async function confirmResult() {
     if (!slug || !token || !selected || busy) return;
+    const name = arbiterName.trim();
+    if (name.length < 1) {
+      setError('Enter your name before confirming');
+      return;
+    }
     setBusy(true);
     setError(null);
-    const res = await apiPublicTableResult(slug, token, selected);
+    const res = await apiPublicTableResult(slug, token, selected, name);
     setBusy(false);
     if (!res.ok) {
       setError(res.error);
@@ -113,6 +174,13 @@ export default function TableScoringPage() {
         void refresh(null);
       }
       return;
+    }
+    if (view?.tournamentId) {
+      saveFloorCredentials(view.tournamentId, {
+        arbiterName: name,
+        pin: loadFloorCredentials(view.tournamentId)?.pin ?? '',
+        pinRound: view.pinRound,
+      });
     }
     setView(res.data.table);
     setConfirming(false);
@@ -127,6 +195,13 @@ export default function TableScoringPage() {
     );
   }
 
+  const showScan =
+    view &&
+    (view.status === 'locked' ||
+      view.status === 'bye' ||
+      view.status === 'no_game' ||
+      view.status === 'confirmed_closed');
+
   return (
     <div className="table-score-page">
       <header className="table-score-header">
@@ -140,12 +215,24 @@ export default function TableScoringPage() {
 
       {view?.status === 'needs_pin' && (
         <form className="table-score-card" onSubmit={(e) => void submitPin(e)}>
-          <h2>Enter round PIN</h2>
+          <h2>Unlock table</h2>
           <p className="form-hint">
-            Ask the director for this round&apos;s PIN. It changes every new round.
+            Your name is saved on this phone. The PIN is remembered until the director rotates it.
           </p>
           <label>
-            PIN
+            Your name
+            <input
+              className="input"
+              autoComplete="name"
+              value={arbiterName}
+              onChange={(e) => setArbiterName(e.target.value)}
+              required
+              maxLength={80}
+              placeholder="Floor arbiter name"
+            />
+          </label>
+          <label>
+            Round PIN
             <input
               className="input"
               inputMode="numeric"
@@ -157,7 +244,11 @@ export default function TableScoringPage() {
               required
             />
           </label>
-          <button type="submit" className="btn btn-primary" disabled={busy || pin.trim().length < 4}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={busy || pin.trim().length < 4 || arbiterName.trim().length < 1}
+          >
             {busy ? 'Checking…' : 'Unlock table'}
           </button>
         </form>
@@ -192,16 +283,7 @@ export default function TableScoringPage() {
         <div className="table-score-card is-locked">
           <h2>Result locked</h2>
           <p className="table-score-round">Round {view.round}</p>
-          <div className="table-score-players">
-            <div>
-              <span className="table-score-side">White</span>
-              <strong>{view.whiteName ?? '—'}</strong>
-            </div>
-            <div>
-              <span className="table-score-side">Black</span>
-              <strong>{view.blackName ?? '—'}</strong>
-            </div>
-          </div>
+          <Matchup whiteName={view.whiteName} blackName={view.blackName} />
           <p className="table-score-result">{resultLabel(view.result)}</p>
           <p className="form-hint">This result cannot be changed from the floor.</p>
         </div>
@@ -210,16 +292,10 @@ export default function TableScoringPage() {
       {view && view.sessionOk && view.status === 'pending' && !confirming && (
         <div className="table-score-card">
           <p className="table-score-round">Round {view.round}</p>
-          <div className="table-score-players">
-            <div>
-              <span className="table-score-side">White</span>
-              <strong>{view.whiteName ?? '—'}</strong>
-            </div>
-            <div>
-              <span className="table-score-side">Black</span>
-              <strong>{view.blackName ?? '—'}</strong>
-            </div>
-          </div>
+          {arbiterName.trim() && (
+            <p className="form-hint">Scoring as <strong>{arbiterName.trim()}</strong></p>
+          )}
+          <Matchup whiteName={view.whiteName} blackName={view.blackName} />
           <h2>Select result</h2>
           <div className="table-score-options">
             {RESULT_OPTIONS.map((opt) => (
@@ -248,17 +324,11 @@ export default function TableScoringPage() {
       {view && view.sessionOk && view.status === 'pending' && confirming && selected && (
         <div className="table-score-card">
           <h2>Confirm result</h2>
-          <p className="table-score-round">Round {view.round} · Table {view.tableNumber}</p>
-          <div className="table-score-players">
-            <div>
-              <span className="table-score-side">White</span>
-              <strong>{view.whiteName ?? '—'}</strong>
-            </div>
-            <div>
-              <span className="table-score-side">Black</span>
-              <strong>{view.blackName ?? '—'}</strong>
-            </div>
-          </div>
+          <p className="table-score-round">
+            Round {view.round} · Table {view.tableNumber}
+            {arbiterName.trim() ? ` · ${arbiterName.trim()}` : ''}
+          </p>
+          <Matchup whiteName={view.whiteName} blackName={view.blackName} />
           <p className="table-score-result">{resultLabel(selected)}</p>
           <p className="form-hint stage-banner-warn">
             You cannot change this after confirm. Double-check names and result.
@@ -282,6 +352,29 @@ export default function TableScoringPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {showScan && (
+        <div className="table-score-next">
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            onClick={() => setScanning(true)}
+          >
+            Scan next table
+          </button>
+          <p className="form-hint">Opens the camera — or scan with your phone camera app.</p>
+        </div>
+      )}
+
+      {scanning && (
+        <TableQrScanner
+          onSlug={(next) => {
+            setScanning(false);
+            navigate(`/t/${next}`);
+          }}
+          onClose={() => setScanning(false)}
+        />
       )}
     </div>
   );

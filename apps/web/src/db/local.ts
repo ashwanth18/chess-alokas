@@ -80,6 +80,9 @@ export interface LocalGame {
   result: string;
   isBye: boolean;
   resultLockedAt?: string | null;
+  resultEnteredByName?: string | null;
+  resultEnteredByRole?: 'floor' | 'director' | null;
+  resultOverrideCount?: number;
   updatedAt: string;
   deletedAt?: string | null;
   dirty: 1 | 0;

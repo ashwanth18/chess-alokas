@@ -154,6 +154,9 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
       await db.games.put({
         ...remote,
         resultLockedAt: remote.resultLockedAt ?? null,
+        resultEnteredByName: remote.resultEnteredByName ?? null,
+        resultEnteredByRole: remote.resultEnteredByRole ?? null,
+        resultOverrideCount: remote.resultOverrideCount ?? 0,
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalGame);

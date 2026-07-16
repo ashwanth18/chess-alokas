@@ -24,12 +24,19 @@ import { matchesTextSearch } from '../lib/textSearch';
 import { softDeleteTournament } from '../lib/deleteTournament';
 import { ensurePoolCategoryId, repairTournamentLocalData } from '../lib/poolCategory';
 import { DEFAULT_PRIZE_PLACES, resolvePrizePlaces } from '../lib/prizePlaces';
-import { apiFloorPrepare, apiFloorRotatePin, apiFloorListTables } from '../api/client';
+import {
+  apiFloorPrepare,
+  apiFloorRotatePin,
+  apiFloorListTables,
+  apiDirectorSetGameResult,
+} from '../api/client';
 import { syncOnline } from '../sync/sync';
+import { subscribeTournamentGames } from '../lib/gamesRealtime';
 import {
   buildTableStickerPdf,
   downloadPdfBytes,
 } from '../lib/tableStickers';
+import { useAuth } from '../auth/AuthContext';
 
 type Tab = 'players' | 'pairings' | 'standings';
 
@@ -143,6 +150,15 @@ export default function TournamentPage() {
   const [pairError, setPairError] = useState<string | null>(null);
   const [floorBusy, setFloorBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [resultChange, setResultChange] = useState<{
+    gameId: string;
+    board: number;
+    from: string;
+    to: GameResult;
+  } | null>(null);
+  const [resultNote, setResultNote] = useState('');
+  const [resultBusy, setResultBusy] = useState(false);
+  const auth = useAuth();
   const [playerSearch, setPlayerSearch] = useState('');
   const [boardSearch, setBoardSearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -262,10 +278,13 @@ export default function TournamentPage() {
     void repairTournamentLocalData(id);
   }, [id]);
 
-  // Pull floor arbiter results while the tournament is live.
+  // Live floor results: Realtime → Dexie; backup sync when Realtime fails or on focus.
   useEffect(() => {
     if (!id || !tournament || caps?.stage !== 'in_progress') return;
     let cancelled = false;
+    let realtimeOk = false;
+    let backupHandle: number | null = null;
+
     const tick = async () => {
       try {
         await syncOnline();
@@ -290,16 +309,36 @@ export default function TournamentPage() {
         /* offline */
       }
     };
+
+    const unsub = subscribeTournamentGames(id, (ok) => {
+      realtimeOk = ok;
+      if (cancelled) return;
+      if (!ok && backupHandle == null && tab === 'pairings') {
+        backupHandle = window.setInterval(() => void tick(), 5_000);
+      }
+      if (ok && backupHandle != null) {
+        window.clearInterval(backupHandle);
+        backupHandle = null;
+      }
+    });
+
     void tick();
-    const handle = window.setInterval(() => void tick(), 20_000);
+    const slowBackup = window.setInterval(() => void tick(), 30_000);
     const onFocus = () => void tick();
     window.addEventListener('focus', onFocus);
+
+    if (tab === 'pairings' && !realtimeOk) {
+      backupHandle = window.setInterval(() => void tick(), 5_000);
+    }
+
     return () => {
       cancelled = true;
-      window.clearInterval(handle);
+      unsub();
+      window.clearInterval(slowBackup);
+      if (backupHandle != null) window.clearInterval(backupHandle);
       window.removeEventListener('focus', onFocus);
     };
-  }, [id, tournament?.id, caps?.stage, floorTables?.length]);
+  }, [id, tournament?.id, caps?.stage, floorTables?.length, tab]);
 
   useEffect(() => {
     if (tournament?.deletedAt) {
@@ -670,15 +709,76 @@ export default function TournamentPage() {
     }
   }
 
-  const updateGameResult = useCallback(
-    async (gameId: string, result: GameResult) => {
+  const applyDirectorResult = useCallback(
+    async (gameId: string, result: GameResult, confirm: boolean, note?: string) => {
       if (!id || !tournament) return;
       const game = (games ?? []).find((g) => g.id === gameId);
       if (!game || !canEditRoundResults(tournament, game.round)) return;
-      const now = nowIso();
-      await db.games.update(gameId, { result, updatedAt: now, dirty: 1 });
+      setResultBusy(true);
+      setPairError(null);
+      try {
+        const res = await apiDirectorSetGameResult(gameId, {
+          result,
+          confirm: confirm ? true : undefined,
+          note: note?.trim() || undefined,
+          actorName: auth.displayName || auth.user?.email?.split('@')[0] || 'Director',
+        });
+        const now = nowIso();
+        if (res.ok && res.data) {
+          await db.games.update(gameId, {
+            result: res.data.result,
+            resultEnteredByName: res.data.resultEnteredByName ?? 'Director',
+            resultEnteredByRole: 'director',
+            resultOverrideCount: res.data.resultOverrideCount ?? game.resultOverrideCount ?? 0,
+            resultLockedAt: res.data.resultLockedAt ?? game.resultLockedAt ?? null,
+            updatedAt: res.data.updatedAt || now,
+            dirty: 0,
+          });
+        } else {
+          const wasEntered = game.result !== 'pending' && game.result !== 'bye';
+          await db.games.update(gameId, {
+            result,
+            resultEnteredByName:
+              auth.displayName || auth.user?.email?.split('@')[0] || 'Director',
+            resultEnteredByRole: 'director',
+            resultOverrideCount:
+              (game.resultOverrideCount ?? 0) + (wasEntered && game.result !== result ? 1 : 0),
+            updatedAt: now,
+            dirty: 1,
+          });
+          if (res.error && res.error !== 'Network error') {
+            setPairError(res.error);
+          }
+        }
+      } finally {
+        setResultBusy(false);
+        setResultChange(null);
+        setResultNote('');
+      }
     },
-    [id, tournament, games],
+    [id, tournament, games, auth.displayName, auth.user?.email],
+  );
+
+  const requestGameResult = useCallback(
+    (gameId: string, result: GameResult) => {
+      if (!id || !tournament) return;
+      const game = (games ?? []).find((g) => g.id === gameId);
+      if (!game || !canEditRoundResults(tournament, game.round)) return;
+      if (game.result === result) return;
+      const entered = game.result !== 'pending' && game.result !== 'bye';
+      if (entered || game.resultLockedAt) {
+        setResultNote('');
+        setResultChange({
+          gameId,
+          board: game.board,
+          from: game.result,
+          to: result,
+        });
+        return;
+      }
+      void applyDirectorResult(gameId, result, false);
+    },
+    [id, tournament, games, applyDirectorResult],
   );
 
   const confirmRoundComplete = useCallback(async () => {
@@ -962,6 +1062,19 @@ export default function TournamentPage() {
       {instructionSteps.length > 0 && (
         <TournamentInstructions steps={instructionSteps} />
       )}
+      {caps?.canMarkReady && (
+        <div className="ready-cta">
+          <div>
+            <h2>Confirm player list</h2>
+            <p className="form-hint">
+              Mark Ready when registration is final — then create table QR codes before Round 1.
+            </p>
+          </div>
+          <button type="button" className="btn btn-primary" onClick={markReady}>
+            Mark Ready
+          </button>
+        </div>
+      )}
 
       {hasCategories && !mix && (
         <div className="category-tabs">
@@ -1073,31 +1186,33 @@ export default function TournamentPage() {
               caps?.stage === 'completed') && (
               <div className="floor-panel">
                 <div className="floor-panel-main">
-                  <h3>Floor arbiter</h3>
+                  <div className="floor-panel-title-row">
+                    <h3>Floor arbiter</h3>
+                    <div className="floor-chips">
+                      {(floorTables?.length ?? 0) > 0 ? (
+                        <span className="floor-chip floor-chip-ok">
+                          QR ready · {floorTables!.length}
+                        </span>
+                      ) : (
+                        <span className="floor-chip floor-chip-warn">QR needed</span>
+                      )}
+                      {(tournament.currentRound ?? 0) > 0 &&
+                        tournament.arbiterPin &&
+                        tournament.arbiterPinRound === tournament.currentRound && (
+                          <span className="floor-chip">PIN Round {tournament.arbiterPinRound}</span>
+                        )}
+                    </div>
+                  </div>
                   <p className="form-hint">
-                    1) Create QR codes from the player list ({estimatedTables} board
-                    {estimatedTables === 1 ? '' : 's'}) and download stickers. 2) Pair a round to
-                    get that round&apos;s PIN (regenerate only if it leaks). Requires online sync.
+                    Create {estimatedTables} table QR sticker
+                    {estimatedTables === 1 ? '' : 's'} from the player list, then pair a round for
+                    the PIN.
                   </p>
-                  {(floorTables?.length ?? 0) > 0 ? (
-                    <p className="form-hint">
-                      {floorTables!.length} QR table station
-                      {floorTables!.length === 1 ? '' : 's'} ready — download stickers anytime.
-                      {floorTables!.length < estimatedTables
-                        ? ` Player list now needs ${estimatedTables} — click Update to add more.`
-                        : ''}
-                    </p>
-                  ) : (
-                    <p className="form-hint stage-banner-warn">
-                      No QR stickers yet. Click <strong>Create table QR codes</strong> before Round
-                      1 ({estimatedTables} from the confirmed player list).
-                    </p>
-                  )}
                   {(tournament.currentRound ?? 0) > 0 &&
                     (tournament.arbiterPin &&
                     tournament.arbiterPinRound === tournament.currentRound ? (
                       <p className="floor-pin">
-                        Round {tournament.arbiterPinRound} PIN:{' '}
+                        <span className="floor-pin-label">Round PIN</span>
                         <strong>{tournament.arbiterPin}</strong>
                         <button
                           type="button"
@@ -1354,18 +1469,30 @@ export default function TournamentPage() {
                 const black = game.blackId ? playerById.get(game.blackId) : null;
                 return (
                   <div key={game.id} className={`board-card ${game.isBye ? 'board-bye' : ''}`}>
-                    <span className="board-num">
-                      Table {game.board}
-                      {game.resultLockedAt ? (
-                        <span className="board-locked-tag" title="Confirmed by floor arbiter">
-                          {' '}
-                          locked
-                        </span>
-                      ) : null}
-                    </span>
+                    <div className="board-card-head">
+                      <span className="board-num">Table {game.board}</span>
+                      <div className="board-badges">
+                        {game.resultLockedAt ? (
+                          <span className="board-locked-tag">Locked</span>
+                        ) : null}
+                        {game.resultEnteredByRole === 'floor' && game.resultEnteredByName ? (
+                          <span className="board-attr-tag" title="Entered by floor arbiter">
+                            Floor · {game.resultEnteredByName}
+                          </span>
+                        ) : null}
+                        {(game.resultOverrideCount ?? 0) > 0 ||
+                        game.resultEnteredByRole === 'director' ? (
+                          <span className="board-attr-tag board-attr-director">
+                            {(game.resultOverrideCount ?? 0) > 0
+                              ? `Edited by director ×${game.resultOverrideCount}`
+                              : 'Director'}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                     <div className="board-matchup">
                       <div className="player-row player-row-white">
-                        <ColorSide color="white" />
+                        <ColorSide color="white" size="md" />
                         <span className="player-name">{white?.name ?? '—'}</span>
                         {white?.rating != null && (
                           <span className="rating-tag">{white.rating}</span>
@@ -1373,7 +1500,7 @@ export default function TournamentPage() {
                       </div>
                       {!game.isBye && (
                         <div className="player-row player-row-black">
-                          <ColorSide color="black" onDark />
+                          <ColorSide color="black" onDark size="md" />
                           <span className="player-name">{black?.name ?? '—'}</span>
                           {black?.rating != null && (
                             <span className="rating-tag">{black.rating}</span>
@@ -1383,7 +1510,7 @@ export default function TournamentPage() {
                     </div>
                     <ResultSelector
                       value={game.result}
-                      onChange={(r) => updateGameResult(game.id, r)}
+                      onChange={(r) => requestGameResult(game.id, r)}
                       isBye={game.isBye}
                       locked={Boolean(game.resultLockedAt)}
                       readOnly={
@@ -1395,6 +1522,59 @@ export default function TournamentPage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {resultChange && (
+        <div className="modal-backdrop" role="presentation" onClick={() => !resultBusy && setResultChange(null)}>
+          <div
+            className="modal-card result-change-modal"
+            role="dialog"
+            aria-modal
+            aria-labelledby="result-change-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="result-change-title">Change Table {resultChange.board} result?</h2>
+            <p className="form-hint">
+              From <strong>{resultChange.from}</strong> to <strong>{resultChange.to}</strong>.
+              This is recorded as a director edit.
+            </p>
+            <label>
+              Note (optional)
+              <input
+                className="input"
+                value={resultNote}
+                onChange={(e) => setResultNote(e.target.value)}
+                maxLength={200}
+                placeholder="e.g. Floor arbiter mistype"
+              />
+            </label>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={resultBusy}
+                onClick={() => setResultChange(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={resultBusy}
+                onClick={() =>
+                  void applyDirectorResult(
+                    resultChange.gameId,
+                    resultChange.to,
+                    true,
+                    resultNote,
+                  )
+                }
+              >
+                {resultBusy ? 'Saving…' : 'Confirm change'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

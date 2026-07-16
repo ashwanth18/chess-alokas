@@ -137,6 +137,9 @@ export const TournamentTableSchema = z.object({
 });
 export type TournamentTable = z.infer<typeof TournamentTableSchema>;
 
+export const ResultActorRoleSchema = z.enum(['floor', 'director']);
+export type ResultActorRole = z.infer<typeof ResultActorRoleSchema>;
+
 export const GameSchema = z.object({
   id: z.string().uuid(),
   tournamentId: z.string().uuid(),
@@ -149,10 +152,29 @@ export const GameSchema = z.object({
   isBye: z.boolean().default(false),
   /** Set when floor arbiter confirms; public API refuses further writes. */
   resultLockedAt: z.string().datetime().nullable().optional(),
+  /** Display name of who last set/confirmed this result. */
+  resultEnteredByName: z.string().nullable().optional(),
+  resultEnteredByRole: ResultActorRoleSchema.nullable().optional(),
+  /** How many times a director overrode a prior result. */
+  resultOverrideCount: z.number().int().nonnegative().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
 });
 export type Game = z.infer<typeof GameSchema>;
+
+export const GameResultEventSchema = z.object({
+  id: z.string().uuid(),
+  gameId: z.string().uuid(),
+  tournamentId: z.string().uuid(),
+  result: GameResultSchema,
+  previousResult: GameResultSchema.nullable().optional(),
+  actorRole: ResultActorRoleSchema,
+  actorName: z.string().nullable().optional(),
+  actorUserId: z.string().uuid().nullable().optional(),
+  note: z.string().nullable().optional(),
+  createdAt: z.string().datetime(),
+});
+export type GameResultEvent = z.infer<typeof GameResultEventSchema>;
 
 export const CreateTournamentInputSchema = z.object({
   name: z.string().min(1),

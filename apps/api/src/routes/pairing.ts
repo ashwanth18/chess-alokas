@@ -217,10 +217,13 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
   });
 
   // -------------------------------------------------------------------------
-  // PATCH /games/:id/result
+  // PATCH /games/:id/result — director desk (audited)
   // -------------------------------------------------------------------------
   const ResultBodySchema = z.object({
     result: GameResultSchema,
+    confirm: z.literal(true).optional(),
+    note: z.string().trim().max(200).optional(),
+    actorName: z.string().trim().max(80).optional(),
   });
 
   app.patch<{ Params: { id: string }; Body: unknown }>(
@@ -237,9 +240,33 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       if (!game || game.deletedAt) {
         return reply.code(404).send({ error: 'Game not found' });
       }
-      const updated = await store.updateGame(id, {
+      if (!(await store.isTournamentOwnedBy(game.tournamentId, request.userId ?? ''))) {
+        return reply.code(403).send({ error: 'Forbidden' });
+      }
+      const tournament = await store.getTournament(game.tournamentId);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      if ((tournament.confirmedRounds ?? 0) >= game.round) {
+        return reply.code(409).send({ error: 'Round is confirmed — results are locked' });
+      }
+      const changingEntered =
+        game.result !== 'pending' &&
+        game.result !== 'bye' &&
+        game.result !== parsed.data.result;
+      if (changingEntered && parsed.data.confirm !== true) {
+        return reply.code(400).send({
+          error: 'Confirm required to change an entered result',
+          code: 'CONFIRM_REQUIRED',
+        });
+      }
+      const updated = await store.recordGameResult(id, {
         result: parsed.data.result,
-        updatedAt: new Date().toISOString(),
+        actorRole: 'director',
+        actorName: parsed.data.actorName || 'Director',
+        actorUserId: request.userId ?? null,
+        note: parsed.data.note ?? null,
+        lock: false,
       });
       return updated;
     },

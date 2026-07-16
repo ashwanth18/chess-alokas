@@ -195,10 +195,11 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
         .object({
           result: ArbiterScorableResultSchema,
           confirm: z.literal(true),
+          arbiterName: z.string().trim().min(1).max(80),
         })
         .safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({ error: 'Invalid result payload' });
+        return reply.code(400).send({ error: 'Invalid result payload (result + arbiter name required)' });
       }
 
       const table = await store.getTableBySlug(request.params.slug);
@@ -243,11 +244,11 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
         return reply.code(409).send({ error: 'Result already locked for this table' });
       }
 
-      const now = new Date().toISOString();
-      const updated = await store.updateGame(game.id, {
+      const updated = await store.recordGameResult(game.id, {
         result: parsed.data.result,
-        resultLockedAt: now,
-        updatedAt: now,
+        actorRole: 'floor',
+        actorName: parsed.data.arbiterName,
+        lock: true,
       });
       if (!updated) return reply.code(500).send({ error: 'Failed to save result' });
 

@@ -54,6 +54,21 @@ export interface Store {
   getGame(id: string): Promise<Game | null>;
   createGame(g: Game): Promise<Game>;
   updateGame(id: string, patch: Partial<Omit<Game, 'id'>>): Promise<Game | null>;
+  /**
+   * Set a game result with attribution + audit event.
+   * Director overrides bump resultOverrideCount when previous result was entered.
+   */
+  recordGameResult(
+    id: string,
+    input: {
+      result: Game['result'];
+      actorRole: 'floor' | 'director';
+      actorName?: string | null;
+      actorUserId?: string | null;
+      note?: string | null;
+      lock?: boolean;
+    },
+  ): Promise<Game | null>;
   softDeleteGamesForRound(tournamentId: string, round: number, categoryId: string): Promise<void>;
 
   // Floor arbiter tables
@@ -86,6 +101,18 @@ export class MemoryStore implements Store {
   private games = new Map<string, Game>();
   private tables = new Map<string, TournamentTable>();
   private pinMeta = new Map<string, { hash: string; round: number }>();
+  private resultEvents: Array<{
+    id: string;
+    gameId: string;
+    tournamentId: string;
+    result: Game['result'];
+    previousResult: Game['result'];
+    actorRole: 'floor' | 'director';
+    actorName: string | null;
+    actorUserId: string | null;
+    note: string | null;
+    createdAt: string;
+  }> = [];
 
   // ---- Tournaments ----
 
@@ -212,6 +239,49 @@ export class MemoryStore implements Store {
     if (!existing) return null;
     const updated: Game = { ...existing, ...patch, id };
     this.games.set(id, updated);
+    return updated;
+  }
+
+  async recordGameResult(
+    id: string,
+    input: {
+      result: Game['result'];
+      actorRole: 'floor' | 'director';
+      actorName?: string | null;
+      actorUserId?: string | null;
+      note?: string | null;
+      lock?: boolean;
+    },
+  ): Promise<Game | null> {
+    const existing = this.games.get(id);
+    if (!existing) return null;
+    const now = new Date().toISOString();
+    const prev = existing.result;
+    const wasEntered = prev !== 'pending' && prev !== 'bye';
+    const overrideBump =
+      input.actorRole === 'director' && wasEntered && prev !== input.result ? 1 : 0;
+    const updated: Game = {
+      ...existing,
+      result: input.result,
+      resultLockedAt: input.lock ? now : (existing.resultLockedAt ?? null),
+      resultEnteredByName: input.actorName?.trim() || existing.resultEnteredByName || null,
+      resultEnteredByRole: input.actorRole,
+      resultOverrideCount: (existing.resultOverrideCount ?? 0) + overrideBump,
+      updatedAt: now,
+    };
+    this.games.set(id, updated);
+    this.resultEvents.push({
+      id: crypto.randomUUID(),
+      gameId: id,
+      tournamentId: existing.tournamentId,
+      result: input.result,
+      previousResult: prev,
+      actorRole: input.actorRole,
+      actorName: input.actorName?.trim() || null,
+      actorUserId: input.actorUserId ?? null,
+      note: input.note?.trim() || null,
+      createdAt: now,
+    });
     return updated;
   }
 
@@ -441,6 +511,11 @@ export class MemoryStore implements Store {
         result: (payload['result'] as GameResult) ?? 'pending',
         isBye: Boolean(payload['isBye'] ?? false),
         resultLockedAt: (payload['resultLockedAt'] as string | null | undefined) ?? null,
+        resultEnteredByName:
+          (payload['resultEnteredByName'] as string | null | undefined) ?? null,
+        resultEnteredByRole:
+          (payload['resultEnteredByRole'] as Game['resultEnteredByRole']) ?? null,
+        resultOverrideCount: Number(payload['resultOverrideCount'] ?? 0),
         updatedAt,
         deletedAt: deletedAt ?? undefined,
       };
@@ -520,6 +595,9 @@ interface GameRow {
   result: string;
   is_bye: boolean;
   result_locked_at: Date | string | null;
+  result_entered_by_name: string | null;
+  result_entered_by_role: string | null;
+  result_override_count: number | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
 }
@@ -597,6 +675,7 @@ function rowToParticipant(row: ParticipantRow): Participant {
 }
 
 function rowToGame(row: GameRow): Game {
+  const role = row.result_entered_by_role;
   return {
     id: row.id,
     tournamentId: row.tournament_id,
@@ -608,6 +687,10 @@ function rowToGame(row: GameRow): Game {
     result: row.result as GameResult,
     isBye: row.is_bye,
     resultLockedAt: toIso(row.result_locked_at) ?? null,
+    resultEnteredByName: row.result_entered_by_name ?? null,
+    resultEnteredByRole:
+      role === 'floor' || role === 'director' ? role : null,
+    resultOverrideCount: row.result_override_count ?? 0,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
   };
@@ -843,10 +926,14 @@ export class PostgresStore implements Store {
   async createGame(g: Game): Promise<Game> {
     const rows = await this.sql<GameRow[]>`
       INSERT INTO games
-        (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye, result_locked_at, updated_at, deleted_at)
+        (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye,
+         result_locked_at, result_entered_by_name, result_entered_by_role, result_override_count,
+         updated_at, deleted_at)
       VALUES
         (${g.id}, ${g.tournamentId}, ${g.categoryId}, ${g.round}, ${g.board},
          ${g.whiteId}, ${g.blackId}, ${g.result}, ${g.isBye}, ${g.resultLockedAt ?? null},
+         ${g.resultEnteredByName ?? null}, ${g.resultEnteredByRole ?? null},
+         ${g.resultOverrideCount ?? 0},
          ${g.updatedAt}, ${g.deletedAt ?? null})
       RETURNING *
     `;
@@ -864,11 +951,61 @@ export class PostgresStore implements Store {
         white_id = ${m.whiteId}, black_id = ${m.blackId},
         result = ${m.result}, is_bye = ${m.isBye},
         result_locked_at = ${m.resultLockedAt ?? null},
+        result_entered_by_name = ${m.resultEnteredByName ?? null},
+        result_entered_by_role = ${m.resultEnteredByRole ?? null},
+        result_override_count = ${m.resultOverrideCount ?? 0},
         updated_at = ${m.updatedAt}, deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
     `;
     const row = rows[0];
     return row ? rowToGame(row) : null;
+  }
+
+  async recordGameResult(
+    id: string,
+    input: {
+      result: Game['result'];
+      actorRole: 'floor' | 'director';
+      actorName?: string | null;
+      actorUserId?: string | null;
+      note?: string | null;
+      lock?: boolean;
+    },
+  ): Promise<Game | null> {
+    const existing = await this.getGame(id);
+    if (!existing) return null;
+    const now = new Date().toISOString();
+    const prev = existing.result;
+    const wasEntered = prev !== 'pending' && prev !== 'bye';
+    const overrideBump =
+      input.actorRole === 'director' && wasEntered && prev !== input.result ? 1 : 0;
+    const actorName = input.actorName?.trim() || existing.resultEnteredByName || null;
+    const nextOverride = (existing.resultOverrideCount ?? 0) + overrideBump;
+    const lockAt = input.lock ? now : (existing.resultLockedAt ?? null);
+
+    const rows = await this.sql<GameRow[]>`
+      UPDATE games SET
+        result = ${input.result},
+        result_locked_at = ${lockAt},
+        result_entered_by_name = ${actorName},
+        result_entered_by_role = ${input.actorRole},
+        result_override_count = ${nextOverride},
+        updated_at = ${now}
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    const row = rows[0];
+    if (!row) return null;
+
+    await this.sql`
+      INSERT INTO game_result_events
+        (id, game_id, tournament_id, result, previous_result, actor_role, actor_name, actor_user_id, note, created_at)
+      VALUES
+        (${crypto.randomUUID()}, ${id}, ${existing.tournamentId}, ${input.result}, ${prev},
+         ${input.actorRole}, ${input.actorName?.trim() || null}, ${input.actorUserId ?? null},
+         ${input.note?.trim() || null}, ${now})
+    `;
+    return rowToGame(row);
   }
 
   async getTableBySlug(slug: string): Promise<TournamentTable | null> {
@@ -1121,15 +1258,22 @@ export class PostgresStore implements Store {
         WHERE EXCLUDED.updated_at > participants.updated_at
       `;
     } else if (entity === 'game') {
+      const enteredRole = p['resultEnteredByRole'];
+      const role =
+        enteredRole === 'floor' || enteredRole === 'director' ? enteredRole : null;
       await this.sql`
         INSERT INTO games
-          (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye, result_locked_at, updated_at, deleted_at)
+          (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye,
+           result_locked_at, result_entered_by_name, result_entered_by_role, result_override_count,
+           updated_at, deleted_at)
         VALUES
           (${id}, ${String(p['tournamentId'] ?? '')}, ${String(p['categoryId'] ?? '')},
            ${Number(p['round'] ?? 1)}, ${Number(p['board'] ?? 1)},
            ${(p['whiteId'] as string) ?? null}, ${(p['blackId'] as string) ?? null},
            ${String(p['result'] ?? 'pending')}, ${Boolean(p['isBye'] ?? false)},
            ${(p['resultLockedAt'] as string) ?? null},
+           ${(p['resultEnteredByName'] as string) ?? null}, ${role},
+           ${Number(p['resultOverrideCount'] ?? 0)},
            ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           tournament_id = EXCLUDED.tournament_id, category_id = EXCLUDED.category_id,
@@ -1137,6 +1281,9 @@ export class PostgresStore implements Store {
           white_id = EXCLUDED.white_id, black_id = EXCLUDED.black_id,
           result = EXCLUDED.result, is_bye = EXCLUDED.is_bye,
           result_locked_at = COALESCE(EXCLUDED.result_locked_at, games.result_locked_at),
+          result_entered_by_name = COALESCE(EXCLUDED.result_entered_by_name, games.result_entered_by_name),
+          result_entered_by_role = COALESCE(EXCLUDED.result_entered_by_role, games.result_entered_by_role),
+          result_override_count = GREATEST(EXCLUDED.result_override_count, games.result_override_count),
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > games.updated_at
       `;
