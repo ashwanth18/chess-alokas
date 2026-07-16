@@ -274,9 +274,9 @@ export function getTournamentInstructions(
     floorDescription = `On Pairings: create ${estimatedTables} table QR code${estimatedTables === 1 ? '' : 's'} from the player list, then download stickers`;
   } else {
     floorStatus = 'done';
-    floorTitle = `${Math.max(floorTableCount, tournament.tableCount ?? 0)} table QR codes ready`;
+    floorTitle = `${Math.max(floorTableCount, tournament.tableCount ?? 0)} table stickers ready`;
     floorDescription =
-      'Stickers stay on the tables for the whole event — download again anytime from Pairings';
+      'One-time setup done — stickers stay on the tables. Each new round only needs a fresh PIN.';
   }
 
   instructions.push({
@@ -290,19 +290,19 @@ export function getTournamentInstructions(
   let playStatus: InstructionStatus = qrReady ? 'current' : 'upcoming';
   let playTitle = 'Pair rounds & enter results';
   let playDescription = qrReady
-    ? 'Generate Round 1 — the floor PIN for that round appears on Pairings (regenerate only if leaked)'
-    : 'Create table QR codes first, then generate Round 1';
+    ? 'Generate Round 1 — the floor PIN for that round appears on Pairings'
+    : 'Finish table QR stickers first, then generate Round 1';
 
   if (!qrReady) {
     playTitle = 'Pair rounds & enter results';
   } else if (!hasGames) {
     playTitle = 'Generate Round 1 pairings';
     playDescription = hasCategories && !mix
-      ? 'Open Pairings and generate Round 1 — each category pairs separately; the round PIN appears after'
-      : 'Open Pairings and generate Round 1 — the floor PIN for Round 1 appears after pairing';
+      ? 'Open Pairings and generate Round 1 — each category pairs separately; share the new round PIN with floor staff'
+      : 'Open Pairings and generate Round 1 — share the new round PIN with floor staff';
   } else if (caps.pendingResultsRound != null && nextRound != null) {
     playTitle = `Enter Round ${caps.pendingResultsRound} results`;
-    playDescription = `Score every game in Round ${caps.pendingResultsRound} (director desk or floor QR + PIN) before confirming.`;
+    playDescription = `Score Round ${caps.pendingResultsRound} (desk or floor phones with this round’s PIN), then confirm.`;
     const pendingDetail = summarizePendingResults(
       tournament,
       cats,
@@ -314,8 +314,7 @@ export function getTournamentInstructions(
     const pinOk =
       !!tournament.arbiterPin && tournament.arbiterPinRound === caps.pendingResultsRound;
     if (!pinOk) {
-      playDescription +=
-        ' Floor PIN missing — use Issue round PIN on the Pairings tab.';
+      playDescription += ' Floor PIN missing — use Issue round PIN on Pairings.';
     }
   } else if (caps.pendingConfirmRound != null) {
     playTitle = `Confirm Round ${caps.pendingConfirmRound} complete`;
@@ -327,8 +326,8 @@ export function getTournamentInstructions(
     playTitle = `Generate Round ${nextRound} pairings`;
     playDescription =
       nextRound === tournament.rounds
-        ? 'Final round — pairings issue a new floor PIN, then enter results and confirm'
-        : `Round ${nextRound - 1} is confirmed — pair the next round (a new floor PIN is issued)`;
+        ? 'Final round — pairings, new floor PIN, results, then confirm'
+        : `Round ${nextRound - 1} confirmed — pair Round ${nextRound} (new floor PIN only; stickers stay)`;
   } else if (!caps.allResultsDone) {
     playTitle = 'Enter remaining results';
     playDescription =

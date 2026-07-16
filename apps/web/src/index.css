@@ -3100,6 +3100,29 @@ a.landing-download-option:hover {
   gap: 0.45rem;
   align-items: flex-start;
 }
+.floor-panel-live {
+  border-color: rgba(76, 175, 130, 0.35);
+}
+.floor-more {
+  width: 100%;
+  margin-top: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--ink-300);
+}
+.floor-more summary {
+  cursor: pointer;
+  color: var(--ink-300);
+  user-select: none;
+}
+.floor-more summary:hover {
+  color: var(--wood-200);
+}
+.floor-more-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
 .board-card-head {
   display: flex;
   flex-wrap: wrap;
