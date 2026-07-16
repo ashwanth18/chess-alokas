@@ -98,24 +98,60 @@ function summarizePendingResults(
   return `${pending.length} game${pending.length === 1 ? '' : 's'} left — ${roundParts.join(', ')}.`;
 }
 
+export type FloorTableEstimate = {
+  tableCount: number;
+  /** Players who will actually be paired (in a pool / category). */
+  pairedPlayers: number;
+  totalPlayers: number;
+  unassignedPlayers: number;
+  /** Per-category breakdown for separate mode. */
+  byCategory: { categoryId: string; players: number; tables: number }[];
+};
+
+/**
+ * Expected physical boards from the pairing pools (byes do not add a table).
+ * Separate categories: only players matching each category filter count —
+ * not the full import if ages/etc. exclude them.
+ */
+export function estimateFloorTables(
+  tournament: TournamentLike,
+  categories: CategoryLike[] | null | undefined,
+  participants: LocalParticipant[] | null | undefined,
+): FloorTableEstimate {
+  const mix = isMixedTournament(tournament);
+  const cats = asList(categories).filter((c) => !c.deletedAt);
+  const players = asList(participants).filter((p) => !p.deletedAt);
+  const totalPlayers = players.length;
+
+  if (mix || cats.length === 0) {
+    const tables = Math.max(1, Math.floor(totalPlayers / 2));
+    return {
+      tableCount: tables,
+      pairedPlayers: totalPlayers,
+      totalPlayers,
+      unassignedPlayers: 0,
+      byCategory: [],
+    };
+  }
+
+  const byCategory = cats.map((cat) => {
+    const n = players.filter((p) => p.categoryIds?.includes(cat.id)).length;
+    return { categoryId: cat.id, players: n, tables: Math.floor(n / 2) };
+  });
+  const pairedPlayers = byCategory.reduce((sum, c) => sum + c.players, 0);
+  // A player can be in multiple categories; unassigned = no category at all.
+  const unassignedPlayers = players.filter((p) => (p.categoryIds?.length ?? 0) === 0).length;
+  const tableCount = Math.max(1, byCategory.reduce((sum, c) => sum + c.tables, 0));
+  return { tableCount, pairedPlayers, totalPlayers, unassignedPlayers, byCategory };
+}
+
 /** Expected physical boards from the current player list (byes do not add a table). */
 export function estimateFloorTableCount(
   tournament: TournamentLike,
   categories: CategoryLike[] | null | undefined,
   participants: LocalParticipant[] | null | undefined,
 ): number {
-  const mix = isMixedTournament(tournament);
-  const cats = asList(categories).filter((c) => !c.deletedAt);
-  const players = asList(participants).filter((p) => !p.deletedAt);
-  if (mix || cats.length === 0) {
-    return Math.max(1, Math.floor(players.length / 2));
-  }
-  let total = 0;
-  for (const cat of cats) {
-    const n = players.filter((p) => p.categoryIds?.includes(cat.id)).length;
-    total += Math.floor(n / 2);
-  }
-  return Math.max(1, total);
+  return estimateFloorTables(tournament, categories, participants).tableCount;
 }
 
 /** Friendly step-by-step guide for what to do next (replaces raw completion blocker dumps). */

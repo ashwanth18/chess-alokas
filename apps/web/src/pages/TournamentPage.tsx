@@ -8,6 +8,7 @@ import ColorSide from '../components/ColorSide';
 import {
   effectiveTournamentStatus,
   estimateFloorTableCount,
+  estimateFloorTables,
   getNextPairingRound,
   getTournamentCapabilities,
   getTournamentInstructions,
@@ -221,10 +222,15 @@ export default function TournamentPage() {
       ? getTournamentCapabilities(tournament, categories, participants, games)
       : null;
   const categoryNames = Object.fromEntries((categories ?? []).map((c) => [c.id, c.name]));
-  const estimatedTables =
+  const floorEstimate =
     tournament && categories && participants
+      ? estimateFloorTables(tournament, categories, participants)
+      : null;
+  const estimatedTables =
+    floorEstimate?.tableCount ??
+    (tournament && categories && participants
       ? estimateFloorTableCount(tournament, categories, participants)
-      : 1;
+      : 1);
   const instructionSteps =
     tournament && categories && participants && games && caps && caps.stage !== 'completed'
       ? getTournamentInstructions(
@@ -1205,9 +1211,36 @@ export default function TournamentPage() {
                   </div>
                   <p className="form-hint">
                     Create {estimatedTables} table QR sticker
-                    {estimatedTables === 1 ? '' : 's'} from the player list, then pair a round for
-                    the PIN.
+                    {estimatedTables === 1 ? '' : 's'} from pairing pools, then pair a round for the
+                    PIN.
                   </p>
+                  {floorEstimate && !mix && (
+                    <p className="form-hint">
+                      {floorEstimate.byCategory.map((row) => {
+                        const name = categoryNames[row.categoryId] ?? 'Category';
+                        return (
+                          <span key={row.categoryId} className="floor-estimate-line">
+                            {name}: {row.players} player{row.players === 1 ? '' : 's'} → {row.tables}{' '}
+                            board{row.tables === 1 ? '' : 's'}
+                            {'. '}
+                          </span>
+                        );
+                      })}
+                      {floorEstimate.unassignedPlayers > 0 && (
+                        <span className="stage-banner-warn">
+                          {floorEstimate.unassignedPlayers} imported player
+                          {floorEstimate.unassignedPlayers === 1 ? '' : 's'} match no category
+                          filter — they are not paired and do not get a table. Broaden the filter
+                          or use Mixed categories if everyone should play together.
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {floorEstimate && mix && (
+                    <p className="form-hint">
+                      Mixed pool: {floorEstimate.totalPlayers} players → {estimatedTables} boards.
+                    </p>
+                  )}
                   {(tournament.currentRound ?? 0) > 0 &&
                     (tournament.arbiterPin &&
                     tournament.arbiterPinRound === tournament.currentRound ? (

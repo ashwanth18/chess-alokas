@@ -1055,10 +1055,23 @@ html.is-desktop-linux .desktop-update-banner {
 }
 .input:disabled { opacity: 0.5; cursor: not-allowed; }
 select.input {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23c4a574' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  /* Opaque field so the closed control is readable on dark UI */
+  background-color: #163d2f;
+  color: var(--ink-900);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23ede3d0' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   padding-right: 2.25rem;
+}
+select.input:focus {
+  background-color: #1a4a38;
+  color: var(--ink-900);
+}
+/* Native dropdown list: light panel + dark ink (OS menus ignore most theme CSS) */
+select.input option,
+select.input optgroup {
+  color: #1a2e24;
+  background: #fffdf8;
 }
 .input-sm { font-size: 0.82rem; padding: 0.4rem 0.7rem; }
 .input-xs { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
@@ -1297,11 +1310,12 @@ input[type=checkbox] {
 }
 .settings-modal {
   width: min(36rem, 100%);
-  background: var(--color-bg, #1a1a1a);
-  border: 1px solid var(--color-border);
+  background: #0c2a20;
+  border: 1px solid rgba(196, 165, 116, 0.45);
   border-radius: var(--radius);
   padding: 1.25rem 1.35rem 1.5rem;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  color: var(--ink-500);
 }
 .settings-modal-header {
   display: flex;
@@ -3142,7 +3156,7 @@ a.landing-download-option:hover {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(4, 14, 10, 0.78);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3150,24 +3164,41 @@ a.landing-download-option:hover {
 }
 .modal-card {
   width: min(26rem, 100%);
-  background: var(--color-surface-mid);
-  border: 1px solid var(--color-border);
+  /* Solid panel — surface-mid is ~9% white and was unreadable over pairings */
+  background: #0c2a20;
+  border: 1px solid rgba(196, 165, 116, 0.45);
   border-radius: var(--radius-lg);
   padding: 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.65);
+  color: var(--ink-500);
 }
 .modal-card h2 {
   margin: 0;
   font-size: 1.2rem;
   color: var(--wood-100);
 }
+.modal-card .form-hint {
+  color: var(--ink-300);
+}
+.modal-card .input {
+  background: #163d2f;
+  color: var(--ink-900);
+  border-color: rgba(196, 165, 116, 0.4);
+}
+.modal-card .input:focus {
+  background: #1a4a38;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.35rem;
+}
+.result-change-modal {
+  background: #0c2a20;
 }
 
 .table-score-page {
@@ -3321,13 +3352,15 @@ a.landing-download-option:hover {
 }
 .qr-scanner-sheet {
   width: min(28rem, 100%);
-  background: var(--color-surface-mid);
-  border: 1px solid var(--color-border);
+  background: #0c2a20;
+  border: 1px solid rgba(196, 165, 116, 0.45);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   padding: 1.1rem 1.1rem 1.4rem;
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+  color: var(--ink-500);
 }
 .qr-scanner-sheet h2 {
   margin: 0;
