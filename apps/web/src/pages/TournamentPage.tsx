@@ -7,6 +7,7 @@ import { db, nowIso } from '../db/local';
 import ColorSide from '../components/ColorSide';
 import {
   effectiveTournamentStatus,
+  estimateFloorTableCount,
   getNextPairingRound,
   getTournamentCapabilities,
   getTournamentInstructions,
@@ -19,6 +20,7 @@ import {
 } from '../lib/tournamentProgress';
 import TournamentInstructions from '../components/TournamentInstructions';
 import TableSearch from '../components/TableSearch';
+import NumberField from '../components/NumberField';
 import { matchesTextSearch } from '../lib/textSearch';
 import { softDeleteTournament } from '../lib/deleteTournament';
 import { ensurePoolCategoryId, repairTournamentLocalData } from '../lib/poolCategory';
@@ -141,6 +143,7 @@ export default function TournamentPage() {
   const [pairing, setPairing] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
   const [floorBusy, setFloorBusy] = useState(false);
+  const [tableCountDraft, setTableCountDraft] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [playerSearch, setPlayerSearch] = useState('');
   const [boardSearch, setBoardSearch] = useState('');
@@ -204,6 +207,10 @@ export default function TournamentPage() {
       ? getTournamentCapabilities(tournament, categories, participants, games)
       : null;
   const categoryNames = Object.fromEntries((categories ?? []).map((c) => [c.id, c.name]));
+  const estimatedTables =
+    tournament && categories && participants
+      ? estimateFloorTableCount(tournament, categories, participants)
+      : 1;
   const instructionSteps =
     tournament && categories && participants && games && caps && caps.stage !== 'completed'
       ? getTournamentInstructions(
@@ -213,8 +220,16 @@ export default function TournamentPage() {
           games,
           caps,
           categoryNames,
+          floorTables?.length ?? 0,
         )
       : [];
+
+  useEffect(() => {
+    if (tableCountDraft != null) return;
+    const fromTournament = tournament?.tableCount ?? 0;
+    const fromFloor = floorTables?.length ?? 0;
+    setTableCountDraft(Math.max(1, fromFloor, fromTournament, estimatedTables));
+  }, [tournament?.tableCount, floorTables?.length, estimatedTables, tableCountDraft]);
   const displayStatus =
     tournament && categories && participants && games
       ? effectiveTournamentStatus(tournament, categories, participants, games)
@@ -355,37 +370,99 @@ export default function TournamentPage() {
     }
   }
 
-  async function prepareFloorScoring(
+  async function persistFloorTables(
     tournamentId: string,
+    tables: {
+      id: string;
+      tournamentId: string;
+      tableNumber: number;
+      slug: string;
+      createdAt: string;
+    }[],
     tableCount: number,
-    pinRound: number,
-  ): Promise<boolean> {
+  ) {
+    await db.tournamentTables.where('tournamentId').equals(tournamentId).delete();
+    for (const t of tables) {
+      await db.tournamentTables.put({
+        id: t.id,
+        tournamentId: t.tournamentId,
+        tableNumber: t.tableNumber,
+        slug: t.slug,
+        createdAt: t.createdAt,
+        dirty: 0,
+      });
+    }
+    await db.tournaments.update(tournamentId, {
+      tableCount,
+      updatedAt: nowIso(),
+      dirty: 1,
+    });
+  }
+
+  /** Create/expand stable table QR stations (no PIN). Call after Mark Ready. */
+  async function createFloorQrTables(tournamentId: string, tableCount: number): Promise<boolean> {
     try {
       await syncOnline();
       const floor = await apiFloorPrepare(tournamentId, {
         tableCount: Math.max(1, tableCount),
-        pinRound,
-        rotatePin: true,
+        pinRound: 1,
+        rotatePin: false,
       });
       if (!floor.ok) {
-        setPairError(floor.error || 'Floor PIN/QR setup failed');
+        setPairError(floor.error || 'Could not create table QR codes');
         return false;
       }
-      await db.tournamentTables.where('tournamentId').equals(tournamentId).delete();
-      for (const t of floor.data.tables) {
-        await db.tournamentTables.put({
-          id: t.id,
-          tournamentId: t.tournamentId,
-          tableNumber: t.tableNumber,
-          slug: t.slug,
-          createdAt: t.createdAt,
-          dirty: 0,
+      await persistFloorTables(tournamentId, floor.data.tables, floor.data.tableCount);
+      setTableCountDraft(floor.data.tableCount);
+      return true;
+    } catch (err) {
+      setPairError(
+        err instanceof Error
+          ? `QR setup failed: ${err.message}`
+          : 'QR setup failed (sign in and sync online required)',
+      );
+      return false;
+    }
+  }
+
+  /** Issue or rotate the floor PIN for a paired round (QR tables must already exist or are created). */
+  async function issueFloorPinForRound(
+    tournamentId: string,
+    pinRound: number,
+    tableCount: number,
+  ): Promise<boolean> {
+    try {
+      await syncOnline();
+      const needTables = (floorTables?.length ?? 0) === 0;
+      if (needTables) {
+        const floor = await apiFloorPrepare(tournamentId, {
+          tableCount: Math.max(1, tableCount),
+          pinRound,
+          rotatePin: true,
         });
+        if (!floor.ok) {
+          setPairError(floor.error || 'Could not issue floor PIN');
+          return false;
+        }
+        await persistFloorTables(tournamentId, floor.data.tables, floor.data.tableCount);
+        if (floor.data.arbiterPin) {
+          await db.tournaments.update(tournamentId, {
+            arbiterPin: floor.data.arbiterPin,
+            arbiterPinRound: floor.data.arbiterPinRound,
+            updatedAt: nowIso(),
+            dirty: 1,
+          });
+        }
+        return true;
+      }
+      const res = await apiFloorRotatePin(tournamentId, pinRound);
+      if (!res.ok) {
+        setPairError(res.error || 'Could not issue floor PIN');
+        return false;
       }
       await db.tournaments.update(tournamentId, {
-        arbiterPin: floor.data.arbiterPin,
-        arbiterPinRound: floor.data.arbiterPinRound,
-        tableCount: floor.data.tableCount,
+        arbiterPin: res.data.arbiterPin,
+        arbiterPinRound: res.data.arbiterPinRound,
         updatedAt: nowIso(),
         dirty: 1,
       });
@@ -393,8 +470,8 @@ export default function TournamentPage() {
     } catch (err) {
       setPairError(
         err instanceof Error
-          ? `Floor setup failed: ${err.message}`
-          : 'Floor PIN/QR setup failed (sync/online required)',
+          ? `Floor PIN failed: ${err.message}`
+          : 'Floor PIN failed (sign in and sync online required)',
       );
       return false;
     }
@@ -561,13 +638,17 @@ export default function TournamentPage() {
         dirty: 1,
       });
 
-      // Push pairings, then rotate floor PIN + ensure QR table stations on the server.
-      const floorOk = await prepareFloorScoring(id, Math.max(1, tableCount), round);
+      // Issue this round's floor PIN (QR stickers should already exist from pre-pair setup).
+      const floorOk = await issueFloorPinForRound(
+        id,
+        round,
+        Math.max(1, tableCount, floorTables?.length ?? 0, tournament?.tableCount ?? 0),
+      );
       if (!floorOk) {
         setPairError((prev) =>
           prev
-            ? `Round paired, but floor setup failed: ${prev}`
-            : 'Round paired, but floor PIN/QR setup failed. Open Pairings and click “Setup floor PIN & QR”.',
+            ? `Round paired, but floor PIN failed: ${prev}`
+            : 'Round paired, but floor PIN failed. Use “Issue round PIN” on Pairings.',
         );
       }
 
@@ -977,6 +1058,180 @@ export default function TournamentPage() {
 
       {tab === 'pairings' && (
         <div className="tab-panel">
+          {tournament &&
+            (caps?.stage === 'ready' ||
+              caps?.stage === 'in_progress' ||
+              caps?.stage === 'completed') && (
+              <div className="floor-panel">
+                <div className="floor-panel-main">
+                  <h3>Floor arbiter</h3>
+                  <p className="form-hint">
+                    1) Create QR codes for each board and download stickers. 2) Pair a round to get
+                    that round&apos;s PIN (regenerate only if it leaks). Requires online sync.
+                  </p>
+                  <div className="floor-table-count">
+                    <NumberField
+                      label="Boards / tables"
+                      value={tableCountDraft}
+                      onChange={setTableCountDraft}
+                      min={1}
+                      max={500}
+                      required
+                      hint={`Suggested from player list: ${estimatedTables}`}
+                    />
+                  </div>
+                  {(floorTables?.length ?? 0) > 0 ? (
+                    <p className="form-hint">
+                      {floorTables!.length} QR table station
+                      {floorTables!.length === 1 ? '' : 's'} ready — download stickers anytime.
+                    </p>
+                  ) : (
+                    <p className="form-hint stage-banner-warn">
+                      No QR stickers yet. Set the board count and click{' '}
+                      <strong>Create table QR codes</strong> before Round 1.
+                    </p>
+                  )}
+                  {(tournament.currentRound ?? 0) > 0 &&
+                    (tournament.arbiterPin &&
+                    tournament.arbiterPinRound === tournament.currentRound ? (
+                      <p className="floor-pin">
+                        Round {tournament.arbiterPinRound} PIN:{' '}
+                        <strong>{tournament.arbiterPin}</strong>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            void navigator.clipboard?.writeText(tournament.arbiterPin ?? '');
+                          }}
+                        >
+                          Copy
+                        </button>
+                      </p>
+                    ) : (
+                      <p className="form-hint stage-banner-warn">
+                        No PIN for Round {tournament.currentRound} yet — click{' '}
+                        <strong>Issue round PIN</strong>.
+                      </p>
+                    ))}
+                </div>
+                <div className="floor-panel-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={floorBusy || tableCountDraft == null || tableCountDraft < 1}
+                    onClick={() => {
+                      void (async () => {
+                        if (!id || tableCountDraft == null) return;
+                        setFloorBusy(true);
+                        setPairError(null);
+                        try {
+                          await createFloorQrTables(id, tableCountDraft);
+                        } finally {
+                          setFloorBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    {floorBusy
+                      ? 'Working…'
+                      : (floorTables?.length ?? 0) > 0
+                        ? 'Update table QR codes'
+                        : 'Create table QR codes'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={(floorTables?.length ?? 0) === 0}
+                    onClick={() => {
+                      void (async () => {
+                        if (!tournament || !floorTables?.length) return;
+                        const bytes = await buildTableStickerPdf(
+                          tournament.name,
+                          floorTables.map((t) => ({
+                            tableNumber: t.tableNumber,
+                            slug: t.slug,
+                          })),
+                        );
+                        downloadPdfBytes(
+                          `${tournament.name.replace(/\s+/g, '-').toLowerCase()}-table-qr.pdf`,
+                          bytes,
+                        );
+                      })();
+                    }}
+                  >
+                    Download QR stickers
+                    {(floorTables?.length ?? 0) > 0 ? ` (${floorTables!.length})` : ''}
+                  </button>
+                  {(tournament.currentRound ?? 0) > 0 &&
+                    (!(
+                      tournament.arbiterPin &&
+                      tournament.arbiterPinRound === tournament.currentRound
+                    ) ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        disabled={floorBusy}
+                        onClick={() => {
+                          void (async () => {
+                            if (!id) return;
+                            setFloorBusy(true);
+                            setPairError(null);
+                            try {
+                              const round = tournament.currentRound || displayRound;
+                              await issueFloorPinForRound(
+                                id,
+                                round,
+                                Math.max(
+                                  1,
+                                  tableCountDraft ?? 0,
+                                  floorTables?.length ?? 0,
+                                  tournament.tableCount ?? 0,
+                                ),
+                              );
+                            } finally {
+                              setFloorBusy(false);
+                            }
+                          })();
+                        }}
+                      >
+                        Issue round PIN
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        disabled={floorBusy}
+                        onClick={() => {
+                          void (async () => {
+                            if (!id) return;
+                            setFloorBusy(true);
+                            setPairError(null);
+                            try {
+                              const round = tournament.currentRound || displayRound;
+                              const res = await apiFloorRotatePin(id, round);
+                              if (!res.ok) {
+                                setPairError(res.error);
+                                return;
+                              }
+                              await db.tournaments.update(id, {
+                                arbiterPin: res.data.arbiterPin,
+                                arbiterPinRound: res.data.arbiterPinRound,
+                                updatedAt: nowIso(),
+                                dirty: 1,
+                              });
+                            } finally {
+                              setFloorBusy(false);
+                            }
+                          })();
+                        }}
+                      >
+                        Regenerate PIN
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+
           <div className="pairings-toolbar">
             <div className="round-selector">
               {roundsInPlay.length > 0 && (
@@ -998,7 +1253,16 @@ export default function TournamentPage() {
               <button
                 className="btn btn-primary"
                 onClick={generatePairings}
-                disabled={pairing || !caps?.canPair}
+                disabled={
+                  pairing ||
+                  !caps?.canPair ||
+                  (caps?.stage === 'ready' && (floorTables?.length ?? 0) === 0)
+                }
+                title={
+                  caps?.stage === 'ready' && (floorTables?.length ?? 0) === 0
+                    ? 'Create table QR codes first'
+                    : undefined
+                }
               >
                 {pairing
                   ? 'Pairing…'
@@ -1006,7 +1270,9 @@ export default function TournamentPage() {
                     ? 'Tournament complete'
                     : caps?.allRoundsPaired
                       ? 'All rounds paired'
-                      : `Generate Round ${nextPairingRound ?? '—'}`}
+                      : caps?.stage === 'ready' && (floorTables?.length ?? 0) === 0
+                        ? 'Create QR codes first'
+                        : `Generate Round ${nextPairingRound ?? '—'}`}
               </button>
               {caps?.canConfirmRound && (
                 <button
@@ -1044,131 +1310,6 @@ export default function TournamentPage() {
             </p>
           )}
 
-          {tournament &&
-            (tournament.currentRound ?? 0) > 0 &&
-            (caps?.stage === 'in_progress' || caps?.stage === 'completed') && (
-              <div className="floor-panel">
-                <div className="floor-panel-main">
-                  <h3>Floor arbiter</h3>
-                  <p className="form-hint">
-                    Stick QR codes on tables. Arbiters scan, enter this round&apos;s PIN, then
-                    confirm results. PIN changes every new round. Requires online sync.
-                  </p>
-                  {tournament.arbiterPin &&
-                  tournament.arbiterPinRound === tournament.currentRound ? (
-                    <p className="floor-pin">
-                      Round {tournament.arbiterPinRound} PIN:{' '}
-                      <strong>{tournament.arbiterPin}</strong>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(tournament.arbiterPin ?? '');
-                        }}
-                      >
-                        Copy
-                      </button>
-                    </p>
-                  ) : (
-                    <p className="form-hint stage-banner-warn">
-                      No PIN yet for this round. Click <strong>Setup floor PIN &amp; QR</strong>{' '}
-                      (must be signed in and online).
-                    </p>
-                  )}
-                  {(floorTables?.length ?? 0) === 0 && (
-                    <p className="form-hint">
-                      No QR table stations yet — setup creates one QR per board.
-                    </p>
-                  )}
-                </div>
-                <div className="floor-panel-actions">
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={floorBusy}
-                    onClick={() => {
-                      void (async () => {
-                        if (!id || !tournament) return;
-                        setFloorBusy(true);
-                        setPairError(null);
-                        try {
-                          const round = tournament.currentRound || displayRound;
-                          const tableCount = Math.max(
-                            1,
-                            tournament.tableCount ?? 0,
-                            (games ?? [])
-                              .filter((g) => g.round === round && !g.deletedAt)
-                              .reduce((max, g) => Math.max(max, g.board), 0),
-                          );
-                          const ok = await prepareFloorScoring(id, tableCount, round);
-                          if (!ok) return;
-                        } finally {
-                          setFloorBusy(false);
-                        }
-                      })();
-                    }}
-                  >
-                    {floorBusy ? 'Setting up…' : 'Setup floor PIN & QR'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm"
-                    disabled={floorBusy || !tournament.arbiterPin}
-                    onClick={() => {
-                      void (async () => {
-                        if (!id) return;
-                        setFloorBusy(true);
-                        setPairError(null);
-                        try {
-                          const round = tournament.currentRound || displayRound;
-                          const res = await apiFloorRotatePin(id, round);
-                          if (!res.ok) {
-                            setPairError(res.error);
-                            return;
-                          }
-                          await db.tournaments.update(id, {
-                            arbiterPin: res.data.arbiterPin,
-                            arbiterPinRound: res.data.arbiterPinRound,
-                            updatedAt: nowIso(),
-                            dirty: 1,
-                          });
-                        } finally {
-                          setFloorBusy(false);
-                        }
-                      })();
-                    }}
-                  >
-                    Regenerate PIN
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm"
-                    disabled={(floorTables?.length ?? 0) === 0}
-                    onClick={() => {
-                      void (async () => {
-                        if (!tournament || !floorTables?.length) return;
-                        const bytes = await buildTableStickerPdf(
-                          tournament.name,
-                          floorTables.map((t) => ({
-                            tableNumber: t.tableNumber,
-                            slug: t.slug,
-                          })),
-                        );
-                        downloadPdfBytes(
-                          `${tournament.name.replace(/\s+/g, '-').toLowerCase()}-table-qr.pdf`,
-                          bytes,
-                        );
-                      })();
-                    }}
-                  >
-                    Download QR stickers
-                    {(floorTables?.length ?? 0) > 0
-                      ? ` (${floorTables!.length})`
-                      : ''}
-                  </button>
-                </div>
-              </div>
-            )}
           {caps?.allRoundsPaired && !caps.allResultsDone && (
             <p className="form-hint">
               All {maxRounds} rounds are paired. Enter remaining results, then confirm the final

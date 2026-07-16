@@ -18,6 +18,8 @@ export interface TournamentLike {
   /** Local-only plaintext PIN for the current floor-arbiter round (not synced). */
   arbiterPin?: string | null;
   arbiterPinRound?: number | null;
+  /** Physical floor tables allocated for QR stickers. */
+  tableCount?: number | null;
 }
 
 export interface TournamentCapabilities {
@@ -96,6 +98,26 @@ function summarizePendingResults(
   return `${pending.length} game${pending.length === 1 ? '' : 's'} left — ${roundParts.join(', ')}.`;
 }
 
+/** Expected physical boards from the current player list (byes do not add a table). */
+export function estimateFloorTableCount(
+  tournament: TournamentLike,
+  categories: CategoryLike[] | null | undefined,
+  participants: LocalParticipant[] | null | undefined,
+): number {
+  const mix = isMixedTournament(tournament);
+  const cats = asList(categories).filter((c) => !c.deletedAt);
+  const players = asList(participants).filter((p) => !p.deletedAt);
+  if (mix || cats.length === 0) {
+    return Math.max(1, Math.floor(players.length / 2));
+  }
+  let total = 0;
+  for (const cat of cats) {
+    const n = players.filter((p) => p.categoryIds?.includes(cat.id)).length;
+    total += Math.floor(n / 2);
+  }
+  return Math.max(1, total);
+}
+
 /** Friendly step-by-step guide for what to do next (replaces raw completion blocker dumps). */
 export function getTournamentInstructions(
   tournament: TournamentLike,
@@ -104,6 +126,7 @@ export function getTournamentInstructions(
   games: LocalGame[] | null | undefined,
   caps: TournamentCapabilities,
   categoryNames: Record<string, string> = {},
+  floorTableCount = 0,
 ): TournamentInstruction[] {
   const cats = asList(categories);
   const players = asList(participants);
@@ -117,7 +140,10 @@ export function getTournamentInstructions(
     tournament.status === 'ready' ||
     hasGames ||
     tournament.currentRound > 0 ||
-    caps.stage === 'in_progress';
+    caps.stage === 'in_progress' ||
+    caps.stage === 'completed';
+  const qrReady = floorTableCount > 0;
+  const estimatedTables = estimateFloorTableCount(tournament, cats, players);
   const nextRound = getNextPairingRound(
     tournament.rounds,
     cats,
@@ -142,21 +168,20 @@ export function getTournamentInstructions(
       {
         id: 'ready',
         status: 'upcoming',
-        title: 'Mark tournament ready',
-        description: 'Confirm the player list when setup is complete',
+        title: 'Confirm player list',
+        description: 'Mark the tournament ready when registration is final',
+      },
+      {
+        id: 'floor',
+        status: 'upcoming',
+        title: 'Generate table QR codes',
+        description: 'Create and download QR stickers once the board count is confirmed',
       },
       {
         id: 'play',
         status: 'upcoming',
         title: 'Pair rounds & enter results',
-        description: `Generate pairings round by round across ${tournament.rounds} rounds`,
-      },
-      {
-        id: 'floor',
-        status: 'upcoming',
-        title: 'Set up table QR codes & floor PIN',
-        description:
-          'After each round is paired, download QR stickers and share the round PIN with floor arbiters',
+        description: `Pair each round — a new floor PIN is issued for arbiters`,
       },
       {
         id: 'complete',
@@ -172,26 +197,25 @@ export function getTournamentInstructions(
   instructions.push({
     id: 'ready',
     status: markedReady ? 'done' : 'current',
-    title: markedReady ? 'Tournament marked ready' : 'Mark tournament ready',
+    title: markedReady ? 'Player list confirmed' : 'Confirm player list',
     description: markedReady
-      ? 'Setup complete — time to pair'
-      : 'Click Mark Ready when the hall is set and the list is final',
+      ? 'List locked for start — next create table QR codes'
+      : 'Click Mark Ready when registration is final',
   });
 
   if (!markedReady) {
     instructions.push(
       {
+        id: 'floor',
+        status: 'upcoming',
+        title: 'Generate table QR codes',
+        description: `About ${estimatedTables} board${estimatedTables === 1 ? '' : 's'} from the current list — download stickers before Round 1`,
+      },
+      {
         id: 'play',
         status: 'upcoming',
         title: 'Pair rounds & enter results',
-        description: 'Open Pairings, generate Round 1, then score each round before the next',
-      },
-      {
-        id: 'floor',
-        status: 'upcoming',
-        title: 'Set up table QR codes & floor PIN',
-        description:
-          'After each round is paired, download QR stickers and share the round PIN with floor arbiters',
+        description: 'After QR stickers are ready, generate Round 1 — the floor PIN appears then',
       },
       {
         id: 'complete',
@@ -203,19 +227,47 @@ export function getTournamentInstructions(
     return instructions;
   }
 
-  // 3 — Pair & play (one focused action at a time)
-  let playStatus: InstructionStatus = 'current';
-  let playTitle = 'Pair rounds & enter results';
-  let playDescription = '';
+  // 3 — Table QR stickers (before pairing)
+  let floorStatus: InstructionStatus = 'upcoming';
+  let floorTitle = 'Generate table QR codes';
+  let floorDescription = `Confirm ~${estimatedTables} boards on Pairings, create QR stations, then download stickers`;
 
-  if (!hasGames) {
+  if (!qrReady) {
+    floorStatus = 'current';
+    floorTitle = 'Generate table QR codes';
+    floorDescription =
+      'On Pairings: set the board count, click Create table QR codes, then Download QR stickers';
+  } else {
+    floorStatus = 'done';
+    floorTitle = `${Math.max(floorTableCount, tournament.tableCount ?? 0)} table QR codes ready`;
+    floorDescription =
+      'Stickers stay on the tables for the whole event — download again anytime from Pairings';
+  }
+
+  instructions.push({
+    id: 'floor',
+    status: floorStatus,
+    title: floorTitle,
+    description: floorDescription,
+  });
+
+  // 4 — Pair & play (PIN issued when a round is paired)
+  let playStatus: InstructionStatus = qrReady ? 'current' : 'upcoming';
+  let playTitle = 'Pair rounds & enter results';
+  let playDescription = qrReady
+    ? 'Generate Round 1 — the floor PIN for that round appears on Pairings (regenerate only if leaked)'
+    : 'Create table QR codes first, then generate Round 1';
+
+  if (!qrReady) {
+    playTitle = 'Pair rounds & enter results';
+  } else if (!hasGames) {
     playTitle = 'Generate Round 1 pairings';
     playDescription = hasCategories && !mix
-      ? 'Open Pairings and generate Round 1 — then set up table QR codes and the floor PIN'
-      : 'Open Pairings, generate Round 1, then set up table QR codes and the floor PIN';
+      ? 'Open Pairings and generate Round 1 — each category pairs separately; the round PIN appears after'
+      : 'Open Pairings and generate Round 1 — the floor PIN for Round 1 appears after pairing';
   } else if (caps.pendingResultsRound != null && nextRound != null) {
     playTitle = `Enter Round ${caps.pendingResultsRound} results`;
-    playDescription = `Score every game in Round ${caps.pendingResultsRound} before confirming the round (director desk or floor QR).`;
+    playDescription = `Score every game in Round ${caps.pendingResultsRound} (director desk or floor QR + PIN) before confirming.`;
     const pendingDetail = summarizePendingResults(
       tournament,
       cats,
@@ -224,6 +276,12 @@ export function getTournamentInstructions(
       categoryNames,
     );
     if (pendingDetail) playDescription += ` ${pendingDetail}`;
+    const pinOk =
+      !!tournament.arbiterPin && tournament.arbiterPinRound === caps.pendingResultsRound;
+    if (!pinOk) {
+      playDescription +=
+        ' Floor PIN missing — use Issue round PIN on the Pairings tab.';
+    }
   } else if (caps.pendingConfirmRound != null) {
     playTitle = `Confirm Round ${caps.pendingConfirmRound} complete`;
     playDescription =
@@ -234,7 +292,7 @@ export function getTournamentInstructions(
     playTitle = `Generate Round ${nextRound} pairings`;
     playDescription =
       nextRound === tournament.rounds
-        ? 'Final round — generate pairings, refresh floor PIN/QR, enter results, then confirm to finish'
+        ? 'Final round — pairings issue a new floor PIN, then enter results and confirm'
         : `Round ${nextRound - 1} is confirmed — pair the next round (a new floor PIN is issued)`;
   } else if (!caps.allResultsDone) {
     playTitle = 'Enter remaining results';
@@ -252,44 +310,6 @@ export function getTournamentInstructions(
     status: playStatus,
     title: playTitle,
     description: playDescription,
-  });
-
-  // 4 — Floor arbiter QR + PIN (after pairings exist)
-  const floorRound = tournament.currentRound > 0 ? tournament.currentRound : 1;
-  const floorReady =
-    hasGames &&
-    !!tournament.arbiterPin &&
-    tournament.arbiterPinRound === floorRound;
-  let floorStatus: InstructionStatus = 'upcoming';
-  let floorTitle = 'Set up table QR codes & floor PIN';
-  let floorDescription =
-    'On Pairings: Setup floor PIN & QR, download stickers for each table, share the PIN with arbiters';
-
-  if (!hasGames) {
-    floorStatus = 'upcoming';
-    floorDescription =
-      'After Round 1 is paired, download QR stickers and share that round’s PIN with floor arbiters';
-  } else if (floorReady || playStatus === 'done') {
-    floorStatus = 'done';
-    floorTitle = floorReady
-      ? `Floor PIN ready for Round ${floorRound}`
-      : 'Table QR codes & floor PIN';
-    floorDescription = floorReady
-      ? 'QR stickers stay on the tables; the PIN changes each new round — copy it from the Pairings tab'
-      : 'Floor arbiter scoring was available on the Pairings tab each round';
-  } else {
-    // Highlight floor setup until PIN/QR exist for this round.
-    floorStatus = 'current';
-    floorTitle = `Set up floor PIN & QR for Round ${floorRound}`;
-    floorDescription =
-      'Click Setup floor PIN & QR on the Pairings tab, then Download QR stickers and share the PIN';
-  }
-
-  instructions.push({
-    id: 'floor',
-    status: floorStatus,
-    title: floorTitle,
-    description: floorDescription,
   });
 
   // 5 — Complete
