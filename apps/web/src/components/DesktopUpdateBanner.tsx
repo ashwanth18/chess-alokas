@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import type { DesktopUpdateStatus } from '../desktop';
 
 const DISMISS_KEY = 'chess-alokas-dismissed-update';
-const LAST_SEEN_VERSION_KEY = 'chess-alokas-last-seen-version';
-const JUST_UPDATED_KEY = 'chess-alokas-just-updated';
 
 type JustUpdatedNotice = {
   from: string;
@@ -26,54 +24,12 @@ function dismissVersion(version: string) {
   }
 }
 
-function readJustUpdatedNotice(): JustUpdatedNotice | null {
-  try {
-    const raw = localStorage.getItem(JUST_UPDATED_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as JustUpdatedNotice;
-    if (!parsed?.from || !parsed?.to) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function clearJustUpdatedNotice() {
-  try {
-    localStorage.removeItem(JUST_UPDATED_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-/** Detect version bump after silent install / restart and stash a one-shot notice. */
-function detectVersionBumpNotice(): JustUpdatedNotice | null {
-  if (!window.desktop?.isDesktop) return null;
-  const current = window.desktop.getAppVersion();
-  let previous: string | null = null;
-  try {
-    previous = localStorage.getItem(LAST_SEEN_VERSION_KEY);
-  } catch {
-    previous = null;
-  }
-
-  try {
-    localStorage.setItem(LAST_SEEN_VERSION_KEY, current);
-  } catch {
-    /* ignore */
-  }
-
-  if (!previous || previous === current) {
-    return readJustUpdatedNotice();
-  }
-
-  const notice = { from: previous, to: current };
-  try {
-    localStorage.setItem(JUST_UPDATED_KEY, JSON.stringify(notice));
-  } catch {
-    /* ignore */
-  }
-  return notice;
+function noticeFromStatus(status: DesktopUpdateStatus): JustUpdatedNotice | null {
+  if (status.status !== 'just-updated' || !status.version) return null;
+  return {
+    from: status.previousVersion ?? status.currentVersion,
+    to: status.version,
+  };
 }
 
 export default function DesktopUpdateBanner() {
@@ -83,29 +39,26 @@ export default function DesktopUpdateBanner() {
 
   useEffect(() => {
     if (!window.desktop?.isDesktop) return;
-    setJustUpdated(detectVersionBumpNotice());
 
     void window.desktop.getUpdateStatus().then((next) => {
       setStatus(next);
-      if (next.status === 'just-updated' && next.version) {
-        setJustUpdated({
-          from: next.previousVersion ?? next.currentVersion,
-          to: next.version,
-        });
+      const notice = noticeFromStatus(next);
+      if (notice) {
+        setJustUpdated(notice);
+        setHidden(false);
       }
     });
 
     if (!window.desktop.onUpdateStatus) return;
     return window.desktop.onUpdateStatus((next) => {
-      setStatus(next);
-      if (next.status === 'just-updated' && next.version) {
-        setJustUpdated({
-          from: next.previousVersion ?? next.currentVersion,
-          to: next.version,
-        });
+      const notice = noticeFromStatus(next);
+      if (notice) {
+        setJustUpdated(notice);
         setHidden(false);
+        setStatus(next);
         return;
       }
+      setStatus(next);
       if (
         (next.status === 'available' ||
           next.status === 'downloading' ||
@@ -114,7 +67,6 @@ export default function DesktopUpdateBanner() {
         dismissedVersion() === next.version &&
         next.status !== 'downloaded'
       ) {
-        // Allow dismissing mid-download; once ready, show again so they can restart.
         setHidden(true);
       } else if (
         next.status === 'available' ||
@@ -143,8 +95,8 @@ export default function DesktopUpdateBanner() {
             type="button"
             className="btn btn-sm btn-ghost"
             onClick={() => {
-              clearJustUpdatedNotice();
               setJustUpdated(null);
+              void window.desktop?.dismissJustUpdated?.();
             }}
           >
             Dismiss
@@ -171,7 +123,6 @@ export default function DesktopUpdateBanner() {
       return;
     }
     if (status?.canInstall) {
-      // Auto-download is usually already running; this is a fallback.
       await window.desktop.downloadUpdate();
       return;
     }

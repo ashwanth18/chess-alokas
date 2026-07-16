@@ -86,6 +86,33 @@ describe('pairSwissRound', () => {
     expect(standings.every((s) => s.rank >= 1)).toBe(true);
   });
 
+  it('scores forfeit and double-absent results', () => {
+    const plist = players(4);
+    const [a, b, c, d] = plist;
+    const past: PastGame[] = [
+      {
+        round: 1,
+        whiteId: a!.id,
+        blackId: b!.id,
+        result: '1-0F',
+        isBye: false,
+      },
+      {
+        round: 1,
+        whiteId: c!.id,
+        blackId: d!.id,
+        result: '0-0',
+        isBye: false,
+      },
+    ];
+    const standings = computeStandings(plist, past);
+    const byId = Object.fromEntries(standings.map((s) => [s.id, s.score]));
+    expect(byId[a!.id]).toBe(1);
+    expect(byId[b!.id]).toBe(0);
+    expect(byId[c!.id]).toBe(0);
+    expect(byId[d!.id]).toBe(0);
+  });
+
   it('does not give consecutive byes when avoidable', () => {
     const plist = players(5);
     const r1 = pairSwissRound({ players: plist, pastGames: [], round: 1 });

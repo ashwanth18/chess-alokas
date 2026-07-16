@@ -1,6 +1,7 @@
 import postgres, { type Sql } from 'postgres';
 import type {
   Tournament,
+  TournamentTable,
   Category,
   Participant,
   Game,
@@ -10,6 +11,7 @@ import type {
   TournamentStatus,
   GameResult,
 } from '@chess-alokas/shared';
+import { generateTableSlug } from './floor/pin.js';
 
 // ---------------------------------------------------------------------------
 // Shared result types
@@ -54,6 +56,20 @@ export interface Store {
   updateGame(id: string, patch: Partial<Omit<Game, 'id'>>): Promise<Game | null>;
   softDeleteGamesForRound(tournamentId: string, round: number, categoryId: string): Promise<void>;
 
+  // Floor arbiter tables
+  getTableBySlug(slug: string): Promise<TournamentTable | null>;
+  listTables(tournamentId: string): Promise<TournamentTable[]>;
+  ensureTables(tournamentId: string, count: number): Promise<TournamentTable[]>;
+  setArbiterPin(tournamentId: string, pinHash: string, pinRound: number): Promise<Tournament | null>;
+  getArbiterPinMeta(
+    tournamentId: string,
+  ): Promise<{ hash: string | null; round: number | null }>;
+  findGameForTable(
+    tournamentId: string,
+    tableNumber: number,
+    round: number,
+  ): Promise<Game | null>;
+
   // Sync
   pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult>;
   pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void>;
@@ -68,6 +84,8 @@ export class MemoryStore implements Store {
   private categories = new Map<string, Category>();
   private participants = new Map<string, Participant>();
   private games = new Map<string, Game>();
+  private tables = new Map<string, TournamentTable>();
+  private pinMeta = new Map<string, { hash: string; round: number }>();
 
   // ---- Tournaments ----
 
@@ -215,6 +233,87 @@ export class MemoryStore implements Store {
     }
   }
 
+  async getTableBySlug(slug: string): Promise<TournamentTable | null> {
+    return [...this.tables.values()].find((t) => t.slug === slug) ?? null;
+  }
+
+  async listTables(tournamentId: string): Promise<TournamentTable[]> {
+    return [...this.tables.values()]
+      .filter((t) => t.tournamentId === tournamentId)
+      .sort((a, b) => a.tableNumber - b.tableNumber);
+  }
+
+  async ensureTables(tournamentId: string, count: number): Promise<TournamentTable[]> {
+    const existing = await this.listTables(tournamentId);
+    const byNum = new Map(existing.map((t) => [t.tableNumber, t]));
+    const now = new Date().toISOString();
+    for (let n = 1; n <= count; n++) {
+      if (byNum.has(n)) continue;
+      const row: TournamentTable = {
+        id: crypto.randomUUID(),
+        tournamentId,
+        tableNumber: n,
+        slug: generateTableSlug(),
+        createdAt: now,
+      };
+      this.tables.set(row.id, row);
+      byNum.set(n, row);
+    }
+    const t = this.tournaments.get(tournamentId);
+    if (t) {
+      this.tournaments.set(tournamentId, {
+        ...t,
+        tableCount: Math.max(t.tableCount ?? 0, count),
+        updatedAt: now,
+      });
+    }
+    return this.listTables(tournamentId);
+  }
+
+  async setArbiterPin(
+    tournamentId: string,
+    pinHash: string,
+    pinRound: number,
+  ): Promise<Tournament | null> {
+    const t = this.tournaments.get(tournamentId);
+    if (!t) return null;
+    this.pinMeta.set(tournamentId, { hash: pinHash, round: pinRound });
+    const updated: Tournament = {
+      ...t,
+      arbiterPinRound: pinRound,
+      updatedAt: new Date().toISOString(),
+    };
+    this.tournaments.set(tournamentId, updated);
+    return updated;
+  }
+
+  async getArbiterPinMeta(
+    tournamentId: string,
+  ): Promise<{ hash: string | null; round: number | null }> {
+    const meta = this.pinMeta.get(tournamentId);
+    const t = this.tournaments.get(tournamentId);
+    return {
+      hash: meta?.hash ?? null,
+      round: meta?.round ?? t?.arbiterPinRound ?? null,
+    };
+  }
+
+  async findGameForTable(
+    tournamentId: string,
+    tableNumber: number,
+    round: number,
+  ): Promise<Game | null> {
+    const matches = [...this.games.values()].filter(
+      (g) =>
+        !g.deletedAt &&
+        g.tournamentId === tournamentId &&
+        g.board === tableNumber &&
+        g.round === round,
+    );
+    if (matches.length !== 1) return null;
+    return matches[0]!;
+  }
+
   // ---- Sync ----
 
   async pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult> {
@@ -287,6 +386,9 @@ export class MemoryStore implements Store {
         prizePlaces: Number(payload['prizePlaces'] ?? 3),
         awardScope: (payload['awardScope'] as Tournament['awardScope']) ?? 'per_category',
         ownerId: (payload['ownerId'] as string | null | undefined) ?? null,
+        arbiterPinRound:
+          payload['arbiterPinRound'] == null ? null : Number(payload['arbiterPinRound']),
+        tableCount: Number(payload['tableCount'] ?? 0),
         clientId: (payload['clientId'] as string | undefined) ?? undefined,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
@@ -333,6 +435,7 @@ export class MemoryStore implements Store {
         blackId: (payload['blackId'] as string | null) ?? null,
         result: (payload['result'] as GameResult) ?? 'pending',
         isBye: Boolean(payload['isBye'] ?? false),
+        resultLockedAt: (payload['resultLockedAt'] as string | null | undefined) ?? null,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
       };
@@ -358,9 +461,20 @@ interface TournamentRow {
   prize_places: number | null;
   award_scope: string | null;
   owner_id: string | null;
+  arbiter_pin_hash: string | null;
+  arbiter_pin_round: number | null;
+  table_count: number | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
+}
+
+interface TournamentTableRow {
+  id: string;
+  tournament_id: string;
+  table_number: number;
+  slug: string;
+  created_at: Date | string;
 }
 
 interface CategoryRow {
@@ -400,6 +514,7 @@ interface GameRow {
   black_id: string | null;
   result: string;
   is_bye: boolean;
+  result_locked_at: Date | string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
 }
@@ -427,9 +542,21 @@ function rowToTournament(row: TournamentRow): Tournament {
     prizePlaces: row.prize_places ?? 3,
     awardScope: (row.award_scope as Tournament['awardScope']) ?? 'per_category',
     ownerId: row.owner_id ?? null,
+    arbiterPinRound: row.arbiter_pin_round ?? null,
+    tableCount: row.table_count ?? 0,
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
+  };
+}
+
+function rowToTournamentTable(row: TournamentTableRow): TournamentTable {
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    tableNumber: row.table_number,
+    slug: row.slug,
+    createdAt: toIso(row.created_at)!,
   };
 }
 
@@ -475,6 +602,7 @@ function rowToGame(row: GameRow): Game {
     blackId: row.black_id,
     result: row.result as GameResult,
     isBye: row.is_bye,
+    resultLockedAt: toIso(row.result_locked_at) ?? null,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
   };
@@ -708,10 +836,10 @@ export class PostgresStore implements Store {
   async createGame(g: Game): Promise<Game> {
     const rows = await this.sql<GameRow[]>`
       INSERT INTO games
-        (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye, updated_at, deleted_at)
+        (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye, result_locked_at, updated_at, deleted_at)
       VALUES
         (${g.id}, ${g.tournamentId}, ${g.categoryId}, ${g.round}, ${g.board},
-         ${g.whiteId}, ${g.blackId}, ${g.result}, ${g.isBye},
+         ${g.whiteId}, ${g.blackId}, ${g.result}, ${g.isBye}, ${g.resultLockedAt ?? null},
          ${g.updatedAt}, ${g.deletedAt ?? null})
       RETURNING *
     `;
@@ -728,11 +856,94 @@ export class PostgresStore implements Store {
         round = ${m.round}, board = ${m.board},
         white_id = ${m.whiteId}, black_id = ${m.blackId},
         result = ${m.result}, is_bye = ${m.isBye},
+        result_locked_at = ${m.resultLockedAt ?? null},
         updated_at = ${m.updatedAt}, deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
     `;
     const row = rows[0];
     return row ? rowToGame(row) : null;
+  }
+
+  async getTableBySlug(slug: string): Promise<TournamentTable | null> {
+    const rows = await this.sql<TournamentTableRow[]>`
+      SELECT * FROM tournament_tables WHERE slug = ${slug} LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? rowToTournamentTable(row) : null;
+  }
+
+  async listTables(tournamentId: string): Promise<TournamentTable[]> {
+    const rows = await this.sql<TournamentTableRow[]>`
+      SELECT * FROM tournament_tables
+      WHERE tournament_id = ${tournamentId}
+      ORDER BY table_number ASC
+    `;
+    return rows.map(rowToTournamentTable);
+  }
+
+  async ensureTables(tournamentId: string, count: number): Promise<TournamentTable[]> {
+    for (let n = 1; n <= count; n++) {
+      const slug = generateTableSlug();
+      await this.sql`
+        INSERT INTO tournament_tables (id, tournament_id, table_number, slug)
+        VALUES (${crypto.randomUUID()}, ${tournamentId}, ${n}, ${slug})
+        ON CONFLICT (tournament_id, table_number) DO NOTHING
+      `;
+    }
+    const now = new Date().toISOString();
+    await this.sql`
+      UPDATE tournaments
+      SET table_count = GREATEST(table_count, ${count}), updated_at = ${now}
+      WHERE id = ${tournamentId}
+    `;
+    return this.listTables(tournamentId);
+  }
+
+  async setArbiterPin(
+    tournamentId: string,
+    pinHash: string,
+    pinRound: number,
+  ): Promise<Tournament | null> {
+    const now = new Date().toISOString();
+    const rows = await this.sql<TournamentRow[]>`
+      UPDATE tournaments
+      SET arbiter_pin_hash = ${pinHash},
+          arbiter_pin_round = ${pinRound},
+          updated_at = ${now}
+      WHERE id = ${tournamentId}
+      RETURNING *
+    `;
+    const row = rows[0];
+    return row ? rowToTournament(row) : null;
+  }
+
+  async getArbiterPinMeta(
+    tournamentId: string,
+  ): Promise<{ hash: string | null; round: number | null }> {
+    const rows = await this.sql<{ arbiter_pin_hash: string | null; arbiter_pin_round: number | null }[]>`
+      SELECT arbiter_pin_hash, arbiter_pin_round FROM tournaments WHERE id = ${tournamentId}
+    `;
+    const row = rows[0];
+    return {
+      hash: row?.arbiter_pin_hash ?? null,
+      round: row?.arbiter_pin_round ?? null,
+    };
+  }
+
+  async findGameForTable(
+    tournamentId: string,
+    tableNumber: number,
+    round: number,
+  ): Promise<Game | null> {
+    const rows = await this.sql<GameRow[]>`
+      SELECT * FROM games
+      WHERE tournament_id = ${tournamentId}
+        AND board = ${tableNumber}
+        AND round = ${round}
+        AND deleted_at IS NULL
+    `;
+    if (rows.length !== 1) return null;
+    return rowToGame(rows[0]!);
   }
 
   async softDeleteGamesForRound(
@@ -899,18 +1110,20 @@ export class PostgresStore implements Store {
     } else if (entity === 'game') {
       await this.sql`
         INSERT INTO games
-          (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye, updated_at, deleted_at)
+          (id, tournament_id, category_id, round, board, white_id, black_id, result, is_bye, result_locked_at, updated_at, deleted_at)
         VALUES
           (${id}, ${String(p['tournamentId'] ?? '')}, ${String(p['categoryId'] ?? '')},
            ${Number(p['round'] ?? 1)}, ${Number(p['board'] ?? 1)},
            ${(p['whiteId'] as string) ?? null}, ${(p['blackId'] as string) ?? null},
            ${String(p['result'] ?? 'pending')}, ${Boolean(p['isBye'] ?? false)},
+           ${(p['resultLockedAt'] as string) ?? null},
            ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           tournament_id = EXCLUDED.tournament_id, category_id = EXCLUDED.category_id,
           round = EXCLUDED.round, board = EXCLUDED.board,
           white_id = EXCLUDED.white_id, black_id = EXCLUDED.black_id,
           result = EXCLUDED.result, is_bye = EXCLUDED.is_bye,
+          result_locked_at = COALESCE(EXCLUDED.result_locked_at, games.result_locked_at),
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > games.updated_at
       `;

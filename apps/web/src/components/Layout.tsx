@@ -4,7 +4,6 @@ import { checkOnline } from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { getLastSyncAt } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
-import DesktopUpdateBanner from './DesktopUpdateBanner';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -207,8 +206,6 @@ export default function Layout() {
           onClick={closeMenu}
         />
       )}
-
-      <DesktopUpdateBanner />
 
       <main className="page-content">
         <Outlet />

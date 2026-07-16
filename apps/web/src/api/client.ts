@@ -221,3 +221,91 @@ export async function apiEmailCertificates(
     },
   );
 }
+
+// ── Floor arbiter tables ─────────────────────────────────────────────────────
+
+export type FloorTableRow = {
+  id: string;
+  tournamentId: string;
+  tableNumber: number;
+  slug: string;
+  createdAt: string;
+};
+
+export type FloorTableView = {
+  slug: string;
+  tableNumber: number;
+  tournamentName: string;
+  tournamentId: string;
+  pinRound: number | null;
+  round: number | null;
+  whiteName: string | null;
+  blackName: string | null;
+  status: 'needs_pin' | 'pending' | 'locked' | 'bye' | 'no_game' | 'confirmed_closed';
+  result: string | null;
+  sessionOk: boolean;
+};
+
+export async function apiFloorPrepare(
+  tournamentId: string,
+  body: { tableCount: number; pinRound: number; rotatePin?: boolean },
+) {
+  return req<{
+    tables: FloorTableRow[];
+    tableCount: number;
+    arbiterPin: string | null;
+    arbiterPinRound: number | null;
+  }>(`/tournaments/${tournamentId}/floor/prepare`, {
+    method: 'POST',
+    body: JSON.stringify({ rotatePin: true, ...body }),
+  });
+}
+
+export async function apiFloorListTables(tournamentId: string) {
+  return req<{
+    tables: FloorTableRow[];
+    tableCount: number;
+    arbiterPinRound: number | null;
+  }>(`/tournaments/${tournamentId}/floor/tables`);
+}
+
+export async function apiFloorRotatePin(tournamentId: string, pinRound: number) {
+  return req<{ arbiterPin: string; arbiterPinRound: number }>(
+    `/tournaments/${tournamentId}/floor/rotate-pin`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ pinRound }),
+    },
+  );
+}
+
+export async function apiPublicTableGet(slug: string, sessionToken?: string | null) {
+  return req<FloorTableView>(`/public/tables/${encodeURIComponent(slug)}`, {
+    headers: sessionToken ? { 'X-Arbiter-Session': sessionToken } : {},
+  });
+}
+
+export async function apiPublicTableSession(slug: string, pin: string) {
+  return req<{ token: string; table: FloorTableView }>(
+    `/public/tables/${encodeURIComponent(slug)}/session`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ pin }),
+    },
+  );
+}
+
+export async function apiPublicTableResult(
+  slug: string,
+  sessionToken: string,
+  result: string,
+) {
+  return req<{ ok: true; table: FloorTableView }>(
+    `/public/tables/${encodeURIComponent(slug)}/result`,
+    {
+      method: 'POST',
+      headers: { 'X-Arbiter-Session': sessionToken },
+      body: JSON.stringify({ result, confirm: true }),
+    },
+  );
+}

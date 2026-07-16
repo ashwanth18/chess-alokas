@@ -17,8 +17,30 @@ export const GameResultSchema = z.enum([
   '1/2-1/2',
   'bye',
   'pending',
+  /** Black absent/forfeit — White wins */
+  '1-0F',
+  /** White absent/forfeit — Black wins */
+  '0-1F',
+  /** Both absent */
+  '0-0',
 ]);
 export type GameResult = z.infer<typeof GameResultSchema>;
+
+/** Results the floor arbiter may confirm (excludes bye/pending). */
+export const ArbiterScorableResultSchema = z.enum([
+  '1-0',
+  '0-1',
+  '1/2-1/2',
+  '1-0F',
+  '0-1F',
+  '0-0',
+]);
+export type ArbiterScorableResult = z.infer<typeof ArbiterScorableResultSchema>;
+
+export function isResultEntered(result: string, isBye = false): boolean {
+  if (isBye || result === 'bye') return true;
+  return result !== 'pending';
+}
 
 /** Simple filter DSL for category assignment */
 export const FilterOpSchema = z.enum(['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in']);
@@ -96,11 +118,24 @@ export const TournamentSchema = z.object({
   awardScope: AwardScopeSchema.default('per_category'),
   /** Supabase Auth user id that owns this tournament (manager). */
   ownerId: z.string().uuid().nullable().optional(),
+  /** Round the current arbiter PIN is valid for (server-side hash only). */
+  arbiterPinRound: z.number().int().nonnegative().nullable().optional(),
+  /** Number of physical floor tables allocated for QR stickers. */
+  tableCount: z.number().int().nonnegative().default(0),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),
 });
 export type Tournament = z.infer<typeof TournamentSchema>;
+
+export const TournamentTableSchema = z.object({
+  id: z.string().uuid(),
+  tournamentId: z.string().uuid(),
+  tableNumber: z.number().int().positive(),
+  slug: z.string().min(8),
+  createdAt: z.string().datetime(),
+});
+export type TournamentTable = z.infer<typeof TournamentTableSchema>;
 
 export const GameSchema = z.object({
   id: z.string().uuid(),
@@ -112,6 +147,8 @@ export const GameSchema = z.object({
   blackId: z.string().uuid().nullable(),
   result: GameResultSchema,
   isBye: z.boolean().default(false),
+  /** Set when floor arbiter confirms; public API refuses further writes. */
+  resultLockedAt: z.string().datetime().nullable().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
 });

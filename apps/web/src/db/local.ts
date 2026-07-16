@@ -19,9 +19,23 @@ export interface LocalTournament {
   awardScope?: 'overall' | 'per_category';
   /** Supabase Auth user id (manager) */
   ownerId?: string | null;
+  /** Round the current arbiter PIN applies to (mirrors server). */
+  arbiterPinRound?: number | null;
+  /** Plaintext PIN for the current round — local display only; never sync. */
+  arbiterPin?: string | null;
+  tableCount?: number;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;
+  dirty: 1 | 0;
+}
+
+export interface LocalTournamentTable {
+  id: string;
+  tournamentId: string;
+  tableNumber: number;
+  slug: string;
+  createdAt: string;
   dirty: 1 | 0;
 }
 
@@ -65,6 +79,7 @@ export interface LocalGame {
   blackId?: string | null;
   result: string;
   isBye: boolean;
+  resultLockedAt?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   dirty: 1 | 0;
@@ -93,6 +108,7 @@ export class ChessDb extends Dexie {
   participants!: Table<LocalParticipant>;
   games!: Table<LocalGame>;
   certificateTemplates!: Table<LocalCertificateTemplate>;
+  tournamentTables!: Table<LocalTournamentTable>;
   meta!: Table<LocalMeta>;
 
   constructor() {
@@ -127,6 +143,16 @@ export class ChessDb extends Dexie {
       participants: 'id, tournamentId, updatedAt, dirty',
       games: 'id, tournamentId, categoryId, round, dirty',
       certificateTemplates: 'id, tournamentId, updatedAt, dirty',
+      meta: 'key',
+    });
+    // v6: floor arbiter tables + result lock field on games
+    this.version(6).stores({
+      tournaments: 'id, ownerId, updatedAt, dirty',
+      categories: 'id, tournamentId, updatedAt, dirty',
+      participants: 'id, tournamentId, updatedAt, dirty',
+      games: 'id, tournamentId, categoryId, round, dirty',
+      certificateTemplates: 'id, tournamentId, updatedAt, dirty',
+      tournamentTables: 'id, tournamentId, tableNumber, slug, dirty',
       meta: 'key',
     });
   }

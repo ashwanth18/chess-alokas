@@ -8,7 +8,11 @@ function toSyncItem(
   record: { id: string; updatedAt: string; deletedAt?: string | null; dirty: 1 | 0 },
 ) {
   // Strip local-only fields before sending
-  const { dirty: _dirty, ...payload } = record as Record<string, unknown> & { dirty: 1 | 0 };
+  const {
+    dirty: _dirty,
+    arbiterPin: _arbiterPin,
+    ...payload
+  } = record as Record<string, unknown> & { dirty: 1 | 0; arbiterPin?: string | null };
   return {
     entity,
     id: record.id,
@@ -85,6 +89,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   for (const remote of tournaments) {
     const local = await db.tournaments.get(remote.id);
     if (!local || remote.updatedAt > local.updatedAt) {
+      const prev = local;
       await db.tournaments.put({
         ...remote,
         mixCategories: remote.mixCategories ?? false,
@@ -93,6 +98,11 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
         prizePlaces: remote.prizePlaces ?? 3,
         awardScope: remote.awardScope ?? 'per_category',
         ownerId: remote.ownerId ?? null,
+        arbiterPinRound: remote.arbiterPinRound ?? null,
+        tableCount: remote.tableCount ?? 0,
+        // Keep local plaintext PIN when round still matches.
+        arbiterPin:
+          prev?.arbiterPinRound === remote.arbiterPinRound ? (prev?.arbiterPin ?? null) : null,
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalTournament);
@@ -130,6 +140,7 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
     if (!local || remote.updatedAt > local.updatedAt) {
       await db.games.put({
         ...remote,
+        resultLockedAt: remote.resultLockedAt ?? null,
         deletedAt: remote.deletedAt ?? null,
         dirty: 0,
       } as LocalGame);

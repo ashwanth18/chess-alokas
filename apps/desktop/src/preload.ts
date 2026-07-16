@@ -8,8 +8,10 @@ export type DesktopUpdateStatus = {
     | 'not-available'
     | 'downloading'
     | 'downloaded'
+    | 'just-updated'
     | 'error';
   currentVersion: string;
+  previousVersion?: string;
   version?: string;
   percent?: number;
   message?: string;
@@ -30,6 +32,7 @@ export interface DesktopBridge {
   installUpdate: () => Promise<void>;
   openDownloadPage: (url?: string) => Promise<void>;
   getUpdateStatus: () => Promise<DesktopUpdateStatus>;
+  dismissJustUpdated: () => Promise<DesktopUpdateStatus>;
   onUpdateStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void;
 }
 
@@ -51,6 +54,8 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke('desktop:open-download-page', url) as Promise<void>,
   getUpdateStatus: () =>
     ipcRenderer.invoke('desktop:get-update-status') as Promise<DesktopUpdateStatus>,
+  dismissJustUpdated: () =>
+    ipcRenderer.invoke('desktop:dismiss-just-updated') as Promise<DesktopUpdateStatus>,
   onUpdateStatus: (listener) => {
     const handler = (_event: IpcRendererEvent, status: DesktopUpdateStatus) => listener(status);
     ipcRenderer.on('desktop:update-status', handler);

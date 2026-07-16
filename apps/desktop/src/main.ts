@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import log from 'electron-log/main';
 import { startApiSidecar, type SidecarHandle } from './sidecar.js';
-import { getLastUpdateStatus, setupAutoUpdater } from './updater.js';
+import { getLastUpdateStatus, setupAutoUpdater, dismissJustUpdatedNotice } from './updater.js';
 import { installAppMenu } from './menu.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,6 +54,7 @@ function registerIpc() {
     updater.openDownloadPage(typeof url === 'string' ? url : undefined);
   });
   ipcMain.handle('desktop:get-update-status', () => getLastUpdateStatus());
+  ipcMain.handle('desktop:dismiss-just-updated', () => dismissJustUpdatedNotice());
 }
 
 async function createWindow() {

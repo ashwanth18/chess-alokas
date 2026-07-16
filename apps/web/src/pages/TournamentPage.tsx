@@ -23,6 +23,12 @@ import { matchesTextSearch } from '../lib/textSearch';
 import { softDeleteTournament } from '../lib/deleteTournament';
 import { ensurePoolCategoryId, repairTournamentLocalData } from '../lib/poolCategory';
 import { DEFAULT_PRIZE_PLACES, resolvePrizePlaces } from '../lib/prizePlaces';
+import { apiFloorPrepare, apiFloorRotatePin, apiFloorListTables } from '../api/client';
+import { syncOnline } from '../sync/sync';
+import {
+  buildTableStickerPdf,
+  downloadPdfBytes,
+} from '../lib/tableStickers';
 
 type Tab = 'players' | 'pairings' | 'standings';
 
@@ -50,27 +56,42 @@ function ResultSelector({
   onChange,
   isBye,
   readOnly,
+  locked,
 }: {
   value: string;
   onChange: (r: GameResult) => void;
   isBye: boolean;
   readOnly?: boolean;
+  locked?: boolean;
 }) {
   if (isBye) return <span className="result-bye">BYE (1pt)</span>;
   if (readOnly) {
-    return <span className="result-readonly">{value === 'pending' ? '—' : value}</span>;
+    return (
+      <span className="result-readonly">
+        {value === 'pending' ? '—' : value}
+        {locked ? ' · locked' : ''}
+      </span>
+    );
   }
-  const options: GameResult[] = ['1-0', '0-1', '1/2-1/2'];
+  const options: { value: GameResult; label: string }[] = [
+    { value: '1-0', label: '1-0' },
+    { value: '0-1', label: '0-1' },
+    { value: '1/2-1/2', label: '½' },
+    { value: '1-0F', label: '1-0F' },
+    { value: '0-1F', label: '0-1F' },
+    { value: '0-0', label: '0-0' },
+  ];
   return (
     <div className="result-selector">
       {options.map((opt) => (
         <button
-          key={opt}
+          key={opt.value}
           type="button"
-          className={`result-btn ${value === opt ? 'active' : ''}`}
-          onClick={() => onChange(opt)}
+          className={`result-btn ${value === opt.value ? 'active' : ''}`}
+          onClick={() => onChange(opt.value)}
+          title={opt.value}
         >
-          {opt}
+          {opt.label}
         </button>
       ))}
     </div>
@@ -158,6 +179,10 @@ export default function TournamentPage() {
         : [],
     [id],
   );
+  const floorTables = useLiveQuery(
+    () => (id ? db.tournamentTables.where('tournamentId').equals(id).sortBy('tableNumber') : []),
+    [id],
+  );
 
   const mix = tournament ? isMixedTournament(tournament) : false;
   const hasCategories = (categories?.length ?? 0) > 0;
@@ -229,6 +254,45 @@ export default function TournamentPage() {
     if (!id) return;
     void repairTournamentLocalData(id);
   }, [id]);
+
+  // Pull floor arbiter results while the tournament is live.
+  useEffect(() => {
+    if (!id || !tournament || caps?.stage !== 'in_progress') return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        await syncOnline();
+        if (cancelled) return;
+        if ((floorTables?.length ?? 0) === 0) {
+          const listed = await apiFloorListTables(id);
+          if (listed.ok && !cancelled) {
+            await db.tournamentTables.where('tournamentId').equals(id).delete();
+            for (const t of listed.data.tables) {
+              await db.tournamentTables.put({
+                id: t.id,
+                tournamentId: t.tournamentId,
+                tableNumber: t.tableNumber,
+                slug: t.slug,
+                createdAt: t.createdAt,
+                dirty: 0,
+              });
+            }
+          }
+        }
+      } catch {
+        /* offline */
+      }
+    };
+    void tick();
+    const handle = window.setInterval(() => void tick(), 20_000);
+    const onFocus = () => void tick();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [id, tournament?.id, caps?.stage, floorTables?.length]);
 
   useEffect(() => {
     if (tournament?.deletedAt) {
@@ -357,6 +421,7 @@ export default function TournamentPage() {
             blackId: board.blackId,
             result: board.isBye ? 'bye' : 'pending',
             isBye: board.isBye,
+            resultLockedAt: null,
             updatedAt: now,
             dirty: 1,
           });
@@ -376,6 +441,11 @@ export default function TournamentPage() {
           setPairing(false);
           return;
         }
+
+        // Contiguous global table numbers across categories for floor QR stickers.
+        let boardOffset = (games ?? [])
+          .filter((g) => !g.deletedAt && g.round === round)
+          .reduce((max, g) => Math.max(max, g.board), 0);
 
         for (const cat of catsToPair) {
           const catId = cat.id;
@@ -398,21 +468,26 @@ export default function TournamentPage() {
           }));
           const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
 
+          let catMax = 0;
           for (const board of boards) {
+            const globalBoard = board.board + boardOffset;
+            catMax = Math.max(catMax, board.board);
             await db.games.put({
               id: crypto.randomUUID(),
               tournamentId: id,
               categoryId: catId,
               round,
-              board: board.board,
+              board: globalBoard,
               whiteId: board.whiteId,
               blackId: board.blackId,
               result: board.isBye ? 'bye' : 'pending',
               isBye: board.isBye,
+              resultLockedAt: null,
               updatedAt: now,
               dirty: 1,
             });
           }
+          boardOffset += catMax;
         }
       }
 
@@ -428,12 +503,52 @@ export default function TournamentPage() {
         updatedGames,
       );
 
+      const tableCount = updatedGames
+        .filter((g) => g.round === round)
+        .reduce((max, g) => Math.max(max, g.board), 0);
+
       await db.tournaments.update(id, {
         currentRound: Math.max(tournament?.currentRound ?? 0, round),
         status: fullyDone ? 'completed' : 'in_progress',
+        tableCount: Math.max(tournament?.tableCount ?? 0, tableCount),
         updatedAt: now,
         dirty: 1,
       });
+
+      // Push pairings, then rotate floor PIN + ensure QR table stations on the server.
+      try {
+        await syncOnline();
+        const floor = await apiFloorPrepare(id, {
+          tableCount: Math.max(1, tableCount),
+          pinRound: round,
+          rotatePin: true,
+        });
+        if (floor.ok) {
+          await db.tournamentTables
+            .where('tournamentId')
+            .equals(id)
+            .delete();
+          for (const t of floor.data.tables) {
+            await db.tournamentTables.put({
+              id: t.id,
+              tournamentId: t.tournamentId,
+              tableNumber: t.tableNumber,
+              slug: t.slug,
+              createdAt: t.createdAt,
+              dirty: 0,
+            });
+          }
+          await db.tournaments.update(id, {
+            arbiterPin: floor.data.arbiterPin,
+            arbiterPinRound: floor.data.arbiterPinRound,
+            tableCount: floor.data.tableCount,
+            updatedAt: nowIso(),
+            dirty: 1,
+          });
+        }
+      } catch {
+        /* offline: pairings stay local; floor prepare when online */
+      }
 
       setSelectedRound(round);
       setTab('pairings');
@@ -907,6 +1022,88 @@ export default function TournamentPage() {
               .
             </p>
           )}
+
+          {tournament &&
+            (tournament.currentRound ?? 0) > 0 &&
+            caps?.stage === 'in_progress' && (
+              <div className="floor-panel">
+                <div className="floor-panel-main">
+                  <h3>Floor arbiter</h3>
+                  <p className="form-hint">
+                    Stick QR codes on tables. Arbiters scan, enter this round&apos;s PIN, then
+                    confirm results. PIN changes every new round.
+                  </p>
+                  {tournament.arbiterPin &&
+                  tournament.arbiterPinRound === tournament.currentRound ? (
+                    <p className="floor-pin">
+                      Round {tournament.arbiterPinRound} PIN:{' '}
+                      <strong>{tournament.arbiterPin}</strong>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(tournament.arbiterPin ?? '');
+                        }}
+                      >
+                        Copy
+                      </button>
+                    </p>
+                  ) : (
+                    <p className="form-hint">
+                      No PIN cached for this round — regenerate after syncing, or pair again.
+                    </p>
+                  )}
+                </div>
+                <div className="floor-panel-actions">
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => {
+                      void (async () => {
+                        if (!id) return;
+                        const round = tournament.currentRound || displayRound;
+                        const res = await apiFloorRotatePin(id, round);
+                        if (!res.ok) {
+                          setPairError(res.error);
+                          return;
+                        }
+                        await db.tournaments.update(id, {
+                          arbiterPin: res.data.arbiterPin,
+                          arbiterPinRound: res.data.arbiterPinRound,
+                          updatedAt: nowIso(),
+                          dirty: 1,
+                        });
+                      })();
+                    }}
+                  >
+                    Regenerate PIN
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={(floorTables?.length ?? 0) === 0}
+                    onClick={() => {
+                      void (async () => {
+                        if (!tournament || !floorTables?.length) return;
+                        const bytes = await buildTableStickerPdf(
+                          tournament.name,
+                          floorTables.map((t) => ({
+                            tableNumber: t.tableNumber,
+                            slug: t.slug,
+                          })),
+                        );
+                        downloadPdfBytes(
+                          `${tournament.name.replace(/\s+/g, '-').toLowerCase()}-table-qr.pdf`,
+                          bytes,
+                        );
+                      })();
+                    }}
+                  >
+                    Download QR stickers
+                  </button>
+                </div>
+              </div>
+            )}
           {caps?.allRoundsPaired && !caps.allResultsDone && (
             <p className="form-hint">
               All {maxRounds} rounds are paired. Enter remaining results, then confirm the final
@@ -958,7 +1155,15 @@ export default function TournamentPage() {
                 const black = game.blackId ? playerById.get(game.blackId) : null;
                 return (
                   <div key={game.id} className={`board-card ${game.isBye ? 'board-bye' : ''}`}>
-                    <span className="board-num">Board {game.board}</span>
+                    <span className="board-num">
+                      Table {game.board}
+                      {game.resultLockedAt ? (
+                        <span className="board-locked-tag" title="Confirmed by floor arbiter">
+                          {' '}
+                          locked
+                        </span>
+                      ) : null}
+                    </span>
                     <div className="board-matchup">
                       <div className="player-row player-row-white">
                         <ColorSide color="white" />
@@ -981,6 +1186,7 @@ export default function TournamentPage() {
                       value={game.result}
                       onChange={(r) => updateGameResult(game.id, r)}
                       isBye={game.isBye}
+                      locked={Boolean(game.resultLockedAt)}
                       readOnly={
                         !tournament || !canEditRoundResults(tournament, game.round)
                       }

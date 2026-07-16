@@ -177,6 +177,8 @@ export default function CreateTournamentPage() {
         status: 'draft',
         currentRound: 0,
         confirmedRounds: 0,
+        tableCount: 0,
+        arbiterPinRound: null,
         mixCategories,
         prizePlaces: clampPrizePlaces(prizePlaces),
         awardScope,

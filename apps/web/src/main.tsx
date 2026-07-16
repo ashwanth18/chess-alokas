@@ -5,6 +5,7 @@ import './index.css';
 
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import Layout from './components/Layout';
+import DesktopUpdateBanner from './components/DesktopUpdateBanner';
 import HomePage from './pages/HomePage';
 import CreateTournamentPage from './pages/CreateTournamentPage';
 import TournamentPage from './pages/TournamentPage';
@@ -18,6 +19,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import AccountPage from './pages/AccountPage';
 import SettingsPage from './pages/SettingsPage';
 import LandingPage from './pages/LandingPage';
+import TableScoringPage from './pages/TableScoringPage';
 
 const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
@@ -83,12 +85,15 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>
       <Router>
-        <Routes>
+        <>
+          <DesktopUpdateBanner />
+          <Routes>
           <Route path="/" element={<RootEntry />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/reset" element={<ResetPasswordPage />} />
+          <Route path="/t/:slug" element={<TableScoringPage />} />
           <Route
             element={
               <RequireAuth>
@@ -105,7 +110,8 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/account" element={<AccountPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
-        </Routes>
+          </Routes>
+        </>
       </Router>
     </AuthProvider>
   </StrictMode>,

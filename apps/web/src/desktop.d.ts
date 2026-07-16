@@ -31,6 +31,7 @@ export interface DesktopBridge {
   installUpdate: () => Promise<void>;
   openDownloadPage: (url?: string) => Promise<void>;
   getUpdateStatus: () => Promise<DesktopUpdateStatus>;
+  dismissJustUpdated: () => Promise<DesktopUpdateStatus>;
   onUpdateStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void;
 }
 

@@ -8,6 +8,8 @@ import { importPlugin } from './routes/import.js';
 import { pairingPlugin } from './routes/pairing.js';
 import { syncPlugin } from './routes/sync.js';
 import { certificatesPlugin } from './routes/certificates.js';
+import { publicTablesPlugin } from './routes/publicTables.js';
+import { floorPlugin } from './routes/floor.js';
 
 const PORT = Number(process.env['PORT'] ?? 3001);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
@@ -33,6 +35,8 @@ await app.register(importPlugin, { store });
 await app.register(pairingPlugin, { store });
 await app.register(syncPlugin, { store });
 await app.register(certificatesPlugin, { store });
+await app.register(publicTablesPlugin, { store });
+await app.register(floorPlugin, { store });
 
 app.get('/health', async () => {
   const mode = process.env['DATABASE_URL'] ? 'postgres' : 'memory';

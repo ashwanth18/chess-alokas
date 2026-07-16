@@ -28,6 +28,8 @@ export type UpdateStatusPayload = {
 const RELEASES_PAGE = 'https://github.com/ashwanth18/chess-alokas/releases/latest';
 const RELEASES_API = 'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
 const PENDING_UPDATE_FILE = 'pending-update.json';
+const LAST_SEEN_VERSION_FILE = 'last-seen-version.txt';
+const JUST_UPDATED_NOTICE_FILE = 'just-updated-notice.json';
 
 type PendingUpdateMarker = {
   from: string;
@@ -52,24 +54,69 @@ let lastStatus: UpdateStatusPayload = {
   canInstall: false,
 };
 
-let startupJustUpdated: PendingUpdateMarker | null = null;
+/** Survives until the renderer dismisses it (not cleared by update checks). */
+let activeJustUpdated: PendingUpdateMarker | null = null;
+
+function userDataFile(name: string): string {
+  return path.join(app.getPath('userData'), name);
+}
+
+function readJustUpdatedNoticeFile(): PendingUpdateMarker | null {
+  try {
+    const file = userDataFile(JUST_UPDATED_NOTICE_FILE);
+    if (!fs.existsSync(file)) return null;
+    const marker = JSON.parse(fs.readFileSync(file, 'utf8')) as PendingUpdateMarker;
+    if (!marker?.from || !marker?.to) return null;
+    return { from: parseTag(marker.from), to: parseTag(marker.to) };
+  } catch {
+    return null;
+  }
+}
+
+function writeJustUpdatedNoticeFile(marker: PendingUpdateMarker) {
+  try {
+    fs.writeFileSync(userDataFile(JUST_UPDATED_NOTICE_FILE), JSON.stringify(marker), 'utf8');
+  } catch (err) {
+    log.warn('Could not write just-updated notice', err);
+  }
+}
+
+function clearJustUpdatedNoticeFile() {
+  try {
+    const file = userDataFile(JUST_UPDATED_NOTICE_FILE);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch {
+    /* ignore */
+  }
+}
+
+function justUpdatedPayload(marker: PendingUpdateMarker): UpdateStatusPayload {
+  return {
+    status: 'just-updated',
+    currentVersion: app.getVersion(),
+    previousVersion: marker.from,
+    version: marker.to,
+    message: `Updated to v${marker.to}.`,
+    canInstall: false,
+  };
+}
 
 export function getLastUpdateStatus(): UpdateStatusPayload {
-  if (startupJustUpdated) {
-    return {
-      status: 'just-updated',
-      currentVersion: app.getVersion(),
-      previousVersion: startupJustUpdated.from,
-      version: startupJustUpdated.to,
-      message: `Updated to v${startupJustUpdated.to}.`,
-      canInstall: false,
-    };
-  }
+  if (activeJustUpdated) return justUpdatedPayload(activeJustUpdated);
   return { ...lastStatus, currentVersion: app.getVersion() };
 }
 
-function pendingUpdatePath(): string {
-  return path.join(app.getPath('userData'), PENDING_UPDATE_FILE);
+export function dismissJustUpdatedNotice(): UpdateStatusPayload {
+  activeJustUpdated = null;
+  clearJustUpdatedNoticeFile();
+  if (lastStatus.status === 'just-updated') {
+    lastStatus = {
+      status: 'idle',
+      currentVersion: app.getVersion(),
+      canInstall: false,
+    };
+  }
+  return getLastUpdateStatus();
 }
 
 function writePendingUpdate(toVersion: string) {
@@ -78,7 +125,7 @@ function writePendingUpdate(toVersion: string) {
     to: parseTag(toVersion),
   };
   try {
-    fs.writeFileSync(pendingUpdatePath(), JSON.stringify(marker), 'utf8');
+    fs.writeFileSync(userDataFile(PENDING_UPDATE_FILE), JSON.stringify(marker), 'utf8');
   } catch (err) {
     log.warn('Could not write pending-update marker', err);
   }
@@ -86,7 +133,7 @@ function writePendingUpdate(toVersion: string) {
 
 /** After silent install + relaunch, surface a one-shot “updated” notice. */
 function consumePendingUpdate(): PendingUpdateMarker | null {
-  const file = pendingUpdatePath();
+  const file = userDataFile(PENDING_UPDATE_FILE);
   try {
     if (!fs.existsSync(file)) return null;
     const raw = fs.readFileSync(file, 'utf8');
@@ -104,6 +151,44 @@ function consumePendingUpdate(): PendingUpdateMarker | null {
     log.warn('Could not read pending-update marker', err);
     return null;
   }
+}
+
+/**
+ * Detect a version bump via pending install marker or last-seen file.
+ * Persists a dismissible notice so login delay / update checks don't wipe it.
+ */
+function detectVersionBumpNotice(): PendingUpdateMarker | null {
+  const current = parseTag(app.getVersion());
+  const lastSeenPath = userDataFile(LAST_SEEN_VERSION_FILE);
+
+  let notice = consumePendingUpdate();
+
+  if (!notice) {
+    try {
+      if (fs.existsSync(lastSeenPath)) {
+        const previous = parseTag(fs.readFileSync(lastSeenPath, 'utf8'));
+        if (previous && previous !== current) {
+          notice = { from: previous, to: current };
+        }
+      }
+    } catch (err) {
+      log.warn('Could not read last-seen version', err);
+    }
+  }
+
+  if (notice) {
+    writeJustUpdatedNoticeFile(notice);
+  } else {
+    notice = readJustUpdatedNoticeFile();
+  }
+
+  try {
+    fs.writeFileSync(lastSeenPath, current, 'utf8');
+  } catch (err) {
+    log.warn('Could not write last-seen version', err);
+  }
+
+  return notice;
 }
 
 function isPortableBuild(): boolean {
@@ -201,17 +286,10 @@ async function checkViaGithubApi(
 
 export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
   const autoUpdater = loadAutoUpdater();
-  startupJustUpdated = consumePendingUpdate();
-  if (startupJustUpdated) {
-    log.info('App relaunched after update', startupJustUpdated);
-    lastStatus = {
-      status: 'just-updated',
-      currentVersion: app.getVersion(),
-      previousVersion: startupJustUpdated.from,
-      version: startupJustUpdated.to,
-      message: `Updated to v${startupJustUpdated.to}.`,
-      canInstall: false,
-    };
+  activeJustUpdated = detectVersionBumpNotice();
+  if (activeJustUpdated) {
+    log.info('App relaunched after update', activeJustUpdated);
+    lastStatus = justUpdatedPayload(activeJustUpdated);
   }
 
   if (autoUpdater) {
@@ -297,14 +375,14 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
   return {
     /** Push the post-install notice once the window can receive IPC. */
     announceJustUpdated() {
-      if (!startupJustUpdated) return;
+      if (!activeJustUpdated) return;
       send(
         getWindow,
         {
           status: 'just-updated',
-          previousVersion: startupJustUpdated.from,
-          version: startupJustUpdated.to,
-          message: `Updated to v${startupJustUpdated.to}.`,
+          previousVersion: activeJustUpdated.from,
+          version: activeJustUpdated.to,
+          message: `Updated to v${activeJustUpdated.to}.`,
           canInstall: false,
         },
         autoUpdater,
@@ -312,8 +390,7 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
     },
 
     async check() {
-      // Drop post-install notice once the normal update cycle starts.
-      startupJustUpdated = null;
+      // Keep activeJustUpdated until the user dismisses — do not clear here.
       send(getWindow, { status: 'checking', message: 'Checking for updates…' }, autoUpdater);
       if (!app.isPackaged || !canAutoInstall(autoUpdater)) {
         const ok = await checkViaGithubApi(getWindow, autoUpdater);

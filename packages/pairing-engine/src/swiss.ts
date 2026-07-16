@@ -104,14 +104,15 @@ export function buildPlayerStates(
       white.floatHistory.push(null);
       black.floatHistory.push(null);
 
-      if (game.result === '1-0') {
+      if (game.result === '1-0' || game.result === '1-0F') {
         white.score += 1;
-      } else if (game.result === '0-1') {
+      } else if (game.result === '0-1' || game.result === '0-1F') {
         black.score += 1;
       } else if (game.result === '1/2-1/2') {
         white.score += 0.5;
         black.score += 0.5;
       }
+      // '0-0' both absent — no points; still counts as played for opponents/colors above.
     }
   }
 
