@@ -34,8 +34,21 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   const dirtyParticipants = await db.participants.where('dirty').equals(1).toArray();
   const dirtyGames = await db.games.where('dirty').equals(1).toArray();
 
+  // Always push parent tournaments before children so ownership/FK sync cannot 403.
+  const dirtyTournamentIds = new Set(dirtyTournaments.map((t) => t.id));
+  const parentIds = new Set<string>();
+  for (const row of [...dirtyCategories, ...dirtyParticipants, ...dirtyGames]) {
+    if (row.tournamentId) parentIds.add(row.tournamentId);
+  }
+  const tournamentsToPush = [...dirtyTournaments];
+  for (const tid of parentIds) {
+    if (dirtyTournamentIds.has(tid)) continue;
+    const parent = await db.tournaments.get(tid);
+    if (parent && !parent.deletedAt) tournamentsToPush.push(parent);
+  }
+
   const items = [
-    ...dirtyTournaments.map((r) => toSyncItem('tournament', r)),
+    ...tournamentsToPush.map((r) => toSyncItem('tournament', r)),
     ...dirtyCategories.map((r) => toSyncItem('category', r)),
     ...dirtyParticipants.map((r) => toSyncItem('participant', r)),
     ...dirtyGames.map((r) => toSyncItem('game', r)),

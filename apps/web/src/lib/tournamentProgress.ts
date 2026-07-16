@@ -235,8 +235,7 @@ export function getTournamentInstructions(
   if (!qrReady) {
     floorStatus = 'current';
     floorTitle = 'Generate table QR codes';
-    floorDescription =
-      'On Pairings: set the board count, click Create table QR codes, then Download QR stickers';
+    floorDescription = `On Pairings: create ${estimatedTables} table QR code${estimatedTables === 1 ? '' : 's'} from the player list, then download stickers`;
   } else {
     floorStatus = 'done';
     floorTitle = `${Math.max(floorTableCount, tournament.tableCount ?? 0)} table QR codes ready`;
@@ -674,6 +673,7 @@ export function getTournamentCapabilities(
     importRequiresLateWarning: live || allRoundsPaired,
     canPair:
       !completed &&
+      stage !== 'draft' &&
       enoughPlayers &&
       nextRound !== null &&
       pendingResultsRound === null &&

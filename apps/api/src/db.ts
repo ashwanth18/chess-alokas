@@ -349,9 +349,14 @@ export class MemoryStore implements Store {
       }
       if (item.entity !== 'tournament' && ownerId) {
         const tid = String(item.payload['tournamentId'] ?? '');
-        const owned = await this.isTournamentOwnedBy(tid, ownerId);
         const existing = this.tournaments.get(tid);
-        if (!owned && existing) {
+        // Soft-deleted rows are reclaimable by sync; only block a live tournament owned by someone else.
+        if (
+          existing &&
+          !existing.deletedAt &&
+          existing.ownerId &&
+          existing.ownerId !== ownerId
+        ) {
           throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
         }
       }
@@ -1023,9 +1028,15 @@ export class PostgresStore implements Store {
       }
       if (ownerId && item.entity !== 'tournament') {
         const tid = String(item.payload['tournamentId'] ?? '');
-        const owned = await this.isTournamentOwnedBy(tid, ownerId);
         const existing = await this.getTournament(tid);
-        if (existing && !owned) {
+        // Soft-deleted rows are reclaimable by a later tournament sync; only block a
+        // live tournament owned by a different user.
+        if (
+          existing &&
+          !existing.deletedAt &&
+          existing.ownerId &&
+          existing.ownerId !== ownerId
+        ) {
           throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
         }
       }

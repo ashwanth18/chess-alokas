@@ -20,7 +20,6 @@ import {
 } from '../lib/tournamentProgress';
 import TournamentInstructions from '../components/TournamentInstructions';
 import TableSearch from '../components/TableSearch';
-import NumberField from '../components/NumberField';
 import { matchesTextSearch } from '../lib/textSearch';
 import { softDeleteTournament } from '../lib/deleteTournament';
 import { ensurePoolCategoryId, repairTournamentLocalData } from '../lib/poolCategory';
@@ -143,7 +142,6 @@ export default function TournamentPage() {
   const [pairing, setPairing] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
   const [floorBusy, setFloorBusy] = useState(false);
-  const [tableCountDraft, setTableCountDraft] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [playerSearch, setPlayerSearch] = useState('');
   const [boardSearch, setBoardSearch] = useState('');
@@ -223,13 +221,6 @@ export default function TournamentPage() {
           floorTables?.length ?? 0,
         )
       : [];
-
-  useEffect(() => {
-    if (tableCountDraft != null) return;
-    const fromTournament = tournament?.tableCount ?? 0;
-    const fromFloor = floorTables?.length ?? 0;
-    setTableCountDraft(Math.max(1, fromFloor, fromTournament, estimatedTables));
-  }, [tournament?.tableCount, floorTables?.length, estimatedTables, tableCountDraft]);
   const displayStatus =
     tournament && categories && participants && games
       ? effectiveTournamentStatus(tournament, categories, participants, games)
@@ -400,11 +391,23 @@ export default function TournamentPage() {
   }
 
   /** Create/expand stable table QR stations (no PIN). Call after Mark Ready. */
-  async function createFloorQrTables(tournamentId: string, tableCount: number): Promise<boolean> {
+  async function createFloorQrTables(tournamentId: string): Promise<boolean> {
+    const tableCount = Math.max(
+      1,
+      estimatedTables,
+      (games ?? [])
+        .filter((g) => !g.deletedAt)
+        .reduce((max, g) => Math.max(max, g.board), 0),
+    );
     try {
+      // Bump + dirty so sync can reclaim a soft-deleted cloud row and claim ownership.
+      await db.tournaments.update(tournamentId, {
+        updatedAt: nowIso(),
+        dirty: 1,
+      });
       await syncOnline();
       const floor = await apiFloorPrepare(tournamentId, {
-        tableCount: Math.max(1, tableCount),
+        tableCount,
         pinRound: 1,
         rotatePin: false,
       });
@@ -413,7 +416,6 @@ export default function TournamentPage() {
         return false;
       }
       await persistFloorTables(tournamentId, floor.data.tables, floor.data.tableCount);
-      setTableCountDraft(floor.data.tableCount);
       return true;
     } catch (err) {
       setPairError(
@@ -429,14 +431,23 @@ export default function TournamentPage() {
   async function issueFloorPinForRound(
     tournamentId: string,
     pinRound: number,
-    tableCount: number,
   ): Promise<boolean> {
+    const tableCount = Math.max(
+      1,
+      estimatedTables,
+      floorTables?.length ?? 0,
+      tournament?.tableCount ?? 0,
+    );
     try {
+      await db.tournaments.update(tournamentId, {
+        updatedAt: nowIso(),
+        dirty: 1,
+      });
       await syncOnline();
       const needTables = (floorTables?.length ?? 0) === 0;
       if (needTables) {
         const floor = await apiFloorPrepare(tournamentId, {
-          tableCount: Math.max(1, tableCount),
+          tableCount,
           pinRound,
           rotatePin: true,
         });
@@ -491,9 +502,11 @@ export default function TournamentPage() {
         setPairError(
           !participants || participants.length < 2
             ? 'Need at least 2 participants to generate pairings.'
-            : caps?.stage === 'completed'
-              ? 'This tournament is complete.'
-              : `This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`,
+            : caps?.stage === 'draft'
+              ? 'Mark Ready first to confirm the player list.'
+              : caps?.stage === 'completed'
+                ? 'This tournament is complete.'
+                : `This tournament is set to ${maxRounds} round${maxRounds === 1 ? '' : 's'}.`,
         );
       }
       return;
@@ -639,11 +652,7 @@ export default function TournamentPage() {
       });
 
       // Issue this round's floor PIN (QR stickers should already exist from pre-pair setup).
-      const floorOk = await issueFloorPinForRound(
-        id,
-        round,
-        Math.max(1, tableCount, floorTables?.length ?? 0, tournament?.tableCount ?? 0),
-      );
+      const floorOk = await issueFloorPinForRound(id, round);
       if (!floorOk) {
         setPairError((prev) =>
           prev
@@ -1066,29 +1075,22 @@ export default function TournamentPage() {
                 <div className="floor-panel-main">
                   <h3>Floor arbiter</h3>
                   <p className="form-hint">
-                    1) Create QR codes for each board and download stickers. 2) Pair a round to get
-                    that round&apos;s PIN (regenerate only if it leaks). Requires online sync.
+                    1) Create QR codes from the player list ({estimatedTables} board
+                    {estimatedTables === 1 ? '' : 's'}) and download stickers. 2) Pair a round to
+                    get that round&apos;s PIN (regenerate only if it leaks). Requires online sync.
                   </p>
-                  <div className="floor-table-count">
-                    <NumberField
-                      label="Boards / tables"
-                      value={tableCountDraft}
-                      onChange={setTableCountDraft}
-                      min={1}
-                      max={500}
-                      required
-                      hint={`Suggested from player list: ${estimatedTables}`}
-                    />
-                  </div>
                   {(floorTables?.length ?? 0) > 0 ? (
                     <p className="form-hint">
                       {floorTables!.length} QR table station
                       {floorTables!.length === 1 ? '' : 's'} ready — download stickers anytime.
+                      {floorTables!.length < estimatedTables
+                        ? ` Player list now needs ${estimatedTables} — click Update to add more.`
+                        : ''}
                     </p>
                   ) : (
                     <p className="form-hint stage-banner-warn">
-                      No QR stickers yet. Set the board count and click{' '}
-                      <strong>Create table QR codes</strong> before Round 1.
+                      No QR stickers yet. Click <strong>Create table QR codes</strong> before Round
+                      1 ({estimatedTables} from the confirmed player list).
                     </p>
                   )}
                   {(tournament.currentRound ?? 0) > 0 &&
@@ -1118,14 +1120,14 @@ export default function TournamentPage() {
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
-                    disabled={floorBusy || tableCountDraft == null || tableCountDraft < 1}
+                    disabled={floorBusy}
                     onClick={() => {
                       void (async () => {
-                        if (!id || tableCountDraft == null) return;
+                        if (!id) return;
                         setFloorBusy(true);
                         setPairError(null);
                         try {
-                          await createFloorQrTables(id, tableCountDraft);
+                          await createFloorQrTables(id);
                         } finally {
                           setFloorBusy(false);
                         }
@@ -1136,7 +1138,7 @@ export default function TournamentPage() {
                       ? 'Working…'
                       : (floorTables?.length ?? 0) > 0
                         ? 'Update table QR codes'
-                        : 'Create table QR codes'}
+                        : `Create table QR codes (${estimatedTables})`}
                   </button>
                   <button
                     type="button"
@@ -1178,16 +1180,7 @@ export default function TournamentPage() {
                             setPairError(null);
                             try {
                               const round = tournament.currentRound || displayRound;
-                              await issueFloorPinForRound(
-                                id,
-                                round,
-                                Math.max(
-                                  1,
-                                  tableCountDraft ?? 0,
-                                  floorTables?.length ?? 0,
-                                  tournament.tableCount ?? 0,
-                                ),
-                              );
+                              await issueFloorPinForRound(id, round);
                             } finally {
                               setFloorBusy(false);
                             }

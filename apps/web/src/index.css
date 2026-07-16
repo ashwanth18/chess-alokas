@@ -3036,13 +3036,6 @@ a.landing-download-option:hover {
   gap: 0.45rem;
   align-items: flex-start;
 }
-.floor-table-count {
-  margin-top: 0.65rem;
-  max-width: 14rem;
-}
-.floor-table-count .form-hint {
-  margin-top: 0.25rem;
-}
 .board-locked-tag {
   font-size: 0.68rem;
   font-weight: 600;
