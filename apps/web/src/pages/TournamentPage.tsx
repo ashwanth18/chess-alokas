@@ -564,8 +564,10 @@ export default function TournamentPage() {
       // Push pairings, then rotate floor PIN + ensure QR table stations on the server.
       const floorOk = await prepareFloorScoring(id, Math.max(1, tableCount), round);
       if (!floorOk) {
-        setPairError(
-          'Round paired, but floor PIN/QR setup failed. Open Pairings and click “Setup floor PIN & QR”.',
+        setPairError((prev) =>
+          prev
+            ? `Round paired, but floor setup failed: ${prev}`
+            : 'Round paired, but floor PIN/QR setup failed. Open Pairings and click “Setup floor PIN & QR”.',
         );
       }
 

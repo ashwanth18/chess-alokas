@@ -616,7 +616,9 @@ export class PostgresStore implements Store {
   private readonly sql: Sql;
 
   constructor(databaseUrl: string) {
-    this.sql = postgres(databaseUrl, { max: 10 });
+    // prepare:false — required for Supabase transaction pooler (PgBouncer);
+    // prepared statements otherwise fail with "prepared statement does not exist".
+    this.sql = postgres(databaseUrl, { max: 10, prepare: false });
   }
 
   // postgres.js sql.json() expects its own JSONValue recursive type; our objects

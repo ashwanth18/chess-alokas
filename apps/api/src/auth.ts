@@ -54,7 +54,7 @@ function getSessionsSql(): Sql | null {
     sessionsSql = null;
     return null;
   }
-  sessionsSql = postgres(dbUrl, { max: 2 });
+  sessionsSql = postgres(dbUrl, { max: 2, prepare: false });
   return sessionsSql;
 }
 

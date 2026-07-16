@@ -61,27 +61,34 @@ export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
       }
 
-      const tournament = await store.getTournament(id);
-      if (!tournament || tournament.deletedAt) {
-        return reply.code(404).send({ error: 'Tournament not found' });
+      try {
+        const tournament = await store.getTournament(id);
+        if (!tournament || tournament.deletedAt) {
+          return reply.code(404).send({ error: 'Tournament not found' });
+        }
+
+        const tables = await store.ensureTables(id, parsed.data.tableCount);
+        let arbiterPin: string | null = null;
+        let arbiterPinRound = tournament.arbiterPinRound ?? null;
+
+        if (parsed.data.rotatePin) {
+          arbiterPin = generateArbiterPin();
+          arbiterPinRound = parsed.data.pinRound;
+          await store.setArbiterPin(id, hashArbiterPin(arbiterPin), arbiterPinRound);
+        }
+
+        return {
+          tables,
+          tableCount: Math.max(parsed.data.tableCount, tables.length),
+          arbiterPin,
+          arbiterPinRound,
+        };
+      } catch (err) {
+        request.log.error(err);
+        return reply.code(500).send({
+          error: err instanceof Error ? err.message : 'Floor prepare failed',
+        });
       }
-
-      const tables = await store.ensureTables(id, parsed.data.tableCount);
-      let arbiterPin: string | null = null;
-      let arbiterPinRound = tournament.arbiterPinRound ?? null;
-
-      if (parsed.data.rotatePin) {
-        arbiterPin = generateArbiterPin();
-        arbiterPinRound = parsed.data.pinRound;
-        await store.setArbiterPin(id, hashArbiterPin(arbiterPin), arbiterPinRound);
-      }
-
-      return {
-        tables,
-        tableCount: Math.max(parsed.data.tableCount, tables.length),
-        arbiterPin,
-        arbiterPinRound,
-      };
     },
   );
 

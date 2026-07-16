@@ -193,7 +193,7 @@ export class PostgresCertificateIssueStore implements CertificateIssueStore {
 export function createCertificateIssueStore(): CertificateIssueStore {
   const dbUrl = process.env['DATABASE_URL'];
   if (dbUrl) {
-    return new PostgresCertificateIssueStore(postgres(dbUrl, { max: 5 }));
+    return new PostgresCertificateIssueStore(postgres(dbUrl, { max: 5, prepare: false }));
   }
   return new MemoryCertificateIssueStore();
 }
