@@ -9,6 +9,7 @@ import { pairingPlugin } from './routes/pairing.js';
 import { syncPlugin } from './routes/sync.js';
 import { certificatesPlugin } from './routes/certificates.js';
 import { publicTablesPlugin } from './routes/publicTables.js';
+import { publicLivePlugin } from './routes/publicLive.js';
 import { floorPlugin } from './routes/floor.js';
 
 const PORT = Number(process.env['PORT'] ?? 3001);
@@ -36,6 +37,7 @@ await app.register(pairingPlugin, { store });
 await app.register(syncPlugin, { store });
 await app.register(certificatesPlugin, { store });
 await app.register(publicTablesPlugin, { store });
+await app.register(publicLivePlugin, { store });
 await app.register(floorPlugin, { store });
 
 app.get('/health', async () => {

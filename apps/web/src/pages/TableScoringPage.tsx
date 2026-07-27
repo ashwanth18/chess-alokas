@@ -5,6 +5,7 @@ import {
   apiPublicTableGet,
   apiPublicTableResult,
   apiPublicTableSession,
+  checkOnline,
   type FloorTableView,
 } from '../api/client';
 import ColorSide from '../components/ColorSide';
@@ -14,6 +15,13 @@ import {
   loadFloorCredentials,
   saveFloorCredentials,
 } from '../lib/floorCredentials';
+
+function networkErrorMessage(raw: string): string {
+  if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(raw)) {
+    return 'No connection — reconnect and try again. The result was not saved.';
+  }
+  return raw;
+}
 
 const SESSION_KEY = (slug: string) => `chess-alokas-arbiter-session:${slug}`;
 
@@ -93,6 +101,28 @@ export default function TableScoringPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [online, setOnline] = useState(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+
+  useEffect(() => {
+    const markOnline = () => {
+      setOnline(true);
+      void checkOnline().then(setOnline);
+    };
+    const markOffline = () => setOnline(false);
+    window.addEventListener('online', markOnline);
+    window.addEventListener('offline', markOffline);
+    void checkOnline().then(setOnline);
+    const interval = setInterval(() => {
+      void checkOnline().then(setOnline);
+    }, 15_000);
+    return () => {
+      window.removeEventListener('online', markOnline);
+      window.removeEventListener('offline', markOffline);
+      clearInterval(interval);
+    };
+  }, []);
 
   const refresh = useCallback(
     async (session = token) => {
@@ -102,10 +132,14 @@ export default function TableScoringPage() {
       const res = await apiPublicTableGet(slug, session);
       setLoading(false);
       if (!res.ok) {
-        setError(res.error);
+        setError(networkErrorMessage(res.error));
+        if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(res.error)) {
+          setOnline(false);
+        }
         setView(null);
         return;
       }
+      setOnline(true);
       setView(res.data);
       const creds = loadFloorCredentials(res.data.tournamentId);
       if (creds) {
@@ -132,6 +166,10 @@ export default function TableScoringPage() {
   async function submitPin(e: React.FormEvent) {
     e.preventDefault();
     if (!slug || busy) return;
+    if (!online) {
+      setError('No connection — unlock needs internet.');
+      return;
+    }
     const name = arbiterName.trim();
     if (name.length < 1) {
       setError('Enter your name');
@@ -142,9 +180,13 @@ export default function TableScoringPage() {
     const res = await apiPublicTableSession(slug, pin.trim());
     setBusy(false);
     if (!res.ok) {
-      setError(res.error);
+      setError(networkErrorMessage(res.error));
+      if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(res.error)) {
+        setOnline(false);
+      }
       return;
     }
+    setOnline(true);
     saveSession(slug, res.data.token);
     setToken(res.data.token);
     setView(res.data.table);
@@ -157,6 +199,10 @@ export default function TableScoringPage() {
 
   async function confirmResult() {
     if (!slug || !token || !selected || busy) return;
+    if (!online) {
+      setError('No connection — result was not saved. Reconnect and confirm again.');
+      return;
+    }
     const name = arbiterName.trim();
     if (name.length < 1) {
       setError('Enter your name before confirming');
@@ -167,7 +213,10 @@ export default function TableScoringPage() {
     const res = await apiPublicTableResult(slug, token, selected, name);
     setBusy(false);
     if (!res.ok) {
-      setError(res.error);
+      setError(networkErrorMessage(res.error));
+      if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(res.error)) {
+        setOnline(false);
+      }
       if (/PIN|session|expired/i.test(res.error)) {
         clearSession(slug);
         setToken(null);
@@ -175,6 +224,7 @@ export default function TableScoringPage() {
       }
       return;
     }
+    setOnline(true);
     if (view?.tournamentId) {
       saveFloorCredentials(view.tournamentId, {
         arbiterName: name,
@@ -205,10 +255,23 @@ export default function TableScoringPage() {
   return (
     <div className="table-score-page">
       <header className="table-score-header">
-        <p className="table-score-brand">Chess Alokas</p>
+        <div className="table-score-header-row">
+          <p className="table-score-brand">Chess Alokas</p>
+          <span className="table-score-conn" title={online ? 'API reachable' : 'Offline'}>
+            <span className={`status-dot ${online ? 'online' : 'offline'}`} />
+            <span className="status-label">{online ? 'Online' : 'Offline'}</span>
+          </span>
+        </div>
         <h1>Table {view?.tableNumber ?? '…'}</h1>
         {view && <p className="table-score-tour">{view.tournamentName}</p>}
       </header>
+
+      {!online && (
+        <div className="table-score-offline" role="status">
+          <strong>No internet</strong>
+          <span>Results will not save until this phone is back online. Do not leave the table yet.</span>
+        </div>
+      )}
 
       {loading && !view && <p className="form-hint">Loading table…</p>}
       {error && <div className="form-error">{error}</div>}
@@ -247,9 +310,11 @@ export default function TableScoringPage() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={busy || pin.trim().length < 4 || arbiterName.trim().length < 1}
+            disabled={
+              busy || !online || pin.trim().length < 4 || arbiterName.trim().length < 1
+            }
           >
-            {busy ? 'Checking…' : 'Unlock table'}
+            {busy ? 'Checking…' : online ? 'Unlock table' : 'Waiting for connection…'}
           </button>
         </form>
       )}
@@ -345,10 +410,10 @@ export default function TableScoringPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy}
+              disabled={busy || !online}
               onClick={() => void confirmResult()}
             >
-              {busy ? 'Saving…' : 'Confirm result'}
+              {busy ? 'Saving…' : online ? 'Confirm result' : 'Waiting for connection…'}
             </button>
           </div>
         </div>

@@ -88,3 +88,8 @@ export function verifyArbiterSession(token: string | undefined | null): ArbiterS
 export function generateTableSlug(): string {
   return randomBytes(16).toString('base64url');
 }
+
+/** Public live viewer token (same entropy as table slugs). */
+export function generatePublicLiveToken(): string {
+  return randomBytes(16).toString('base64url');
+}

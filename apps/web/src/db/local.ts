@@ -24,6 +24,9 @@ export interface LocalTournament {
   /** Plaintext PIN for the current round — local display only; never sync. */
   arbiterPin?: string | null;
   tableCount?: number;
+  /** Public live page token (from cloud; set via enable API). */
+  publicToken?: string | null;
+  publicEnabled?: boolean;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;

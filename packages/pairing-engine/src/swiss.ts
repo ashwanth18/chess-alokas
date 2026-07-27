@@ -418,6 +418,23 @@ export function computeStandings(
   return withBuchholz.map((s, i) => ({ ...s, rank: i + 1 }));
 }
 
+/**
+ * Full-field scores/Buchholz, then re-rank within a section (e.g. age category).
+ * Use for mixed pairing with per-category prizes: cross-category opponents still
+ * count toward Buchholz, but ranks are 1..n inside the section only.
+ */
+export function computeSectionStandings(
+  players: EnginePlayer[],
+  pastGames: PastGame[],
+  sectionPlayerIds: ReadonlySet<string>,
+): Array<PlayerState & { buchholz: number; rank: number }> {
+  const full = computeStandings(players, pastGames);
+  if (sectionPlayerIds.size === 0) return [];
+  return full
+    .filter((s) => sectionPlayerIds.has(s.id))
+    .map((s, i) => ({ ...s, rank: i + 1 }));
+}
+
 export function diagnosePairings(
   players: EnginePlayer[],
   pastGames: PastGame[],

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { pairRound, computeStandings } from '@chess-alokas/pairing-engine';
+import { pairRound, computeStandings, computeSectionStandings } from '@chess-alokas/pairing-engine';
 import type { FilterGroup, FilterOp, GameResult } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import ColorSide from '../components/ColorSide';
@@ -30,6 +30,9 @@ import {
   apiFloorRotatePin,
   apiFloorListTables,
   apiDirectorSetGameResult,
+  apiPublicLiveEnable,
+  apiPublicLiveRotate,
+  apiPublicLiveDisable,
 } from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { subscribeTournamentGames } from '../lib/gamesRealtime';
@@ -37,6 +40,7 @@ import {
   buildTableStickerPdf,
   downloadPdfBytes,
 } from '../lib/tableStickers';
+import { livePublicUrl } from '../lib/liveViewer';
 import { useAuth } from '../auth/AuthContext';
 
 type Tab = 'players' | 'pairings' | 'standings';
@@ -163,6 +167,8 @@ export default function TournamentPage() {
   const [playerSearch, setPlayerSearch] = useState('');
   const [boardSearch, setBoardSearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [liveBusy, setLiveBusy] = useState(false);
+  const [liveMsg, setLiveMsg] = useState<string | null>(null);
 
   const tournament = useLiveQuery(() => (id ? db.tournaments.get(id) : undefined), [id]);
   const categories = useLiveQuery(
@@ -205,7 +211,10 @@ export default function TournamentPage() {
 
   const mix = tournament ? isMixedTournament(tournament) : false;
   const hasCategories = (categories?.length ?? 0) > 0;
-  const activeCatId = mix ? '' : selectedCategoryId || categories?.[0]?.id || '';
+  /** Category tab for standings (and separate-mode pairings). Always set when categories exist. */
+  const activeCatId = hasCategories
+    ? selectedCategoryId || categories?.[0]?.id || ''
+    : '';
 
   const roundsInPlay = games
     ? [...new Set(games.map((g) => g.round))].sort((a, b) => a - b)
@@ -403,6 +412,81 @@ export default function TournamentPage() {
       if (removed) navigate('/app', { replace: true });
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function applyPublicLiveResult(
+    res: Awaited<ReturnType<typeof apiPublicLiveEnable>>,
+    successMsg: string,
+  ) {
+    if (!id) return;
+    if (!res.ok) {
+      setLiveMsg(res.error);
+      return;
+    }
+    await db.tournaments.update(id, {
+      publicToken: res.data.publicToken,
+      publicEnabled: res.data.publicEnabled,
+      updatedAt: res.data.updatedAt,
+      dirty: 0,
+    });
+    setLiveMsg(successMsg);
+  }
+
+  async function enablePublicLive() {
+    if (!id || liveBusy) return;
+    setLiveBusy(true);
+    setLiveMsg(null);
+    try {
+      try {
+        await syncOnline();
+      } catch {
+        /* enable still works if already synced */
+      }
+      const res = await apiPublicLiveEnable(id);
+      await applyPublicLiveResult(res, 'Live page enabled — share the link with parents.');
+    } finally {
+      setLiveBusy(false);
+    }
+  }
+
+  async function rotatePublicLive() {
+    if (!id || liveBusy) return;
+    const ok = window.confirm(
+      'Rotate the live link? The old URL will stop working immediately.',
+    );
+    if (!ok) return;
+    setLiveBusy(true);
+    setLiveMsg(null);
+    try {
+      const res = await apiPublicLiveRotate(id);
+      await applyPublicLiveResult(res, 'Live link rotated — copy the new URL.');
+    } finally {
+      setLiveBusy(false);
+    }
+  }
+
+  async function disablePublicLive() {
+    if (!id || liveBusy) return;
+    setLiveBusy(true);
+    setLiveMsg(null);
+    try {
+      const res = await apiPublicLiveDisable(id);
+      await applyPublicLiveResult(res, 'Live page disabled.');
+    } finally {
+      setLiveBusy(false);
+    }
+  }
+
+  async function copyLiveLink() {
+    const token = tournament?.publicToken;
+    if (!token) return;
+    const url = livePublicUrl(token);
+    try {
+      await navigator.clipboard.writeText(url);
+      setLiveMsg('Link copied.');
+    } catch {
+      setLiveMsg(url);
     }
   }
 
@@ -829,34 +913,42 @@ export default function TournamentPage() {
 
   const standings = useMemo(() => {
     if (!participants || !games) return [];
-    const catGames = mix
-      ? games
-      : activeCatId
+    const toPast = (list: typeof games) =>
+      list
+        .filter((g) => g.result !== 'pending')
+        .map((g) => ({
+          round: g.round,
+          whiteId: g.whiteId ?? null,
+          blackId: g.blackId ?? null,
+          result: g.result as GameResult,
+          isBye: g.isBye,
+        }));
+    const toEngine = (list: typeof participants) =>
+      list.map((p) => ({
+        id: p.id,
+        name: p.name,
+        rating: p.rating ?? undefined,
+        seed: p.seed,
+      }));
+
+    try {
+      // Mixed pairing + categories: one field for scores, re-rank within the section.
+      if (mix && activeCatId) {
+        const sectionIds = new Set(
+          participants.filter((p) => p.categoryIds?.includes(activeCatId)).map((p) => p.id),
+        );
+        if (sectionIds.size === 0) return [];
+        return computeSectionStandings(toEngine(participants), toPast(games), sectionIds);
+      }
+
+      const catGames = activeCatId
         ? games.filter((g) => g.categoryId === activeCatId)
         : games;
-    const catPlayers = mix
-      ? participants
-      : activeCatId
+      const catPlayers = activeCatId
         ? participants.filter((p) => p.categoryIds?.includes(activeCatId))
         : participants;
-    if (catPlayers.length === 0) return [];
-    const enginePlayers = catPlayers.map((p) => ({
-      id: p.id,
-      name: p.name,
-      rating: p.rating ?? undefined,
-      seed: p.seed,
-    }));
-    const pastGames = catGames
-      .filter((g) => g.result !== 'pending')
-      .map((g) => ({
-        round: g.round,
-        whiteId: g.whiteId ?? null,
-        blackId: g.blackId ?? null,
-        result: g.result as GameResult,
-        isBye: g.isBye,
-      }));
-    try {
-      return computeStandings(enginePlayers, pastGames);
+      if (catPlayers.length === 0) return [];
+      return computeStandings(toEngine(catPlayers), toPast(catGames));
     } catch {
       return [];
     }
@@ -864,22 +956,21 @@ export default function TournamentPage() {
 
   const standingsEmptyReason = useMemo(() => {
     if (!participants || participants.length === 0) return 'no-players' as const;
-    if (!mix && activeCatId) {
+    if (activeCatId) {
       const inCat = participants.filter((p) => p.categoryIds?.includes(activeCatId));
       if (inCat.length === 0) return 'no-category-players' as const;
     }
     if (!standings || standings.length === 0) return 'empty' as const;
     return null;
-  }, [participants, mix, activeCatId, standings]);
+  }, [participants, activeCatId, standings]);
 
   const prizePlacesN = useMemo(() => {
     if (!tournament) return 3;
-    const activeCat =
-      !mix && activeCatId
-        ? (categories ?? []).find((c) => c.id === activeCatId)
-        : undefined;
-    return resolvePrizePlaces(tournament, activeCat, { mix });
-  }, [tournament, categories, activeCatId, mix]);
+    const activeCat = activeCatId
+      ? (categories ?? []).find((c) => c.id === activeCatId)
+      : undefined;
+    return resolvePrizePlaces(tournament, activeCat);
+  }, [tournament, categories, activeCatId]);
 
   if (!tournament) {
     return (
@@ -902,7 +993,7 @@ export default function TournamentPage() {
           <div className="tournament-meta">
             <span>{tournament.style === 'swiss' ? 'FIDE Swiss' : tournament.style}</span>
             <span>{tournament.rounds} rounds</span>
-            <span>{mix ? 'Mixed categories' : 'Separate categories'}</span>
+            <span>{mix ? 'Mixed pairing' : 'Separate categories'}</span>
             {tournament.date && <span>{new Date(tournament.date).toLocaleDateString()}</span>}
             <span className={`status-badge status-${displayStatus}`}>
               {displayStatus.replace('_', ' ')}
@@ -992,7 +1083,7 @@ export default function TournamentPage() {
                 <dt>Category mode</dt>
                 <dd>
                   {mix
-                    ? 'Mixed — one shared pairing pool and ranking'
+                    ? 'Mixed pairing — one shared pool; standings stay per category'
                     : 'Separate — pair and rank within each category'}
                 </dd>
               </div>
@@ -1020,9 +1111,9 @@ export default function TournamentPage() {
             ) : (
               <ul className="settings-categories">
                 {categories!.map((cat) => {
-                  const effective = resolvePrizePlaces(tournament, cat, { mix });
+                  const effective = resolvePrizePlaces(tournament, cat);
                   const override =
-                    !mix && cat.prizePlaces != null
+                    cat.prizePlaces != null
                       ? `override ${cat.prizePlaces}`
                       : 'uses default';
                   return (
@@ -1030,9 +1121,7 @@ export default function TournamentPage() {
                       <div className="settings-category-name">{cat.name}</div>
                       <div className="settings-category-meta">
                         Prize places: top {effective}
-                        {!mix && (
-                          <span className="form-hint-sm"> ({override})</span>
-                        )}
+                        <span className="form-hint-sm"> ({override})</span>
                       </div>
                       <div className="settings-category-filter">
                         {formatFilterSummary(cat.filter)}
@@ -1044,10 +1133,57 @@ export default function TournamentPage() {
             )}
             {mix && (categories?.length ?? 0) > 0 && (
               <p className="form-hint">
-                Mixed mode ignores per-category prize overrides — one ranking uses the
-                tournament top N.
+                Mixed pairing uses one board pool. Rankings and prize places stay per category.
               </p>
             )}
+
+            <h3 className="settings-subtitle">Public live page</h3>
+            <p className="form-hint">
+              Share with parents — seating and scores, no login. Search by name to find a table.
+            </p>
+            <div className="live-share-box">
+              {tournament.publicEnabled && tournament.publicToken ? (
+                <>
+                  <code className="live-share-url">{livePublicUrl(tournament.publicToken)}</code>
+                  <div className="live-share-actions">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      disabled={liveBusy}
+                      onClick={() => void copyLiveLink()}
+                    >
+                      Copy link
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      disabled={liveBusy}
+                      onClick={() => void rotatePublicLive()}
+                    >
+                      Rotate link
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      disabled={liveBusy}
+                      onClick={() => void disablePublicLive()}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={liveBusy}
+                  onClick={() => void enablePublicLive()}
+                >
+                  {liveBusy ? 'Working…' : 'Enable live page'}
+                </button>
+              )}
+              {liveMsg && <p className="form-hint">{liveMsg}</p>}
+            </div>
           </div>
         </div>
       )}
@@ -1082,10 +1218,10 @@ export default function TournamentPage() {
         </div>
       )}
 
-      {hasCategories && !mix && (
+      {hasCategories && (
         <div className="category-tabs">
           {categories!.map((cat) => {
-            const pending = pendingResultsCountForCategory(games ?? [], cat.id);
+            const pending = !mix ? pendingResultsCountForCategory(games ?? [], cat.id) : 0;
             return (
               <button
                 key={cat.id}
@@ -1101,7 +1237,8 @@ export default function TournamentPage() {
       )}
       {hasCategories && mix && (
         <p className="form-hint category-mode-hint">
-          Mixed mode: all categories share one pairing pool and one ranking.
+          Mixed pairing: everyone shares one board list. Use the tabs for per-category standings
+          and prizes.
         </p>
       )}
 
@@ -1689,7 +1826,7 @@ export default function TournamentPage() {
             <>
               <p className="form-hint standings-prize-hint">
                 Prize places: top {prizePlacesN}
-                {!mix && activeCatId && categoryNames[activeCatId]
+                {activeCatId && categoryNames[activeCatId]
                   ? ` · ${categoryNames[activeCatId]}`
                   : ''}
               </p>

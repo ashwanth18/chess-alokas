@@ -32,6 +32,7 @@ export interface Store {
   // Tournaments
   listTournaments(ownerId?: string | null): Promise<Tournament[]>;
   getTournament(id: string): Promise<Tournament | null>;
+  getTournamentByPublicToken(token: string): Promise<Tournament | null>;
   createTournament(t: Tournament): Promise<Tournament>;
   updateTournament(id: string, patch: Partial<Omit<Tournament, 'id'>>): Promise<Tournament | null>;
   isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean>;
@@ -124,6 +125,13 @@ export class MemoryStore implements Store {
 
   async getTournament(id: string): Promise<Tournament | null> {
     return this.tournaments.get(id) ?? null;
+  }
+
+  async getTournamentByPublicToken(token: string): Promise<Tournament | null> {
+    const t = [...this.tournaments.values()].find(
+      (row) => row.publicToken === token && row.publicEnabled && !row.deletedAt,
+    );
+    return t ?? null;
   }
 
   async isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean> {
@@ -464,10 +472,18 @@ export class MemoryStore implements Store {
         arbiterPinRound:
           payload['arbiterPinRound'] == null ? null : Number(payload['arbiterPinRound']),
         tableCount: Number(payload['tableCount'] ?? 0),
+        publicToken: null,
+        publicEnabled: false,
         clientId: (payload['clientId'] as string | undefined) ?? undefined,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
       };
+      // Preserve server-owned live fields when client sync omits them.
+      const prev = this.tournaments.get(id);
+      if (prev) {
+        t.publicToken = prev.publicToken ?? null;
+        t.publicEnabled = prev.publicEnabled ?? false;
+      }
       applyIfNewer(this.tournaments, t);
     } else if (entity === 'category') {
       const c: Category = {
@@ -544,6 +560,8 @@ interface TournamentRow {
   arbiter_pin_hash: string | null;
   arbiter_pin_round: number | null;
   table_count: number | null;
+  public_token: string | null;
+  public_enabled: boolean | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
@@ -627,6 +645,8 @@ function rowToTournament(row: TournamentRow): Tournament {
     ownerId: row.owner_id ?? null,
     arbiterPinRound: row.arbiter_pin_round ?? null,
     tableCount: row.table_count ?? 0,
+    publicToken: row.public_token ?? null,
+    publicEnabled: row.public_enabled ?? false,
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
@@ -735,6 +755,18 @@ export class PostgresStore implements Store {
     return row ? rowToTournament(row) : null;
   }
 
+  async getTournamentByPublicToken(token: string): Promise<Tournament | null> {
+    const rows = await this.sql<TournamentRow[]>`
+      SELECT * FROM tournaments
+      WHERE public_token = ${token}
+        AND public_enabled = true
+        AND deleted_at IS NULL
+      LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? rowToTournament(row) : null;
+  }
+
   async isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean> {
     const rows = await this.sql<{ ok: boolean }[]>`
       SELECT true AS ok FROM tournaments
@@ -746,10 +778,10 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, owner_id, public_token, public_enabled, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
               ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
-              ${t.ownerId ?? null}, ${t.clientId ?? null},
+              ${t.ownerId ?? null}, ${t.publicToken ?? null}, ${t.publicEnabled ?? false}, ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
     `;
@@ -772,6 +804,8 @@ export class PostgresStore implements Store {
         prize_places = ${m.prizePlaces ?? 3},
         award_scope = ${m.awardScope ?? 'per_category'},
         owner_id = ${m.ownerId ?? null},
+        public_token = ${m.publicToken ?? null},
+        public_enabled = ${m.publicEnabled ?? false},
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
         deleted_at = ${m.deletedAt ?? null}
       WHERE id = ${id} RETURNING *
@@ -1221,6 +1255,7 @@ export class PostgresStore implements Store {
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > tournaments.updated_at
       `;
+      // public_token / public_enabled are server-owned (enable/rotate/disable API only).
     } else if (entity === 'category') {
       const filter = (p['filter'] as FilterGroup) ?? { logic: 'and', rules: [] };
       await this.sql`

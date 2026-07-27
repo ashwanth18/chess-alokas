@@ -2,6 +2,7 @@ export {
   pairSwissRound,
   buildPlayerStates,
   computeStandings,
+  computeSectionStandings,
   diagnosePairings,
   colorPreference,
   colorImbalance,

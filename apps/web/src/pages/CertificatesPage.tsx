@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import Papa from 'papaparse';
-import { computeStandings } from '@chess-alokas/pairing-engine';
+import { computeStandings, computeSectionStandings } from '@chess-alokas/pairing-engine';
 import {
   collectColumns,
   generateCertificateBatch,
@@ -198,19 +198,19 @@ export default function CertificatesPage() {
         rating: p.rating ?? undefined,
         seed: p.seed,
       }));
+      const allPast = games
+        .filter((g) => g.result !== 'pending')
+        .map((g) => ({
+          round: g.round,
+          whiteId: g.whiteId ?? null,
+          blackId: g.blackId ?? null,
+          result: g.result as GameResult,
+          isBye: g.isBye,
+        }));
 
-      if (mix || scope === 'overall' || !(categories?.length)) {
-        const past = games
-          .filter((g) => g.result !== 'pending')
-          .map((g) => ({
-            round: g.round,
-            whiteId: g.whiteId ?? null,
-            blackId: g.blackId ?? null,
-            result: g.result as GameResult,
-            isBye: g.isBye,
-          }));
+      if (scope === 'overall' || !(categories?.length)) {
         try {
-          const standings = computeStandings(enginePlayers, past);
+          const standings = computeStandings(enginePlayers, allPast);
           for (const s of winnersFromStandings(standings, topN)) {
             const p = participants.find((x) => x.id === s.id);
             next.push({
@@ -231,23 +231,30 @@ export default function CertificatesPage() {
         for (const cat of categories) {
           const catPlayers = participants.filter((p) => p.categoryIds?.includes(cat.id));
           const catTop = cat.prizePlaces ?? topN;
-          const engine = catPlayers.map((p) => ({
-            id: p.id,
-            name: p.name,
-            rating: p.rating ?? undefined,
-            seed: p.seed,
-          }));
-          const past = games
-            .filter((g) => g.categoryId === cat.id && g.result !== 'pending')
-            .map((g) => ({
-              round: g.round,
-              whiteId: g.whiteId ?? null,
-              blackId: g.blackId ?? null,
-              result: g.result as GameResult,
-              isBye: g.isBye,
-            }));
           try {
-            const standings = computeStandings(engine, past);
+            const standings = mix
+              ? computeSectionStandings(
+                  enginePlayers,
+                  allPast,
+                  new Set(catPlayers.map((p) => p.id)),
+                )
+              : computeStandings(
+                  catPlayers.map((p) => ({
+                    id: p.id,
+                    name: p.name,
+                    rating: p.rating ?? undefined,
+                    seed: p.seed,
+                  })),
+                  games
+                    .filter((g) => g.categoryId === cat.id && g.result !== 'pending')
+                    .map((g) => ({
+                      round: g.round,
+                      whiteId: g.whiteId ?? null,
+                      blackId: g.blackId ?? null,
+                      result: g.result as GameResult,
+                      isBye: g.isBye,
+                    })),
+                );
             for (const s of winnersFromStandings(standings, catTop)) {
               const p = participants.find((x) => x.id === s.id);
               next.push({

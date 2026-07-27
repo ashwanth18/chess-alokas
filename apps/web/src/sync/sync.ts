@@ -11,8 +11,15 @@ function toSyncItem(
   const {
     dirty: _dirty,
     arbiterPin: _arbiterPin,
+    publicToken: _publicToken,
+    publicEnabled: _publicEnabled,
     ...payload
-  } = record as Record<string, unknown> & { dirty: 1 | 0; arbiterPin?: string | null };
+  } = record as Record<string, unknown> & {
+    dirty: 1 | 0;
+    arbiterPin?: string | null;
+    publicToken?: string | null;
+    publicEnabled?: boolean;
+  };
   return {
     entity,
     id: record.id,
@@ -113,6 +120,8 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
         ownerId: remote.ownerId ?? null,
         arbiterPinRound: remote.arbiterPinRound ?? null,
         tableCount: remote.tableCount ?? 0,
+        publicToken: remote.publicToken ?? null,
+        publicEnabled: remote.publicEnabled ?? false,
         // Keep local plaintext PIN when round still matches.
         arbiterPin:
           prev?.arbiterPinRound === remote.arbiterPinRound ? (prev?.arbiterPin ?? null) : null,

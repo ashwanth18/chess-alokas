@@ -3234,6 +3234,38 @@ a.landing-download-option:hover {
 .table-score-header {
   margin-bottom: 1.25rem;
 }
+.table-score-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.table-score-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.table-score-offline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(220, 80, 80, 0.4);
+  background: rgba(180, 40, 40, 0.18);
+  color: #ffb4b4;
+}
+.table-score-offline strong {
+  font-size: 0.95rem;
+  color: #ffd0d0;
+}
+.table-score-offline span {
+  font-size: 0.88rem;
+  line-height: 1.35;
+  color: #ffc4c4;
+}
 .table-score-brand {
   margin: 0;
   font-size: 0.8rem;
@@ -3398,4 +3430,260 @@ a.landing-download-option:hover {
 }
 .qr-scanner-view video {
   width: 100% !important;
+}
+
+/* ── Public live viewer ───────────────────────────────────────────────────── */
+.live-page {
+  min-height: 100vh;
+  padding: 1.25rem 1rem 2.5rem;
+  max-width: 40rem;
+  margin: 0 auto;
+}
+.live-header {
+  margin-bottom: 1rem;
+}
+.live-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+.live-brand {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-300);
+}
+.live-header h1 {
+  margin: 0.15rem 0;
+  font-size: 1.75rem;
+  color: var(--wood-100);
+}
+.live-meta {
+  margin: 0;
+  color: var(--ink-300);
+  font-size: 0.9rem;
+}
+.live-offline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(220, 80, 80, 0.4);
+  background: rgba(180, 40, 40, 0.18);
+  color: #ffb4b4;
+}
+.live-offline strong {
+  color: #ffd0d0;
+}
+.live-search-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 0.5rem 0 0.75rem;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(180deg, var(--color-bg) 70%, transparent);
+}
+.live-search-hits {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 16rem;
+  overflow: auto;
+}
+.live-search-hit {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-mid);
+  color: inherit;
+  cursor: pointer;
+}
+.live-search-hit strong {
+  color: var(--wood-100);
+}
+.live-search-hit span {
+  font-size: 0.85rem;
+  color: var(--green-200);
+}
+.live-search-empty {
+  padding: 0.6rem 0.2rem;
+  color: var(--ink-300);
+  font-size: 0.9rem;
+}
+.live-tabs {
+  margin-bottom: 0.85rem;
+}
+.live-section {
+  margin-top: 0.5rem;
+}
+.live-section-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.1rem;
+  color: var(--wood-200);
+}
+.live-round-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+.live-round-pill {
+  border: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--ink-500);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.live-round-pill.active {
+  border-color: var(--green-500);
+  background: rgba(45, 138, 104, 0.22);
+  color: var(--wood-100);
+}
+.live-board-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.live-board-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-mid);
+}
+.live-board-num {
+  font-weight: 700;
+  color: var(--green-200);
+  white-space: nowrap;
+}
+.live-board-players {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.live-board-player {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--wood-100);
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.live-board-player:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+.live-board-player span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-board-result {
+  font-weight: 600;
+  color: var(--ink-500);
+  white-space: nowrap;
+}
+.live-player-card {
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-mid);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 1.25rem;
+}
+.live-player-card h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--wood-200);
+}
+.live-seat {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ink-500);
+}
+.live-vs {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--wood-100);
+}
+.live-scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+}
+.live-scores > div {
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.live-score-label {
+  font-size: 0.75rem;
+  color: var(--ink-300);
+}
+.live-scores strong {
+  font-size: 1.35rem;
+  color: var(--green-200);
+}
+.live-share-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.18);
+}
+.live-share-url {
+  font-size: 0.82rem;
+  word-break: break-all;
+  color: var(--green-200);
+}
+.live-share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+@media (max-width: 520px) {
+  .live-board-card {
+    grid-template-columns: 1fr;
+  }
+  .live-scores {
+    grid-template-columns: 1fr;
+  }
 }

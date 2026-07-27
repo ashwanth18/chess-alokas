@@ -183,6 +183,8 @@ export default function CreateTournamentPage() {
         prizePlaces: clampPrizePlaces(prizePlaces),
         awardScope,
         ownerId: auth.user?.id ?? null,
+        publicToken: null,
+        publicEnabled: false,
         updatedAt: now,
         dirty: 1,
       });
@@ -326,7 +328,7 @@ export default function CreateTournamentPage() {
               <strong>Allow mixed matches</strong>
               <span className="form-hint-sm">
                 {mixCategories
-                  ? 'Players from all categories share one pairing pool and one ranking.'
+                  ? 'Players from all categories share one pairing pool. Rankings and prizes stay per category.'
                   : 'Default: players only play within their category (e.g. U12 vs U12) with separate rankings.'}
               </span>
             </span>

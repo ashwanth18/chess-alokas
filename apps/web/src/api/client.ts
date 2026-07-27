@@ -311,6 +311,64 @@ export async function apiPublicTableResult(
   );
 }
 
+// ── Public live viewer ───────────────────────────────────────────────────────
+
+export type PublicLivePayload = {
+  tournament: {
+    name: string;
+    date: string | null;
+    rounds: number;
+    currentRound: number;
+    confirmedRounds: number;
+    mixCategories: boolean;
+    status: string;
+    prizePlaces: number;
+  };
+  categories: Array<{ id: string; name: string; prizePlaces: number | null }>;
+  players: Array<{
+    id: string;
+    name: string;
+    rating: number | null;
+    club: string | null;
+    seed: number | null;
+    categoryIds: string[];
+  }>;
+  games: Array<{
+    round: number;
+    board: number;
+    whiteId: string | null;
+    blackId: string | null;
+    result: string;
+    isBye: boolean;
+    categoryId: string;
+  }>;
+};
+
+export async function apiPublicLiveGet(token: string) {
+  return req<PublicLivePayload>(`/public/live/${encodeURIComponent(token)}`);
+}
+
+export async function apiPublicLiveEnable(tournamentId: string) {
+  return req<{ publicToken: string | null; publicEnabled: boolean; updatedAt: string }>(
+    `/tournaments/${tournamentId}/public-live/enable`,
+    { method: 'POST' },
+  );
+}
+
+export async function apiPublicLiveRotate(tournamentId: string) {
+  return req<{ publicToken: string | null; publicEnabled: boolean; updatedAt: string }>(
+    `/tournaments/${tournamentId}/public-live/rotate`,
+    { method: 'POST' },
+  );
+}
+
+export async function apiPublicLiveDisable(tournamentId: string) {
+  return req<{ publicToken: string | null; publicEnabled: boolean; updatedAt: string }>(
+    `/tournaments/${tournamentId}/public-live/disable`,
+    { method: 'POST' },
+  );
+}
+
 export async function apiDirectorSetGameResult(
   gameId: string,
   body: {

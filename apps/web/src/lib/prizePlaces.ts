@@ -9,16 +9,15 @@ export function clampPrizePlaces(value: number | null | undefined): number {
 
 /**
  * Resolve how many top places count as prize winners.
- * Mixed mode / no category: tournament default only.
- * Separate categories: category override if set, else tournament default.
+ * Category override if set, else tournament default.
+ * (Applies to mixed pairing too — standings stay per category when categories exist.)
  */
 export function resolvePrizePlaces(
   tournament: { prizePlaces?: number | null; mixCategories?: boolean } | null | undefined,
   category?: { prizePlaces?: number | null } | null,
-  opts?: { mix?: boolean },
+  _opts?: { mix?: boolean },
 ): number {
-  const mix = opts?.mix ?? tournament?.mixCategories === true;
-  if (!mix && category?.prizePlaces != null) {
+  if (category?.prizePlaces != null) {
     return clampPrizePlaces(category.prizePlaces);
   }
   return clampPrizePlaces(tournament?.prizePlaces);

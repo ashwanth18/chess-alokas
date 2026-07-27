@@ -20,6 +20,7 @@ import AccountPage from './pages/AccountPage';
 import SettingsPage from './pages/SettingsPage';
 import LandingPage from './pages/LandingPage';
 import TableScoringPage from './pages/TableScoringPage';
+import LivePage from './pages/LivePage';
 
 const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
@@ -94,6 +95,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/reset" element={<ResetPasswordPage />} />
           <Route path="/t/:slug" element={<TableScoringPage />} />
+          <Route path="/live/:token" element={<LivePage />} />
+          <Route path="/live/:token/p/:playerId" element={<LivePage />} />
           <Route
             element={
               <RequireAuth>

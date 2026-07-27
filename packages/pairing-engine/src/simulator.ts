@@ -1,6 +1,7 @@
 import type { GameResult } from '@chess-alokas/shared';
 import {
   computeStandings,
+  computeSectionStandings,
   diagnosePairings,
   pairSwissRound,
   type EnginePlayer,
@@ -315,6 +316,7 @@ export function getSimulationStandings(
   state: SimulationState,
   category?: SimCategory,
 ): StandingRow[] {
+  // Separate pools: each category has its own games.
   if (usesSeparatePools(state.config)) {
     const cats: SimCategory[] =
       category && category !== 'open' ? [category] : ['under12', 'under18'];
@@ -323,6 +325,20 @@ export function getSimulationStandings(
       const players = filterPlayersByCategory(state.players, cat);
       const past = state.pastGamesByCategory[cat] ?? [];
       const standings = computeStandings(players, past);
+      rows.push(...standings.map((s) => ({ ...s, category: cat })));
+    }
+    return rows;
+  }
+
+  // Mixed pairing (or open): one field — optionally re-rank within a section.
+  if (state.config.splitCategories && state.config.mixCategories) {
+    const cats: SimCategory[] =
+      category && category !== 'open' ? [category] : ['under12', 'under18'];
+    const rows: StandingRow[] = [];
+    for (const cat of cats) {
+      const section = filterPlayersByCategory(state.players, cat);
+      const ids = new Set(section.map((p) => p.id));
+      const standings = computeSectionStandings(state.players, state.pastGames, ids);
       rows.push(...standings.map((s) => ({ ...s, category: cat })));
     }
     return rows;

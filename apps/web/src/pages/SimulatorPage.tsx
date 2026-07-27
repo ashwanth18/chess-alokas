@@ -272,10 +272,11 @@ export default function SimulatorPage() {
   const playerById = new Map((state?.players ?? []).map((p) => [p.id, p]));
   const separatePools =
     Boolean(state?.config.splitCategories) && !state?.config.mixCategories;
+  const showStandingsTabs = Boolean(state?.config.splitCategories);
   const standings = state
     ? getSimulationStandings(
         state,
-        separatePools && standingsTab !== 'all' ? standingsTab : undefined,
+        showStandingsTabs && standingsTab !== 'all' ? standingsTab : undefined,
       )
     : [];
 
@@ -372,7 +373,7 @@ export default function SimulatorPage() {
                   checked={config.mixCategories}
                   onChange={(e) => cfg({ mixCategories: e.target.checked })}
                 />
-                Allow mixed matches (one shared pool)
+                Allow mixed matches (shared pairing; section standings)
               </label>
             </div>
           )}
@@ -425,7 +426,9 @@ export default function SimulatorPage() {
               <span>
                 Categories:{' '}
                 <strong>
-                  {state.config.mixCategories ? 'Mixed pool' : 'Separate U12 / U18'}
+                  {state.config.mixCategories
+                    ? 'Mixed pairing · section ranks'
+                    : 'Separate U12 / U18'}
                 </strong>
               </span>
             )}
@@ -531,7 +534,7 @@ export default function SimulatorPage() {
                 Standings{' '}
                 {isDone && <span className="final-tag">Final</span>}
               </h2>
-              {separatePools && (
+              {showStandingsTabs && (
                 <div className="category-tabs sim-standings-tabs">
                   {(
                     [

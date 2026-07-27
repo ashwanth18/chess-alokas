@@ -122,6 +122,10 @@ export const TournamentSchema = z.object({
   arbiterPinRound: z.number().int().nonnegative().nullable().optional(),
   /** Number of physical floor tables allocated for QR stickers. */
   tableCount: z.number().int().nonnegative().default(0),
+  /** Unguessable token for the public live page (null until enabled once). */
+  publicToken: z.string().min(8).nullable().optional(),
+  /** When true, GET /public/live/:token serves sanitized pairings/standings. */
+  publicEnabled: z.boolean().default(false),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),

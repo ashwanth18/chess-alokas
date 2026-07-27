@@ -6,6 +6,7 @@ import {
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth } from '../auth.js';
+import { generatePublicLiveToken } from '../floor/pin.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -57,6 +58,8 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       prizePlaces: input.prizePlaces ?? 3,
       awardScope: input.awardScope ?? 'per_category',
       ownerId: request.userId ?? null,
+      publicToken: null,
+      publicEnabled: false,
       updatedAt: now,
     });
 
@@ -216,6 +219,80 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       const updated = await store.updateCategory(id, { deletedAt: now, updatedAt: now });
       if (!updated) return reply.code(404).send({ error: 'Category not found' });
       return reply.code(204).send();
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/tournaments/:id/public-live/enable',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const tournament = await store.getTournament(id);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      const now = new Date().toISOString();
+      const updated = await store.updateTournament(id, {
+        publicToken: tournament.publicToken ?? generatePublicLiveToken(),
+        publicEnabled: true,
+        updatedAt: now,
+      });
+      if (!updated) return reply.code(404).send({ error: 'Tournament not found' });
+      return {
+        publicToken: updated.publicToken,
+        publicEnabled: updated.publicEnabled,
+        updatedAt: updated.updatedAt,
+      };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/tournaments/:id/public-live/rotate',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const tournament = await store.getTournament(id);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      const now = new Date().toISOString();
+      const updated = await store.updateTournament(id, {
+        publicToken: generatePublicLiveToken(),
+        publicEnabled: true,
+        updatedAt: now,
+      });
+      if (!updated) return reply.code(404).send({ error: 'Tournament not found' });
+      return {
+        publicToken: updated.publicToken,
+        publicEnabled: updated.publicEnabled,
+        updatedAt: updated.updatedAt,
+      };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/tournaments/:id/public-live/disable',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const tournament = await store.getTournament(id);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      const now = new Date().toISOString();
+      const updated = await store.updateTournament(id, {
+        publicEnabled: false,
+        updatedAt: now,
+      });
+      if (!updated) return reply.code(404).send({ error: 'Tournament not found' });
+      return {
+        publicToken: updated.publicToken,
+        publicEnabled: updated.publicEnabled,
+        updatedAt: updated.updatedAt,
+      };
     },
   );
 };

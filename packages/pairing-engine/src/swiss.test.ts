@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   pairSwissRound,
   computeStandings,
+  computeSectionStandings,
   diagnosePairings,
   firstRoundMissingResults,
   createSimulation,
@@ -84,6 +85,34 @@ describe('pairSwissRound', () => {
     const standings = computeStandings(plist, past);
     expect(standings[0].score).toBeGreaterThanOrEqual(standings[standings.length - 1].score);
     expect(standings.every((s) => s.rank >= 1)).toBe(true);
+  });
+
+  it('re-ranks within a section after mixed-field standings', () => {
+    const plist = players(4);
+    const past: PastGame[] = [
+      {
+        round: 1,
+        whiteId: 'p1',
+        blackId: 'p2',
+        result: '1-0',
+        isBye: false,
+      },
+      {
+        round: 1,
+        whiteId: 'p3',
+        blackId: 'p4',
+        result: '1-0',
+        isBye: false,
+      },
+    ];
+    const section = computeSectionStandings(plist, past, new Set(['p2', 'p4']));
+    expect(section).toHaveLength(2);
+    expect(section.map((s) => s.id)).toEqual(['p2', 'p4']);
+    expect(section[0]!.rank).toBe(1);
+    expect(section[1]!.rank).toBe(2);
+    // Buchholz still reflects the full-field opponent (p1 / p3 scored 1).
+    expect(section[0]!.buchholz).toBe(1);
+    expect(section[1]!.buchholz).toBe(1);
   });
 
   it('scores forfeit and double-absent results', () => {
