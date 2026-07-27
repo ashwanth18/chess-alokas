@@ -5,7 +5,6 @@ import {
   checkOnline,
   type PublicLivePayload,
 } from '../api/client';
-import ColorSide from '../components/ColorSide';
 import TableSearch from '../components/TableSearch';
 import { matchesTextSearch } from '../lib/textSearch';
 import {
@@ -15,6 +14,8 @@ import {
   gameForPlayerRound,
   resultPointsLabel,
   runningScore,
+  type LiveGame,
+  type LivePlayer,
 } from '../lib/liveViewer';
 import { resolvePrizePlaces } from '../lib/prizePlaces';
 
@@ -25,6 +26,47 @@ function networkErrorMessage(raw: string): string {
     return 'No connection — reconnect to refresh pairings and scores.';
   }
   return raw;
+}
+
+function ColorPill({ color }: { color: 'white' | 'black' }) {
+  return (
+    <span className={`live-color-pill live-color-${color}`} aria-label={color}>
+      <span className="live-color-dot" aria-hidden />
+      {color === 'white' ? 'White' : 'Black'}
+    </span>
+  );
+}
+
+function SideRow({
+  color,
+  name,
+  points,
+  onOpen,
+}: {
+  color: 'white' | 'black';
+  name: string;
+  points: number;
+  onOpen?: () => void;
+}) {
+  const inner = (
+    <>
+      <ColorPill color={color} />
+      <span className="live-side-name">{name}</span>
+      <span className="live-side-pts" title="Tournament points so far">
+        {resultPointsLabel(points)}
+        <small>pts</small>
+      </span>
+    </>
+  );
+
+  if (onOpen) {
+    return (
+      <button type="button" className={`live-side live-side-${color}`} onClick={onOpen}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={`live-side live-side-${color}`}>{inner}</div>;
 }
 
 export default function LivePage() {
@@ -217,9 +259,7 @@ export default function LivePage() {
             : 'Tournament'}
           {' · '}
           Round {displayRound}
-          {data.tournament.currentRound
-            ? ` of ${data.tournament.rounds}`
-            : ''}
+          {data.tournament.rounds ? ` of ${data.tournament.rounds}` : ''}
         </p>
       </header>
 
@@ -245,29 +285,16 @@ export default function LivePage() {
             {filteredPlayers.length === 0 ? (
               <li className="live-search-empty">No players match “{q}”.</li>
             ) : (
-              filteredPlayers.slice(0, 12).map((p) => {
-                const game = gameForPlayerRound(data.games, p.id, displayRound);
-                let seat = 'Not paired yet';
-                if (game) {
-                  if (game.isBye || game.result === 'bye') seat = 'Bye';
-                  else {
-                    const color = game.whiteId === p.id ? 'White' : 'Black';
-                    seat = `Table ${game.board} · ${color}`;
-                  }
-                }
-                return (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      className="live-search-hit"
-                      onClick={() => navigate(`/live/${token}/p/${p.id}`)}
-                    >
-                      <strong>{p.name}</strong>
-                      <span>{seat}</span>
-                    </button>
-                  </li>
-                );
-              })
+              filteredPlayers.slice(0, 12).map((p) => (
+                <li key={p.id}>
+                  <SearchHit
+                    player={p}
+                    game={gameForPlayerRound(data.games, p.id, displayRound)}
+                    score={runningScore(data.games, p.id, displayRound)}
+                    onOpen={() => navigate(`/live/${token}/p/${p.id}`)}
+                  />
+                </li>
+              ))
             )}
           </ul>
         )}
@@ -304,6 +331,7 @@ export default function LivePage() {
               </button>
             ))}
           </div>
+          <p className="live-hint-inline">Tap a player for full history. Points shown are totals so far.</p>
           {filteredBoards.length === 0 ? (
             <p className="form-hint">
               {q
@@ -312,54 +340,21 @@ export default function LivePage() {
             </p>
           ) : (
             <ul className="live-board-list">
-              {filteredBoards.map((g) => {
-                const white = g.whiteId ? playerById.get(g.whiteId) : null;
-                const black = g.blackId ? playerById.get(g.blackId) : null;
-                return (
-                  <li key={`${g.round}-${g.board}-${g.whiteId}-${g.blackId}`} className="live-board-card">
-                    <div className="live-board-num">
-                      {g.isBye ? 'Bye' : `Table ${g.board}`}
-                    </div>
-                    <div className="live-board-players">
-                      {g.isBye ? (
-                        <p>
-                          <Link to={`/live/${token}/p/${g.whiteId ?? g.blackId}`}>
-                            {white?.name ?? black?.name ?? 'Player'}
-                          </Link>
-                        </p>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="live-board-player"
-                            onClick={() =>
-                              g.whiteId && navigate(`/live/${token}/p/${g.whiteId}`)
-                            }
-                            disabled={!g.whiteId}
-                          >
-                            <ColorSide color="white" />
-                            <span>{white?.name ?? '—'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="live-board-player"
-                            onClick={() =>
-                              g.blackId && navigate(`/live/${token}/p/${g.blackId}`)
-                            }
-                            disabled={!g.blackId}
-                          >
-                            <ColorSide color="black" onDark />
-                            <span>{black?.name ?? '—'}</span>
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <div className="live-board-result">
-                      {formatResultLabel(g.result, g.isBye)}
-                    </div>
-                  </li>
-                );
-              })}
+              {filteredBoards.map((g) => (
+                <BoardCard
+                  key={`${g.round}-${g.board}-${g.whiteId}-${g.blackId}`}
+                  game={g}
+                  white={g.whiteId ? playerById.get(g.whiteId) : null}
+                  black={g.blackId ? playerById.get(g.blackId) : null}
+                  whitePts={
+                    g.whiteId ? runningScore(data.games, g.whiteId, displayRound) : 0
+                  }
+                  blackPts={
+                    g.blackId ? runningScore(data.games, g.blackId, displayRound) : 0
+                  }
+                  onOpen={(id) => navigate(`/live/${token}/p/${id}`)}
+                />
+              ))}
             </ul>
           )}
         </section>
@@ -422,6 +417,122 @@ export default function LivePage() {
   );
 }
 
+function SearchHit({
+  player,
+  game,
+  score,
+  onOpen,
+}: {
+  player: LivePlayer;
+  game: LiveGame | null;
+  score: number;
+  onOpen: () => void;
+}) {
+  const isBye = Boolean(game && (game.isBye || game.result === 'bye'));
+  const color =
+    game && !isBye
+      ? game.whiteId === player.id
+        ? 'white'
+        : 'black'
+      : null;
+
+  return (
+    <button type="button" className="live-search-hit" onClick={onOpen}>
+      <div className="live-search-hit-main">
+        <strong>{player.name}</strong>
+        <span className="live-search-hit-pts">
+          {resultPointsLabel(score)} pts
+        </span>
+      </div>
+      <div className="live-search-hit-meta">
+        {!game ? (
+          <span className="live-chip live-chip-muted">Not paired yet</span>
+        ) : isBye ? (
+          <span className="live-chip">Bye</span>
+        ) : (
+          <>
+            <span className="live-chip live-chip-table">Table {game.board}</span>
+            {color && <ColorPill color={color} />}
+          </>
+        )}
+        <span className="live-search-hit-cta">Details →</span>
+      </div>
+    </button>
+  );
+}
+
+function BoardCard({
+  game,
+  white,
+  black,
+  whitePts,
+  blackPts,
+  onOpen,
+}: {
+  game: LiveGame;
+  white: LivePlayer | null | undefined;
+  black: LivePlayer | null | undefined;
+  whitePts: number;
+  blackPts: number;
+  onOpen: (id: string) => void;
+}) {
+  if (game.isBye || game.result === 'bye') {
+    const byeId = game.whiteId ?? game.blackId;
+    const byeName = white?.name ?? black?.name ?? 'Player';
+    return (
+      <li className="live-board-card live-board-bye">
+        <div className="live-board-top">
+          <span className="live-board-badge">Bye</span>
+          <span className="live-result-pill">1 pt</span>
+        </div>
+        {byeId ? (
+          <button type="button" className="live-bye-player" onClick={() => onOpen(byeId)}>
+            <span>{byeName}</span>
+            <span className="live-side-pts">
+              {resultPointsLabel(whitePts || blackPts)}
+              <small>pts</small>
+            </span>
+          </button>
+        ) : (
+          <p>{byeName}</p>
+        )}
+      </li>
+    );
+  }
+
+  return (
+    <li className="live-board-card">
+      <div className="live-board-top">
+        <span className="live-board-badge">Table {game.board}</span>
+        <span
+          className={`live-result-pill ${
+            game.result === 'pending' ? 'is-pending' : 'is-done'
+          }`}
+        >
+          {formatResultLabel(game.result, false)}
+        </span>
+      </div>
+      <div className="live-matchup">
+        <SideRow
+          color="white"
+          name={white?.name ?? '—'}
+          points={whitePts}
+          onOpen={game.whiteId ? () => onOpen(game.whiteId!) : undefined}
+        />
+        <div className="live-matchup-vs" aria-hidden>
+          vs
+        </div>
+        <SideRow
+          color="black"
+          name={black?.name ?? '—'}
+          points={blackPts}
+          onOpen={game.blackId ? () => onOpen(game.blackId!) : undefined}
+        />
+      </div>
+    </li>
+  );
+}
+
 function LivePlayerView({
   token,
   playerId,
@@ -443,6 +554,7 @@ function LivePlayerView({
   onRoundChange: (r: number) => void;
   onBack: () => void;
 }) {
+  const navigate = useNavigate();
   const player = data.players.find((p) => p.id === playerId);
   const history = useMemo(
     () => buildPlayerHistory(data.games, data.players, playerId),
@@ -475,7 +587,8 @@ function LivePlayerView({
   }
 
   const isWhite = game?.whiteId === playerId;
-  const color = game && !game.isBye ? (isWhite ? 'white' : 'black') : null;
+  const myColor = game && !game.isBye ? (isWhite ? 'white' : 'black') : null;
+  const oppColor = myColor === 'white' ? 'black' : myColor === 'black' ? 'white' : null;
 
   return (
     <div className="live-page">
@@ -514,50 +627,66 @@ function LivePlayerView({
         ))}
       </div>
 
-      <div className="live-player-card">
-        <h2>Round {displayRound}</h2>
+      <div className="live-player-hero">
         {!game ? (
           <p className="form-hint">Not paired in this round yet.</p>
         ) : game.isBye || game.result === 'bye' ? (
-          <p className="form-hint">Bye this round (1 point).</p>
+          <>
+            <div className="live-board-top">
+              <span className="live-board-badge">Bye</span>
+              <span className="live-result-pill">1 pt this round</span>
+            </div>
+            <div className="live-scores-duo">
+              <div className="live-score-tile is-you">
+                <span className="live-score-label">Your total</span>
+                <strong>{resultPointsLabel(myScore)}</strong>
+              </div>
+            </div>
+          </>
         ) : (
           <>
-            <p className="live-seat">
-              Table <strong>{game.board}</strong>
-              {color && (
-                <>
-                  {' · '}
-                  <ColorSide color={color} onDark={color === 'black'} />
-                  <span>{color === 'white' ? 'White' : 'Black'}</span>
-                </>
-              )}
-            </p>
-            <p className="live-vs">
-              vs{' '}
-              {opponent ? (
-                <Link to={`/live/${token}/p/${opponent.id}`}>{opponent.name}</Link>
-              ) : (
-                '—'
-              )}
-            </p>
-            <p className="live-board-result">
-              {formatResultLabel(game.result, false)}
-            </p>
+            <div className="live-board-top">
+              <span className="live-board-badge live-board-badge-lg">
+                Table {game.board}
+              </span>
+              <span
+                className={`live-result-pill ${
+                  game.result === 'pending' ? 'is-pending' : 'is-done'
+                }`}
+              >
+                {formatResultLabel(game.result, false)}
+              </span>
+            </div>
+
+            <div className="live-duel">
+              <div className={`live-duel-side live-side-${myColor ?? 'white'} is-you`}>
+                <span className="live-duel-you">You</span>
+                {myColor && <ColorPill color={myColor} />}
+                <strong className="live-duel-name">{player.name}</strong>
+                <span className="live-duel-pts">
+                  {resultPointsLabel(myScore)}
+                  <small>pts total</small>
+                </span>
+              </div>
+              <div className="live-duel-mid" aria-hidden>
+                vs
+              </div>
+              <button
+                type="button"
+                className={`live-duel-side live-side-${oppColor ?? 'black'}`}
+                disabled={!opponent}
+                onClick={() => opponent && navigate(`/live/${token}/p/${opponent.id}`)}
+              >
+                {oppColor && <ColorPill color={oppColor} />}
+                <strong className="live-duel-name">{opponent?.name ?? '—'}</strong>
+                <span className="live-duel-pts">
+                  {oppScore != null ? resultPointsLabel(oppScore) : '—'}
+                  <small>pts total</small>
+                </span>
+              </button>
+            </div>
           </>
         )}
-
-        <div className="live-scores">
-          <div>
-            <span className="live-score-label">Your points</span>
-            <strong>{resultPointsLabel(myScore)}</strong>
-          </div>
-          {oppScore != null && opponent && (
-            <div>
-              <span className="live-score-label">{opponent.name}</span>
-              <strong>{resultPointsLabel(oppScore)}</strong>
-            </div>
-          )}
-        </div>
       </div>
 
       <section className="live-section">
@@ -565,44 +694,44 @@ function LivePlayerView({
         {history.length === 0 ? (
           <p className="form-hint">No games yet.</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Rd</th>
-                <th>Table</th>
-                <th>Color</th>
-                <th>Opponent</th>
-                <th>Result</th>
-                <th>Pts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((row) => (
-                <tr key={row.round}>
-                  <td>{row.round}</td>
-                  <td>{row.board ?? '—'}</td>
-                  <td>
-                    {row.color === 'white'
-                      ? 'W'
-                      : row.color === 'black'
-                        ? 'B'
-                        : '—'}
-                  </td>
-                  <td>
-                    {row.opponentId ? (
+          <ul className="live-history-list">
+            {history.map((row) => (
+              <li
+                key={row.round}
+                className={`live-history-card ${
+                  row.round === displayRound ? 'is-current' : ''
+                }`}
+              >
+                <div className="live-history-top">
+                  <span className="live-chip">Round {row.round}</span>
+                  {row.board != null && (
+                    <span className="live-chip live-chip-table">Table {row.board}</span>
+                  )}
+                  {row.color && <ColorPill color={row.color} />}
+                  <span className="live-history-result">
+                    {formatResultLabel(row.result, row.isBye)}
+                  </span>
+                </div>
+                <div className="live-history-body">
+                  <span>
+                    {row.isBye ? (
+                      'Bye'
+                    ) : row.opponentId ? (
                       <Link to={`/live/${token}/p/${row.opponentId}`}>
-                        {row.opponentName}
+                        vs {row.opponentName}
                       </Link>
                     ) : (
-                      row.opponentName
+                      `vs ${row.opponentName}`
                     )}
-                  </td>
-                  <td>{formatResultLabel(row.result, row.isBye)}</td>
-                  <td>{resultPointsLabel(row.scoreAfter)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </span>
+                  <span className="live-history-pts">
+                    {resultPointsLabel(row.scoreAfter)}
+                    <small> after</small>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
     </div>
