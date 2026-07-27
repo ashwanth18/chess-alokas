@@ -35,11 +35,12 @@ async function req<T>(
   const BASE_URL = resolveApiBaseUrl();
   try {
     const authHeaders = await getAuthHeaders();
+    const hasBody = fetchOptions.body != null && fetchOptions.body !== '';
     const res = await fetch(`${BASE_URL}${path}`, {
       signal: AbortSignal.timeout(timeoutMs ?? defaultTimeout),
       ...fetchOptions,
       headers: {
-        'Content-Type': 'application/json',
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
         ...authHeaders,
         ...(fetchOptions.headers ?? {}),
       },
@@ -351,21 +352,21 @@ export async function apiPublicLiveGet(token: string) {
 export async function apiPublicLiveEnable(tournamentId: string) {
   return req<{ publicToken: string | null; publicEnabled: boolean; updatedAt: string }>(
     `/tournaments/${tournamentId}/public-live/enable`,
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify({}) },
   );
 }
 
 export async function apiPublicLiveRotate(tournamentId: string) {
   return req<{ publicToken: string | null; publicEnabled: boolean; updatedAt: string }>(
     `/tournaments/${tournamentId}/public-live/rotate`,
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify({}) },
   );
 }
 
 export async function apiPublicLiveDisable(tournamentId: string) {
   return req<{ publicToken: string | null; publicEnabled: boolean; updatedAt: string }>(
     `/tournaments/${tournamentId}/public-live/disable`,
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify({}) },
   );
 }
 
