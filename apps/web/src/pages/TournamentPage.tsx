@@ -45,6 +45,7 @@ import {
 } from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { subscribeTournamentGames } from '../lib/gamesRealtime';
+import { subscribeTournamentGameCards } from '../lib/gameCardsRealtime';
 import {
   buildTableStickerPdf,
   downloadPdfBytes,
@@ -391,21 +392,57 @@ export default function TournamentPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [settingsOpen]);
 
+  // Live floor/director cards: Realtime → refetch; poll backup when Realtime fails.
   useEffect(() => {
     if (!id || tab !== 'pairings') {
       setRoundCards([]);
       return;
     }
     let cancelled = false;
-    void apiListGameCards(id, displayRound).then((res) => {
+    let realtimeOk = false;
+    let pollHandle: number | null = null;
+
+    const refreshCards = async () => {
+      const res = await apiListGameCards(id, displayRound);
       if (cancelled) return;
       if (res.ok && res.data?.cards) setRoundCards(res.data.cards);
       else setRoundCards([]);
-    });
+    };
+
+    void refreshCards();
+
+    const unsub = subscribeTournamentGameCards(
+      id,
+      () => {
+        void refreshCards();
+      },
+      (ok) => {
+        realtimeOk = ok;
+        if (cancelled) return;
+        if (!ok && pollHandle == null) {
+          pollHandle = window.setInterval(() => void refreshCards(), 4_000);
+        }
+        if (ok && pollHandle != null) {
+          window.clearInterval(pollHandle);
+          pollHandle = null;
+        }
+      },
+    );
+
+    if (!realtimeOk) {
+      pollHandle = window.setInterval(() => void refreshCards(), 4_000);
+    }
+
+    const onFocus = () => void refreshCards();
+    window.addEventListener('focus', onFocus);
+
     return () => {
       cancelled = true;
+      unsub();
+      if (pollHandle != null) window.clearInterval(pollHandle);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [id, tab, displayRound, games]);
+  }, [id, tab, displayRound]);
 
   const boardsForRound = (games ?? [])
     .filter((g) => {
