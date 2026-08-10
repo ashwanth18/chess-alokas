@@ -3429,6 +3429,45 @@ a.landing-download-option:hover {
 .floor-btn-red:hover:not(:disabled) {
   background: rgba(220, 80, 80, 0.35);
 }
+
+/* Higher contrast on cream white-player rows (director desk) */
+.player-row-white .floor-card-yellow {
+  background: rgba(180, 120, 0, 0.18);
+  color: #7a4a00;
+  border-color: rgba(140, 90, 0, 0.45);
+}
+.player-row-white .floor-card-red {
+  background: rgba(180, 40, 40, 0.16);
+  color: #9a1f1f;
+  border-color: rgba(150, 40, 40, 0.45);
+}
+.player-row-white .floor-btn-yellow {
+  background: rgba(200, 140, 20, 0.22);
+  border: 1px solid rgba(140, 90, 0, 0.55);
+  color: #6b4000;
+}
+.player-row-white .floor-btn-yellow:hover:not(:disabled) {
+  background: rgba(200, 140, 20, 0.35);
+  color: #543200;
+}
+.player-row-white .floor-btn-red {
+  background: rgba(200, 50, 50, 0.18);
+  border: 1px solid rgba(150, 40, 40, 0.55);
+  color: #8a1818;
+}
+.player-row-white .floor-btn-red:hover:not(:disabled) {
+  background: rgba(200, 50, 50, 0.3);
+  color: #6e1010;
+}
+.player-row-white .btn-ghost {
+  color: #3a2a1a;
+  border-color: rgba(74, 60, 40, 0.35);
+}
+.player-row-white .btn-ghost:hover:not(:disabled) {
+  background: rgba(74, 60, 40, 0.08);
+  color: #2a2018;
+}
+
 .desk-card-row {
   display: flex;
   flex-wrap: wrap;
