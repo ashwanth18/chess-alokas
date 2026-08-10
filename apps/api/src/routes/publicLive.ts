@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { countCardsForPlayer, emptyCardCounts } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 
 type Opts = { store: Store };
@@ -21,11 +22,19 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
       return reply.code(404).send({ error: 'Live page not found' });
     }
 
-    const [categories, participants, games] = await Promise.all([
+    const [categories, participants, games, cards] = await Promise.all([
       store.listCategories(tournament.id),
       store.listParticipants(tournament.id),
       store.listGames(tournament.id),
+      store.listTournamentGameCards(tournament.id),
     ]);
+
+    const cardsByGame = new Map<string, typeof cards>();
+    for (const card of cards) {
+      const list = cardsByGame.get(card.gameId) ?? [];
+      list.push(card);
+      cardsByGame.set(card.gameId, list);
+    }
 
     return {
       tournament: {
@@ -57,15 +66,25 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
         })),
       games: games
         .filter((g) => !g.deletedAt)
-        .map((g) => ({
-          round: g.round,
-          board: g.board,
-          whiteId: g.whiteId ?? null,
-          blackId: g.blackId ?? null,
-          result: g.result,
-          isBye: g.isBye,
-          categoryId: g.categoryId,
-        })),
+        .map((g) => {
+          const gameCards = cardsByGame.get(g.id) ?? [];
+          return {
+            id: g.id,
+            round: g.round,
+            board: g.board,
+            whiteId: g.whiteId ?? null,
+            blackId: g.blackId ?? null,
+            result: g.result,
+            isBye: g.isBye,
+            categoryId: g.categoryId,
+            whiteCards: g.whiteId
+              ? countCardsForPlayer(gameCards, g.whiteId)
+              : emptyCardCounts(),
+            blackCards: g.blackId
+              ? countCardsForPlayer(gameCards, g.blackId)
+              : emptyCardCounts(),
+          };
+        }),
     };
   });
 };

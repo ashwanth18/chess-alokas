@@ -233,6 +233,11 @@ export type FloorTableRow = {
   createdAt: string;
 };
 
+export type PlayerCardCounts = {
+  illegalMove: number;
+  warning: number;
+};
+
 export type FloorTableView = {
   slug: string;
   tableNumber: number;
@@ -240,11 +245,17 @@ export type FloorTableView = {
   tournamentId: string;
   pinRound: number | null;
   round: number | null;
+  gameId: string | null;
+  whiteId: string | null;
+  blackId: string | null;
   whiteName: string | null;
   blackName: string | null;
   status: 'needs_pin' | 'pending' | 'locked' | 'bye' | 'no_game' | 'confirmed_closed';
   result: string | null;
   sessionOk: boolean;
+  whiteCards: PlayerCardCounts;
+  blackCards: PlayerCardCounts;
+  forfeitReason: string | null;
 };
 
 export async function apiFloorPrepare(
@@ -312,6 +323,78 @@ export async function apiPublicTableResult(
   );
 }
 
+export async function apiPublicTableCard(
+  slug: string,
+  sessionToken: string,
+  body: {
+    playerSide: 'white' | 'black';
+    cardType: 'illegal_move' | 'warning';
+    note?: string;
+    arbiterName: string;
+  },
+) {
+  return req<{
+    ok: true;
+    table: FloorTableView;
+    forfeited: boolean;
+    forfeitReason: string | null;
+  }>(`/public/tables/${encodeURIComponent(slug)}/cards`, {
+    method: 'POST',
+    headers: { 'X-Arbiter-Session': sessionToken },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiListGameCards(tournamentId: string, round?: number) {
+  const qs = round != null ? `?round=${round}` : '';
+  return req<{ cards: Array<{
+    id: string;
+    gameId: string;
+    playerId: string;
+    cardType: 'illegal_move' | 'warning';
+    note?: string | null;
+    createdAt: string;
+  }> }>(`/tournaments/${tournamentId}/game-cards${qs}`);
+}
+
+export async function apiDirectorIssueCard(
+  tournamentId: string,
+  gameId: string,
+  body: {
+    playerSide?: 'white' | 'black';
+    playerId?: string;
+    cardType: 'illegal_move' | 'warning';
+    note?: string;
+    actorName?: string;
+  },
+) {
+  return req<{
+    ok: true;
+    game: Game;
+    whiteCards: PlayerCardCounts;
+    blackCards: PlayerCardCounts;
+    forfeited: boolean;
+    forfeitReason: string | null;
+  }>(`/tournaments/${tournamentId}/games/${gameId}/cards`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiDirectorRemoveCard(
+  tournamentId: string,
+  gameId: string,
+  cardId: string,
+) {
+  return req<{
+    ok: true;
+    whiteCards: PlayerCardCounts;
+    blackCards: PlayerCardCounts;
+  }>(`/tournaments/${tournamentId}/games/${gameId}/cards/${cardId}`, {
+    method: 'DELETE',
+  });
+}
+
 // ── Public live viewer ───────────────────────────────────────────────────────
 
 export type PublicLivePayload = {
@@ -335,6 +418,7 @@ export type PublicLivePayload = {
     categoryIds: string[];
   }>;
   games: Array<{
+    id?: string;
     round: number;
     board: number;
     whiteId: string | null;
@@ -342,6 +426,8 @@ export type PublicLivePayload = {
     result: string;
     isBye: boolean;
     categoryId: string;
+    whiteCards?: PlayerCardCounts;
+    blackCards?: PlayerCardCounts;
   }>;
 };
 

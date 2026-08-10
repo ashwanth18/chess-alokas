@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { ArbiterScorableResult } from '@chess-alokas/shared';
+import type { ArbiterScorableResult, GameCardType } from '@chess-alokas/shared';
 import {
+  ILLEGAL_MOVE_LIMIT,
+  WARNING_LIMIT,
+  emptyCardCounts,
+} from '@chess-alokas/shared';
+import {
+  apiPublicTableCard,
   apiPublicTableGet,
   apiPublicTableResult,
   apiPublicTableSession,
   checkOnline,
   type FloorTableView,
+  type PlayerCardCounts,
 } from '../api/client';
 import ColorSide from '../components/ColorSide';
 import TableQrScanner from '../components/TableQrScanner';
@@ -64,25 +71,98 @@ function resultLabel(result: string | null): string {
   return opt ? `${opt.label} (${opt.hint})` : result;
 }
 
+function CardChips({ counts }: { counts: PlayerCardCounts }) {
+  return (
+    <div className="floor-card-chips">
+      <span className="floor-card-chip floor-card-yellow" title="Warnings">
+        🟡 {counts.warning}/{WARNING_LIMIT}
+      </span>
+      <span className="floor-card-chip floor-card-red" title="Illegal moves">
+        🔴 {counts.illegalMove}/{ILLEGAL_MOVE_LIMIT}
+      </span>
+    </div>
+  );
+}
+
 function Matchup({
   whiteName,
   blackName,
+  whiteCards,
+  blackCards,
+  canIssue,
+  busy,
+  online,
+  onIssue,
 }: {
   whiteName: string | null;
   blackName: string | null;
+  whiteCards?: PlayerCardCounts | null;
+  blackCards?: PlayerCardCounts | null;
+  canIssue?: boolean;
+  busy?: boolean;
+  online?: boolean;
+  onIssue?: (side: 'white' | 'black', cardType: GameCardType) => void;
 }) {
+  const w = whiteCards ?? emptyCardCounts();
+  const b = blackCards ?? emptyCardCounts();
   return (
     <div className="table-score-matchup">
       <div className="table-score-player table-score-player-white">
         <ColorSide color="white" />
-        <strong className="table-score-player-name">{whiteName ?? '—'}</strong>
+        <div className="table-score-player-meta">
+          <strong className="table-score-player-name">{whiteName ?? '—'}</strong>
+          <CardChips counts={w} />
+          {canIssue && onIssue && (
+            <div className="floor-card-actions">
+              <button
+                type="button"
+                className="btn btn-sm floor-btn-yellow"
+                disabled={busy || !online || w.warning >= WARNING_LIMIT}
+                onClick={() => onIssue('white', 'warning')}
+              >
+                Warning
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm floor-btn-red"
+                disabled={busy || !online || w.illegalMove >= ILLEGAL_MOVE_LIMIT}
+                onClick={() => onIssue('white', 'illegal_move')}
+              >
+                Illegal
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       <div className="table-score-vs" aria-hidden>
         vs
       </div>
       <div className="table-score-player table-score-player-black">
         <ColorSide color="black" onDark />
-        <strong className="table-score-player-name">{blackName ?? '—'}</strong>
+        <div className="table-score-player-meta">
+          <strong className="table-score-player-name">{blackName ?? '—'}</strong>
+          <CardChips counts={b} />
+          {canIssue && onIssue && (
+            <div className="floor-card-actions">
+              <button
+                type="button"
+                className="btn btn-sm floor-btn-yellow"
+                disabled={busy || !online || b.warning >= WARNING_LIMIT}
+                onClick={() => onIssue('black', 'warning')}
+              >
+                Warning
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm floor-btn-red"
+                disabled={busy || !online || b.illegalMove >= ILLEGAL_MOVE_LIMIT}
+                onClick={() => onIssue('black', 'illegal_move')}
+              >
+                Illegal
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -97,6 +177,11 @@ export default function TableScoringPage() {
   const [pin, setPin] = useState('');
   const [selected, setSelected] = useState<ArbiterScorableResult | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [cardPending, setCardPending] = useState<{
+    side: 'white' | 'black';
+    cardType: GameCardType;
+  } | null>(null);
+  const [cardNote, setCardNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -195,6 +280,45 @@ export default function TableScoringPage() {
       pin: pin.trim(),
       pinRound: res.data.table.pinRound,
     });
+  }
+
+  async function issueCard() {
+    if (!slug || !token || !cardPending || busy) return;
+    if (!online) {
+      setError('No connection — card was not saved.');
+      return;
+    }
+    const name = arbiterName.trim();
+    if (name.length < 1) {
+      setError('Enter your name before issuing a card');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const res = await apiPublicTableCard(slug, token, {
+      playerSide: cardPending.side,
+      cardType: cardPending.cardType,
+      note: cardNote.trim() || undefined,
+      arbiterName: name,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(networkErrorMessage(res.error));
+      if (/PIN|session|expired/i.test(res.error)) {
+        clearSession(slug);
+        setToken(null);
+        void refresh(null);
+      }
+      return;
+    }
+    setView(res.data.table);
+    setCardPending(null);
+    setCardNote('');
+    setConfirming(false);
+    setSelected(null);
+    if (res.data.forfeited) {
+      setError(null);
+    }
   }
 
   async function confirmResult() {
@@ -348,19 +472,90 @@ export default function TableScoringPage() {
         <div className="table-score-card is-locked">
           <h2>Result locked</h2>
           <p className="table-score-round">Round {view.round}</p>
-          <Matchup whiteName={view.whiteName} blackName={view.blackName} />
+          <Matchup
+            whiteName={view.whiteName}
+            blackName={view.blackName}
+            whiteCards={view.whiteCards}
+            blackCards={view.blackCards}
+          />
           <p className="table-score-result">{resultLabel(view.result)}</p>
+          {view.forfeitReason && (
+            <p className="form-hint stage-banner-warn">Auto-forfeit: {view.forfeitReason}</p>
+          )}
           <p className="form-hint">This result cannot be changed from the floor.</p>
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'pending' && !confirming && (
+      {view && view.sessionOk && view.status === 'pending' && cardPending && (
+        <div className="table-score-card">
+          <h2>
+            Issue {cardPending.cardType === 'warning' ? 'yellow warning' : 'red illegal-move'} card
+          </h2>
+          <p className="table-score-round">
+            {cardPending.side === 'white' ? view.whiteName : view.blackName}
+            {' · '}
+            {cardPending.cardType === 'warning'
+              ? `${(view[cardPending.side === 'white' ? 'whiteCards' : 'blackCards']?.warning ?? 0) + 1}/${WARNING_LIMIT}`
+              : `${(view[cardPending.side === 'white' ? 'whiteCards' : 'blackCards']?.illegalMove ?? 0) + 1}/${ILLEGAL_MOVE_LIMIT}`}
+          </p>
+          <p className="form-hint stage-banner-warn">
+            {cardPending.cardType === 'illegal_move'
+              ? `2nd illegal move = instant loss for this player.`
+              : `3rd warning = instant loss for this player.`}
+          </p>
+          <label>
+            Note (optional)
+            <input
+              className="input"
+              value={cardNote}
+              onChange={(e) => setCardNote(e.target.value)}
+              maxLength={200}
+              placeholder="e.g. touched piece / phones"
+            />
+          </label>
+          <div className="table-score-actions">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={() => {
+                setCardPending(null);
+                setCardNote('');
+              }}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              className={`btn ${cardPending.cardType === 'warning' ? 'floor-btn-yellow' : 'floor-btn-red'}`}
+              disabled={busy || !online || arbiterName.trim().length < 1}
+              onClick={() => void issueCard()}
+            >
+              {busy ? 'Saving…' : 'Confirm card'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {view && view.sessionOk && view.status === 'pending' && !confirming && !cardPending && (
         <div className="table-score-card">
           <p className="table-score-round">Round {view.round}</p>
           {arbiterName.trim() && (
             <p className="form-hint">Scoring as <strong>{arbiterName.trim()}</strong></p>
           )}
-          <Matchup whiteName={view.whiteName} blackName={view.blackName} />
+          <Matchup
+            whiteName={view.whiteName}
+            blackName={view.blackName}
+            whiteCards={view.whiteCards}
+            blackCards={view.blackCards}
+            canIssue
+            busy={busy}
+            online={online}
+            onIssue={(side, cardType) => {
+              setCardPending({ side, cardType });
+              setCardNote('');
+            }}
+          />
           <h2>Select result</h2>
           <div className="table-score-options">
             {RESULT_OPTIONS.map((opt) => (
@@ -386,14 +581,19 @@ export default function TableScoringPage() {
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'pending' && confirming && selected && (
+      {view && view.sessionOk && view.status === 'pending' && confirming && selected && !cardPending && (
         <div className="table-score-card">
           <h2>Confirm result</h2>
           <p className="table-score-round">
             Round {view.round} · Table {view.tableNumber}
             {arbiterName.trim() ? ` · ${arbiterName.trim()}` : ''}
           </p>
-          <Matchup whiteName={view.whiteName} blackName={view.blackName} />
+          <Matchup
+            whiteName={view.whiteName}
+            blackName={view.blackName}
+            whiteCards={view.whiteCards}
+            blackCards={view.blackCards}
+          />
           <p className="table-score-result">{resultLabel(selected)}</p>
           <p className="form-hint stage-banner-warn">
             You cannot change this after confirm. Double-check names and result.

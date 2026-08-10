@@ -5,6 +5,8 @@ import type {
   Category,
   Participant,
   Game,
+  GameCard,
+  GameCardType,
   SyncPushItem,
   FilterGroup,
   TournamentStyle,
@@ -86,6 +88,15 @@ export interface Store {
     round: number,
   ): Promise<Game | null>;
 
+  // Discipline cards (yellow/red)
+  listGameCards(gameId: string, includeDeleted?: boolean): Promise<GameCard[]>;
+  listTournamentGameCards(
+    tournamentId: string,
+    filters?: { round?: number; gameId?: string },
+  ): Promise<GameCard[]>;
+  createGameCard(card: GameCard): Promise<GameCard>;
+  softDeleteGameCard(id: string): Promise<GameCard | null>;
+
   // Sync
   pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult>;
   pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void>;
@@ -101,6 +112,7 @@ export class MemoryStore implements Store {
   private participants = new Map<string, Participant>();
   private games = new Map<string, Game>();
   private tables = new Map<string, TournamentTable>();
+  private gameCards = new Map<string, GameCard>();
   private pinMeta = new Map<string, { hash: string; round: number }>();
   private resultEvents: Array<{
     id: string;
@@ -392,6 +404,54 @@ export class MemoryStore implements Store {
     return matches[0]!;
   }
 
+  async listGameCards(gameId: string, includeDeleted = false): Promise<GameCard[]> {
+    return [...this.gameCards.values()]
+      .filter((c) => c.gameId === gameId && (includeDeleted || !c.deletedAt))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async listTournamentGameCards(
+    tournamentId: string,
+    filters?: { round?: number; gameId?: string },
+  ): Promise<GameCard[]> {
+    let cards = [...this.gameCards.values()].filter(
+      (c) => c.tournamentId === tournamentId && !c.deletedAt,
+    );
+    if (filters?.gameId) {
+      cards = cards.filter((c) => c.gameId === filters.gameId);
+    }
+    if (filters?.round != null) {
+      const gameIds = new Set(
+        [...this.games.values()]
+          .filter(
+            (g) =>
+              g.tournamentId === tournamentId &&
+              !g.deletedAt &&
+              g.round === filters.round,
+          )
+          .map((g) => g.id),
+      );
+      cards = cards.filter((c) => gameIds.has(c.gameId));
+    }
+    return cards.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async createGameCard(card: GameCard): Promise<GameCard> {
+    this.gameCards.set(card.id, card);
+    return card;
+  }
+
+  async softDeleteGameCard(id: string): Promise<GameCard | null> {
+    const existing = this.gameCards.get(id);
+    if (!existing || existing.deletedAt) return null;
+    const updated: GameCard = {
+      ...existing,
+      deletedAt: new Date().toISOString(),
+    };
+    this.gameCards.set(id, updated);
+    return updated;
+  }
+
   // ---- Sync ----
 
   async pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult> {
@@ -620,6 +680,20 @@ interface GameRow {
   deleted_at: Date | string | null;
 }
 
+interface GameCardRow {
+  id: string;
+  game_id: string;
+  tournament_id: string;
+  player_id: string;
+  card_type: string;
+  note: string | null;
+  actor_role: string;
+  actor_name: string | null;
+  actor_user_id: string | null;
+  created_at: Date | string;
+  deleted_at: Date | string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers – row → domain type
 // ---------------------------------------------------------------------------
@@ -712,6 +786,23 @@ function rowToGame(row: GameRow): Game {
       role === 'floor' || role === 'director' ? role : null,
     resultOverrideCount: row.result_override_count ?? 0,
     updatedAt: toIso(row.updated_at)!,
+    deletedAt: toIso(row.deleted_at) ?? undefined,
+  };
+}
+
+function rowToGameCard(row: GameCardRow): GameCard {
+  const role = row.actor_role;
+  return {
+    id: row.id,
+    gameId: row.game_id,
+    tournamentId: row.tournament_id,
+    playerId: row.player_id,
+    cardType: row.card_type as GameCardType,
+    note: row.note ?? null,
+    actorRole: role === 'floor' || role === 'director' ? role : 'floor',
+    actorName: row.actor_name ?? null,
+    actorUserId: row.actor_user_id ?? null,
+    createdAt: toIso(row.created_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
   };
 }
@@ -1122,6 +1213,68 @@ export class PostgresStore implements Store {
     `;
     if (rows.length !== 1) return null;
     return rowToGame(rows[0]!);
+  }
+
+  async listGameCards(gameId: string, includeDeleted = false): Promise<GameCard[]> {
+    const rows = includeDeleted
+      ? await this.sql<GameCardRow[]>`
+          SELECT * FROM game_cards WHERE game_id = ${gameId} ORDER BY created_at ASC`
+      : await this.sql<GameCardRow[]>`
+          SELECT * FROM game_cards
+          WHERE game_id = ${gameId} AND deleted_at IS NULL
+          ORDER BY created_at ASC`;
+    return rows.map(rowToGameCard);
+  }
+
+  async listTournamentGameCards(
+    tournamentId: string,
+    filters?: { round?: number; gameId?: string },
+  ): Promise<GameCard[]> {
+    if (filters?.gameId) {
+      return this.listGameCards(filters.gameId);
+    }
+    if (filters?.round != null) {
+      const rows = await this.sql<GameCardRow[]>`
+        SELECT c.* FROM game_cards c
+        INNER JOIN games g ON g.id = c.game_id
+        WHERE c.tournament_id = ${tournamentId}
+          AND c.deleted_at IS NULL
+          AND g.deleted_at IS NULL
+          AND g.round = ${filters.round}
+        ORDER BY c.created_at ASC
+      `;
+      return rows.map(rowToGameCard);
+    }
+    const rows = await this.sql<GameCardRow[]>`
+      SELECT * FROM game_cards
+      WHERE tournament_id = ${tournamentId} AND deleted_at IS NULL
+      ORDER BY created_at ASC
+    `;
+    return rows.map(rowToGameCard);
+  }
+
+  async createGameCard(card: GameCard): Promise<GameCard> {
+    const rows = await this.sql<GameCardRow[]>`
+      INSERT INTO game_cards
+        (id, game_id, tournament_id, player_id, card_type, note, actor_role, actor_name, actor_user_id, created_at, deleted_at)
+      VALUES
+        (${card.id}, ${card.gameId}, ${card.tournamentId}, ${card.playerId}, ${card.cardType},
+         ${card.note ?? null}, ${card.actorRole}, ${card.actorName ?? null}, ${card.actorUserId ?? null},
+         ${card.createdAt}, ${card.deletedAt ?? null})
+      RETURNING *
+    `;
+    return rowToGameCard(rows[0]!);
+  }
+
+  async softDeleteGameCard(id: string): Promise<GameCard | null> {
+    const now = new Date().toISOString();
+    const rows = await this.sql<GameCardRow[]>`
+      UPDATE game_cards SET deleted_at = ${now}
+      WHERE id = ${id} AND deleted_at IS NULL
+      RETURNING *
+    `;
+    const row = rows[0];
+    return row ? rowToGameCard(row) : null;
   }
 
   async softDeleteGamesForRound(

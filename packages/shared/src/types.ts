@@ -180,6 +180,56 @@ export const GameResultEventSchema = z.object({
 });
 export type GameResultEvent = z.infer<typeof GameResultEventSchema>;
 
+/** Red card = illegal move; yellow card = warning / misconduct. */
+export const GameCardTypeSchema = z.enum(['illegal_move', 'warning']);
+export type GameCardType = z.infer<typeof GameCardTypeSchema>;
+
+/** 2nd illegal move (red) → instant loss. */
+export const ILLEGAL_MOVE_LIMIT = 2;
+/** 3rd warning (yellow) → instant loss. */
+export const WARNING_LIMIT = 3;
+
+export function cardLimit(cardType: GameCardType): number {
+  return cardType === 'illegal_move' ? ILLEGAL_MOVE_LIMIT : WARNING_LIMIT;
+}
+
+export const GameCardSchema = z.object({
+  id: z.string().uuid(),
+  gameId: z.string().uuid(),
+  tournamentId: z.string().uuid(),
+  playerId: z.string().uuid(),
+  cardType: GameCardTypeSchema,
+  note: z.string().nullable().optional(),
+  actorRole: ResultActorRoleSchema,
+  actorName: z.string().nullable().optional(),
+  actorUserId: z.string().uuid().nullable().optional(),
+  createdAt: z.string().datetime(),
+  deletedAt: z.string().datetime().nullable().optional(),
+});
+export type GameCard = z.infer<typeof GameCardSchema>;
+
+export type PlayerCardCounts = {
+  illegalMove: number;
+  warning: number;
+};
+
+export function emptyCardCounts(): PlayerCardCounts {
+  return { illegalMove: 0, warning: 0 };
+}
+
+export function countCardsForPlayer(
+  cards: Array<{ playerId: string; cardType: GameCardType; deletedAt?: string | null }>,
+  playerId: string,
+): PlayerCardCounts {
+  const counts = emptyCardCounts();
+  for (const c of cards) {
+    if (c.deletedAt || c.playerId !== playerId) continue;
+    if (c.cardType === 'illegal_move') counts.illegalMove += 1;
+    else counts.warning += 1;
+  }
+  return counts;
+}
+
 export const CreateTournamentInputSchema = z.object({
   name: z.string().min(1),
   date: z.string().nullable().optional(),

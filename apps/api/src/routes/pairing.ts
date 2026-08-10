@@ -1,6 +1,12 @@
 import type { FastifyPluginAsync, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
-import { GameResultSchema, isStyleImplemented } from '@chess-alokas/shared';
+import {
+  GameCardTypeSchema,
+  GameResultSchema,
+  countCardsForPlayer,
+  emptyCardCounts,
+  isStyleImplemented,
+} from '@chess-alokas/shared';
 import {
   pairRound,
   computeStandings,
@@ -11,6 +17,7 @@ import type { EnginePlayer, PastGame } from '@chess-alokas/pairing-engine';
 import type { Participant, Game, Category } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth } from '../auth.js';
+import { issueGameCard } from '../lib/gameCards.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -271,6 +278,138 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       return updated;
     },
   );
+
+  // -------------------------------------------------------------------------
+  // GET /tournaments/:id/game-cards?round=
+  // -------------------------------------------------------------------------
+  app.get<{
+    Params: { id: string };
+    Querystring: { round?: string };
+  }>('/tournaments/:id/game-cards', async (request, reply) => {
+    const { id: tournamentId } = request.params;
+    const tournament = await store.getTournament(tournamentId);
+    if (!tournament || tournament.deletedAt) {
+      return reply.code(404).send({ error: 'Tournament not found' });
+    }
+    const round =
+      request.query.round != null ? parseInt(request.query.round, 10) : undefined;
+    if (request.query.round != null && (isNaN(round!) || round! < 1)) {
+      return reply.code(400).send({ error: 'Invalid round' });
+    }
+    const cards = await store.listTournamentGameCards(tournamentId, {
+      round: round && !isNaN(round) ? round : undefined,
+    });
+    return { cards };
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /tournaments/:id/games/:gameId/cards
+  // -------------------------------------------------------------------------
+  app.post<{
+    Params: { id: string; gameId: string };
+    Body: unknown;
+  }>('/tournaments/:id/games/:gameId/cards', async (request, reply) => {
+    const { id: tournamentId, gameId } = request.params;
+    const parsed = z
+      .object({
+        playerSide: z.enum(['white', 'black']).optional(),
+        playerId: z.string().uuid().optional(),
+        cardType: GameCardTypeSchema,
+        note: z.string().trim().max(200).optional(),
+        actorName: z.string().trim().max(80).optional(),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Invalid card payload' });
+    }
+
+    const tournament = await store.getTournament(tournamentId);
+    if (!tournament || tournament.deletedAt) {
+      return reply.code(404).send({ error: 'Tournament not found' });
+    }
+    const game = await store.getGame(gameId);
+    if (!game || game.deletedAt || game.tournamentId !== tournamentId) {
+      return reply.code(404).send({ error: 'Game not found' });
+    }
+
+    let playerId = parsed.data.playerId ?? null;
+    if (!playerId && parsed.data.playerSide) {
+      playerId =
+        parsed.data.playerSide === 'white' ? game.whiteId : game.blackId;
+    }
+    if (!playerId) {
+      return reply.code(400).send({ error: 'playerId or playerSide required' });
+    }
+
+    const issued = await issueGameCard(store, {
+      game,
+      playerId,
+      cardType: parsed.data.cardType,
+      note: parsed.data.note,
+      actorRole: 'director',
+      actorName: parsed.data.actorName || 'Director',
+      actorUserId: request.userId ?? null,
+      confirmedRounds: tournament.confirmedRounds ?? 0,
+    });
+    if (!issued.ok) {
+      return reply.code(issued.status).send({ error: issued.error });
+    }
+    return {
+      ok: true,
+      card: issued.card,
+      game: issued.game,
+      whiteCards: issued.whiteCounts,
+      blackCards: issued.blackCounts,
+      forfeited: issued.forfeited,
+      forfeitReason: issued.forfeitReason,
+    };
+  });
+
+  // -------------------------------------------------------------------------
+  // DELETE /tournaments/:id/games/:gameId/cards/:cardId
+  // -------------------------------------------------------------------------
+  app.delete<{
+    Params: { id: string; gameId: string; cardId: string };
+  }>('/tournaments/:id/games/:gameId/cards/:cardId', async (request, reply) => {
+    const { id: tournamentId, gameId, cardId } = request.params;
+    const tournament = await store.getTournament(tournamentId);
+    if (!tournament || tournament.deletedAt) {
+      return reply.code(404).send({ error: 'Tournament not found' });
+    }
+    const game = await store.getGame(gameId);
+    if (!game || game.deletedAt || game.tournamentId !== tournamentId) {
+      return reply.code(404).send({ error: 'Game not found' });
+    }
+    if (game.result !== 'pending' || game.resultLockedAt) {
+      return reply
+        .code(409)
+        .send({ error: 'Cannot remove cards after the result is entered or locked' });
+    }
+    if ((tournament.confirmedRounds ?? 0) >= game.round) {
+      return reply.code(409).send({ error: 'Round is confirmed — cards are locked' });
+    }
+
+    const cards = await store.listGameCards(gameId);
+    const target = cards.find((c) => c.id === cardId);
+    if (!target) {
+      return reply.code(404).send({ error: 'Card not found' });
+    }
+    const removed = await store.softDeleteGameCard(cardId);
+    if (!removed) {
+      return reply.code(404).send({ error: 'Card not found' });
+    }
+    const remaining = await store.listGameCards(gameId);
+    return {
+      ok: true,
+      card: removed,
+      whiteCards: game.whiteId
+        ? countCardsForPlayer(remaining, game.whiteId)
+        : emptyCardCounts(),
+      blackCards: game.blackId
+        ? countCardsForPlayer(remaining, game.blackId)
+        : emptyCardCounts(),
+    };
+  });
 
   // -------------------------------------------------------------------------
   // GET /tournaments/:id/standings?categoryId=

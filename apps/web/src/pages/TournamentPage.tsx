@@ -2,7 +2,13 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { pairRound, computeStandings, computeSectionStandings } from '@chess-alokas/pairing-engine';
-import type { FilterGroup, FilterOp, GameResult } from '@chess-alokas/shared';
+import type { FilterGroup, FilterOp, GameCardType, GameResult } from '@chess-alokas/shared';
+import {
+  ILLEGAL_MOVE_LIMIT,
+  WARNING_LIMIT,
+  countCardsForPlayer,
+  emptyCardCounts,
+} from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import ColorSide from '../components/ColorSide';
 import {
@@ -30,6 +36,9 @@ import {
   apiFloorRotatePin,
   apiFloorListTables,
   apiDirectorSetGameResult,
+  apiDirectorIssueCard,
+  apiDirectorRemoveCard,
+  apiListGameCards,
   apiPublicLiveEnable,
   apiPublicLiveRotate,
   apiPublicLiveDisable,
@@ -169,6 +178,18 @@ export default function TournamentPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [liveBusy, setLiveBusy] = useState(false);
   const [liveMsg, setLiveMsg] = useState<string | null>(null);
+  const [roundCards, setRoundCards] = useState<
+    Array<{
+      id: string;
+      gameId: string;
+      playerId: string;
+      cardType: 'illegal_move' | 'warning';
+      note?: string | null;
+      createdAt: string;
+    }>
+  >([]);
+  const [cardBusyId, setCardBusyId] = useState<string | null>(null);
+  const [cardMsg, setCardMsg] = useState<string | null>(null);
 
   const tournament = useLiveQuery(() => (id ? db.tournaments.get(id) : undefined), [id]);
   const categories = useLiveQuery(
@@ -369,6 +390,22 @@ export default function TournamentPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!id || tab !== 'pairings') {
+      setRoundCards([]);
+      return;
+    }
+    let cancelled = false;
+    void apiListGameCards(id, displayRound).then((res) => {
+      if (cancelled) return;
+      if (res.ok && res.data?.cards) setRoundCards(res.data.cards);
+      else setRoundCards([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, tab, displayRound, games]);
 
   const boardsForRound = (games ?? [])
     .filter((g) => {
@@ -869,6 +906,83 @@ export default function TournamentPage() {
       void applyDirectorResult(gameId, result, false);
     },
     [id, tournament, games, applyDirectorResult],
+  );
+
+  const issueDirectorCard = useCallback(
+    async (gameId: string, side: 'white' | 'black', cardType: GameCardType) => {
+      if (!id || !tournament) return;
+      const game = (games ?? []).find((g) => g.id === gameId);
+      if (!game || game.isBye || game.resultLockedAt) return;
+      if (!canEditRoundResults(tournament, game.round)) return;
+      const pid = side === 'white' ? game.whiteId : game.blackId;
+      const playerName = (participants ?? []).find((p) => p.id === pid)?.name;
+      const label = cardType === 'warning' ? 'yellow warning' : 'red illegal-move';
+      if (!window.confirm(`Issue ${label} card to ${playerName ?? side}?`)) return;
+      setCardBusyId(gameId);
+      setCardMsg(null);
+      setPairError(null);
+      try {
+        const res = await apiDirectorIssueCard(id, gameId, {
+          playerSide: side,
+          cardType,
+          actorName: auth.displayName || auth.user?.email?.split('@')[0] || 'Director',
+        });
+        if (!res.ok || !res.data) {
+          setPairError(res.error || 'Could not issue card');
+          return;
+        }
+        const now = nowIso();
+        await db.games.update(gameId, {
+          result: res.data.game.result,
+          resultEnteredByName: res.data.game.resultEnteredByName ?? undefined,
+          resultEnteredByRole: res.data.game.resultEnteredByRole ?? undefined,
+          resultOverrideCount: res.data.game.resultOverrideCount ?? undefined,
+          resultLockedAt: res.data.game.resultLockedAt ?? null,
+          updatedAt: res.data.game.updatedAt || now,
+          dirty: 0,
+        });
+        const cardsRes = await apiListGameCards(id, displayRound);
+        if (cardsRes.ok && cardsRes.data?.cards) setRoundCards(cardsRes.data.cards);
+        if (res.data.forfeited) {
+          setCardMsg(
+            res.data.forfeitReason
+              ? `Auto-forfeit: ${res.data.forfeitReason}`
+              : 'Auto-forfeit applied',
+          );
+        }
+      } finally {
+        setCardBusyId(null);
+      }
+    },
+    [id, tournament, games, participants, auth.displayName, auth.user?.email, displayRound],
+  );
+
+  const undoLastDirectorCard = useCallback(
+    async (gameId: string, playerId: string) => {
+      if (!id || !tournament) return;
+      const game = (games ?? []).find((g) => g.id === gameId);
+      if (!game || game.result !== 'pending' || game.resultLockedAt) return;
+      if (!canEditRoundResults(tournament, game.round)) return;
+      const last = [...roundCards]
+        .filter((c) => c.gameId === gameId && c.playerId === playerId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (!last) return;
+      if (!window.confirm('Remove the last card for this player?')) return;
+      setCardBusyId(gameId);
+      setPairError(null);
+      try {
+        const res = await apiDirectorRemoveCard(id, gameId, last.id);
+        if (!res.ok) {
+          setPairError(res.error || 'Could not remove card');
+          return;
+        }
+        const cardsRes = await apiListGameCards(id, displayRound);
+        if (cardsRes.ok && cardsRes.data?.cards) setRoundCards(cardsRes.data.cards);
+      } finally {
+        setCardBusyId(null);
+      }
+    },
+    [id, tournament, games, roundCards, displayRound],
   );
 
   const confirmRoundComplete = useCallback(async () => {
@@ -1693,10 +1807,29 @@ export default function TournamentPage() {
               <p>No boards match &ldquo;{boardSearch.trim()}&rdquo;.</p>
             </div>
           ) : (
+            <>
+            {cardMsg && (
+              <p className="form-hint stage-banner-warn" role="status">
+                {cardMsg}
+              </p>
+            )}
             <div className="boards-list">
               {filteredBoards.map((game) => {
                 const white = game.whiteId ? playerById.get(game.whiteId) : null;
                 const black = game.blackId ? playerById.get(game.blackId) : null;
+                const gameCards = roundCards.filter((c) => c.gameId === game.id);
+                const whiteCounts = game.whiteId
+                  ? countCardsForPlayer(gameCards, game.whiteId)
+                  : emptyCardCounts();
+                const blackCounts = game.blackId
+                  ? countCardsForPlayer(gameCards, game.blackId)
+                  : emptyCardCounts();
+                const canCard =
+                  Boolean(tournament) &&
+                  !game.isBye &&
+                  !game.resultLockedAt &&
+                  game.result === 'pending' &&
+                  canEditRoundResults(tournament!, game.round);
                 return (
                   <div key={game.id} className={`board-card ${game.isBye ? 'board-bye' : ''}`}>
                     <div className="board-card-head">
@@ -1727,6 +1860,53 @@ export default function TournamentPage() {
                         {white?.rating != null && (
                           <span className="rating-tag">{white.rating}</span>
                         )}
+                        {!game.isBye && (
+                          <div className="desk-card-row">
+                            <span className="floor-card-chip floor-card-yellow">
+                              🟡 {whiteCounts.warning}/{WARNING_LIMIT}
+                            </span>
+                            <span className="floor-card-chip floor-card-red">
+                              🔴 {whiteCounts.illegalMove}/{ILLEGAL_MOVE_LIMIT}
+                            </span>
+                            {canCard && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm floor-btn-yellow"
+                                  disabled={cardBusyId === game.id}
+                                  onClick={() =>
+                                    void issueDirectorCard(game.id, 'white', 'warning')
+                                  }
+                                >
+                                  Warning
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm floor-btn-red"
+                                  disabled={cardBusyId === game.id}
+                                  onClick={() =>
+                                    void issueDirectorCard(game.id, 'white', 'illegal_move')
+                                  }
+                                >
+                                  Illegal
+                                </button>
+                                {(whiteCounts.warning > 0 || whiteCounts.illegalMove > 0) &&
+                                  game.whiteId && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-ghost"
+                                      disabled={cardBusyId === game.id}
+                                      onClick={() =>
+                                        void undoLastDirectorCard(game.id, game.whiteId!)
+                                      }
+                                    >
+                                      Undo last
+                                    </button>
+                                  )}
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {!game.isBye && (
                         <div className="player-row player-row-black">
@@ -1735,6 +1915,51 @@ export default function TournamentPage() {
                           {black?.rating != null && (
                             <span className="rating-tag">{black.rating}</span>
                           )}
+                          <div className="desk-card-row">
+                            <span className="floor-card-chip floor-card-yellow">
+                              🟡 {blackCounts.warning}/{WARNING_LIMIT}
+                            </span>
+                            <span className="floor-card-chip floor-card-red">
+                              🔴 {blackCounts.illegalMove}/{ILLEGAL_MOVE_LIMIT}
+                            </span>
+                            {canCard && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm floor-btn-yellow"
+                                  disabled={cardBusyId === game.id}
+                                  onClick={() =>
+                                    void issueDirectorCard(game.id, 'black', 'warning')
+                                  }
+                                >
+                                  Warning
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm floor-btn-red"
+                                  disabled={cardBusyId === game.id}
+                                  onClick={() =>
+                                    void issueDirectorCard(game.id, 'black', 'illegal_move')
+                                  }
+                                >
+                                  Illegal
+                                </button>
+                                {(blackCounts.warning > 0 || blackCounts.illegalMove > 0) &&
+                                  game.blackId && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-ghost"
+                                      disabled={cardBusyId === game.id}
+                                      onClick={() =>
+                                        void undoLastDirectorCard(game.id, game.blackId!)
+                                      }
+                                    >
+                                      Undo last
+                                    </button>
+                                  )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1751,6 +1976,7 @@ export default function TournamentPage() {
                 );
               })}
             </div>
+            </>
           )}
         </div>
       )}

@@ -1,4 +1,8 @@
-import type { ArbiterScorableResult, TournamentTable } from '@chess-alokas/shared';
+import type {
+  ArbiterScorableResult,
+  PlayerCardCounts,
+  TournamentTable,
+} from '@chess-alokas/shared';
 
 export type FloorTableView = {
   slug: string;
@@ -7,11 +11,17 @@ export type FloorTableView = {
   tournamentId: string;
   pinRound: number | null;
   round: number | null;
+  gameId: string | null;
+  whiteId: string | null;
+  blackId: string | null;
   whiteName: string | null;
   blackName: string | null;
   status: 'needs_pin' | 'pending' | 'locked' | 'bye' | 'no_game' | 'confirmed_closed';
   result: string | null;
   sessionOk: boolean;
+  whiteCards: PlayerCardCounts;
+  blackCards: PlayerCardCounts;
+  forfeitReason: string | null;
 };
 
 export type EnsureTablesResult = {

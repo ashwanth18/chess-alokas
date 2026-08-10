@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   apiPublicLiveGet,
   checkOnline,
+  type PlayerCardCounts,
   type PublicLivePayload,
 } from '../api/client';
 import TableSearch from '../components/TableSearch';
@@ -18,6 +19,7 @@ import {
   type LivePlayer,
 } from '../lib/liveViewer';
 import { resolvePrizePlaces } from '../lib/prizePlaces';
+import { ILLEGAL_MOVE_LIMIT, WARNING_LIMIT } from '@chess-alokas/shared';
 
 type LiveTab = 'boards' | 'standings';
 
@@ -37,21 +39,47 @@ function ColorPill({ color }: { color: 'white' | 'black' }) {
   );
 }
 
+function LiveCardChips({ counts }: { counts?: PlayerCardCounts | null }) {
+  if (!counts) return null;
+  const showY = counts.warning > 0;
+  const showR = counts.illegalMove > 0;
+  if (!showY && !showR) return null;
+  return (
+    <span className="live-card-chips" aria-label="Discipline cards">
+      {showY ? (
+        <span className="floor-card-chip floor-card-yellow" title="Warnings">
+          🟡 {counts.warning}/{WARNING_LIMIT}
+        </span>
+      ) : null}
+      {showR ? (
+        <span className="floor-card-chip floor-card-red" title="Illegal moves">
+          🔴 {counts.illegalMove}/{ILLEGAL_MOVE_LIMIT}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function SideRow({
   color,
   name,
   points,
+  cards,
   onOpen,
 }: {
   color: 'white' | 'black';
   name: string;
   points: number;
+  cards?: PlayerCardCounts | null;
   onOpen?: () => void;
 }) {
   const inner = (
     <>
       <ColorPill color={color} />
-      <span className="live-side-name">{name}</span>
+      <span className="live-side-main">
+        <span className="live-side-name">{name}</span>
+        <LiveCardChips counts={cards} />
+      </span>
       <span className="live-side-pts" title="Tournament points so far">
         {resultPointsLabel(points)}
         <small>pts</small>
@@ -517,6 +545,7 @@ function BoardCard({
           color="white"
           name={white?.name ?? '—'}
           points={whitePts}
+          cards={game.whiteCards}
           onOpen={game.whiteId ? () => onOpen(game.whiteId!) : undefined}
         />
         <div className="live-matchup-vs" aria-hidden>
@@ -526,6 +555,7 @@ function BoardCard({
           color="black"
           name={black?.name ?? '—'}
           points={blackPts}
+          cards={game.blackCards}
           onOpen={game.blackId ? () => onOpen(game.blackId!) : undefined}
         />
       </div>

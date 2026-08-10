@@ -3379,6 +3379,63 @@ a.landing-download-option:hover {
   font-size: 1.2rem;
   color: var(--wood-100);
 }
+.table-score-player-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+.floor-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.floor-card-chip {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+}
+.floor-card-yellow {
+  background: rgba(255, 190, 80, 0.16);
+  color: #ffcc60;
+  border-color: rgba(255, 190, 80, 0.4);
+}
+.floor-card-red {
+  background: rgba(220, 80, 80, 0.16);
+  color: #ffb4b4;
+  border-color: rgba(220, 80, 80, 0.4);
+}
+.floor-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.floor-btn-yellow {
+  background: rgba(255, 190, 80, 0.2);
+  border: 1px solid rgba(255, 190, 80, 0.5);
+  color: #ffcc60;
+}
+.floor-btn-yellow:hover:not(:disabled) {
+  background: rgba(255, 190, 80, 0.32);
+}
+.floor-btn-red {
+  background: rgba(220, 80, 80, 0.22);
+  border: 1px solid rgba(220, 80, 80, 0.55);
+  color: #ffb4b4;
+}
+.floor-btn-red:hover:not(:disabled) {
+  background: rgba(220, 80, 80, 0.35);
+}
+.desk-card-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
 .table-score-vs {
   text-align: center;
   font-size: 0.75rem;
@@ -3723,6 +3780,18 @@ button.live-side:hover {
 }
 .live-side-black {
   background: rgba(0, 0, 0, 0.32);
+}
+.live-side-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.live-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
 }
 .live-side-name {
   font-size: 1.02rem;
