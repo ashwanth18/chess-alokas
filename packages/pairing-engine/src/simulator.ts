@@ -7,7 +7,7 @@ import {
   type EnginePlayer,
   type PastGame,
   type PairingBoard,
-  type PlayerState,
+  type Standing,
 } from './swiss.js';
 
 export type ResultMode = 'random' | 'rating_biased' | 'manual';
@@ -310,7 +310,7 @@ export function runAllRounds(state: SimulationState): SimulationState {
   return current;
 }
 
-export type StandingRow = PlayerState & { buchholz: number; rank: number; category: SimCategory };
+export type StandingRow = Standing & { category: SimCategory };
 
 export function getSimulationStandings(
   state: SimulationState,

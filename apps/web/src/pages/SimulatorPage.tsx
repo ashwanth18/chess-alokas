@@ -15,6 +15,7 @@ import type {
 import type { GameResult } from '@chess-alokas/shared';
 import ColorSide from '../components/ColorSide';
 import NumberField from '../components/NumberField';
+import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
 
 const DEFAULT_CONFIG = {
   playerCount: 12 as number | null,
@@ -530,10 +531,13 @@ export default function SimulatorPage() {
           {/* Standings */}
           {standings.length > 0 && (
             <section className="sim-section" key={`standings-${animKey}`}>
-              <h2 className="sim-section-title">
-                Standings{' '}
-                {isDone && <span className="final-tag">Final</span>}
-              </h2>
+              <div className="standings-heading-row">
+                <h2 className="sim-section-title">
+                  Standings{' '}
+                  {isDone && <span className="final-tag">Final</span>}
+                </h2>
+                <TiebreakRulesHelp />
+              </div>
               {showStandingsTabs && (
                 <div className="category-tabs sim-standings-tabs">
                   {(
@@ -562,7 +566,10 @@ export default function SimulatorPage() {
                     <th>Cat</th>
                     <th>Rating</th>
                     <th>Score</th>
-                    <th>Buchholz</th>
+                    <th title="Buchholz">BH</th>
+                    <th title="Buchholz Cut-1">BH-C1</th>
+                    <th title="Sonneborn-Berger">SB</th>
+                    <th title="Wins">Wins</th>
                     <th>W</th>
                     <th>B</th>
                   </tr>
@@ -592,6 +599,9 @@ export default function SimulatorPage() {
                           <span className="score-pill">{s.score}</span>
                         </td>
                         <td>{s.buchholz.toFixed(1)}</td>
+                        <td>{s.buchholzCut1.toFixed(1)}</td>
+                        <td>{s.sonnebornBerger.toFixed(1)}</td>
+                        <td>{s.wins}</td>
                         <td>{whites}</td>
                         <td>{blacks}</td>
                       </tr>

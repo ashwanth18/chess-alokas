@@ -27,6 +27,7 @@ import {
 } from '../lib/tournamentProgress';
 import TournamentInstructions from '../components/TournamentInstructions';
 import TableSearch from '../components/TableSearch';
+import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
 import { matchesTextSearch } from '../lib/textSearch';
 import { softDeleteTournament } from '../lib/deleteTournament';
 import { ensurePoolCategoryId, repairTournamentLocalData } from '../lib/poolCategory';
@@ -2087,19 +2088,25 @@ export default function TournamentPage() {
             </div>
           ) : (
             <>
-              <p className="form-hint standings-prize-hint">
-                Prize places: top {prizePlacesN}
-                {activeCatId && categoryNames[activeCatId]
-                  ? ` · ${categoryNames[activeCatId]}`
-                  : ''}
-              </p>
+              <div className="standings-heading-row">
+                <p className="form-hint standings-prize-hint">
+                  Prize places: top {prizePlacesN}
+                  {activeCatId && categoryNames[activeCatId]
+                    ? ` · ${categoryNames[activeCatId]}`
+                    : ''}
+                </p>
+                <TiebreakRulesHelp />
+              </div>
               <table className="data-table standings-table">
                 <thead>
                   <tr>
                     <th>Rank</th>
                     <th>Name</th>
                     <th>Score</th>
-                    <th>Buchholz</th>
+                    <th title="Buchholz">BH</th>
+                    <th title="Buchholz Cut-1">BH-C1</th>
+                    <th title="Sonneborn-Berger">SB</th>
+                    <th title="Wins">Wins</th>
                     <th>Rating</th>
                   </tr>
                 </thead>
@@ -2131,6 +2138,9 @@ export default function TournamentPage() {
                         <td>{s.name}</td>
                         <td className="score-cell">{s.score}</td>
                         <td>{s.buchholz.toFixed(1)}</td>
+                        <td>{s.buchholzCut1.toFixed(1)}</td>
+                        <td>{s.sonnebornBerger.toFixed(1)}</td>
+                        <td>{s.wins}</td>
                         <td>{s.rating || '—'}</td>
                       </tr>
                     );

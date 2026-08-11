@@ -394,28 +394,84 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
   };
 }
 
+export type StandingRowMetrics = {
+  buchholz: number;
+  buchholzCut1: number;
+  sonnebornBerger: number;
+  wins: number;
+  rank: number;
+};
+
+export type Standing = PlayerState & StandingRowMetrics;
+
+/**
+ * Points a player scored in one non-bye game (0 / 0.5 / 1).
+ * Forfeits count as decisive wins/losses; 0-0 gives neither side a point.
+ */
+function pointsFromGame(
+  playerId: PlayerId,
+  game: PastGame,
+): { opponentId: PlayerId; points: number } | null {
+  if (game.isBye || game.result === 'bye') return null;
+  const { whiteId, blackId, result } = game;
+  if (!whiteId || !blackId) return null;
+  if (playerId !== whiteId && playerId !== blackId) return null;
+
+  const isWhite = playerId === whiteId;
+  const opponentId = isWhite ? blackId : whiteId;
+  let points = 0;
+  if (result === '1-0' || result === '1-0F') points = isWhite ? 1 : 0;
+  else if (result === '0-1' || result === '0-1F') points = isWhite ? 0 : 1;
+  else if (result === '1/2-1/2') points = 0.5;
+  // '0-0' / pending → 0
+  return { opponentId, points };
+}
+
+/**
+ * Ranking order (must match TiebreakRulesHelp UI copy):
+ * Score → Buchholz → Buchholz Cut-1 → Sonneborn-Berger → Wins → Rating → Seed
+ */
 export function computeStandings(
   players: EnginePlayer[],
   pastGames: PastGame[],
-): Array<PlayerState & { buchholz: number; rank: number }> {
+): Standing[] {
   const states = buildPlayerStates(players, pastGames);
   const byId = new Map(states.map((s) => [s.id, s]));
 
-  const withBuchholz = states.map((s) => {
-    const buchholz = s.opponents.reduce((sum, oid) => {
-      return sum + (byId.get(oid)?.score ?? 0);
-    }, 0);
-    return { ...s, buchholz };
+  const withMetrics = states.map((s) => {
+    const opponentScores = s.opponents.map((oid) => byId.get(oid)?.score ?? 0);
+    const buchholz = opponentScores.reduce((sum, sc) => sum + sc, 0);
+    const buchholzCut1 =
+      opponentScores.length >= 2
+        ? buchholz - Math.min(...opponentScores)
+        : buchholz;
+
+    let sonnebornBerger = 0;
+    let wins = 0;
+    for (const game of pastGames) {
+      const scored = pointsFromGame(s.id, game);
+      if (!scored) continue;
+      const oppScore = byId.get(scored.opponentId)?.score ?? 0;
+      sonnebornBerger += scored.points * oppScore;
+      if (scored.points === 1) wins += 1;
+    }
+
+    return { ...s, buchholz, buchholzCut1, sonnebornBerger, wins };
   });
 
-  withBuchholz.sort((a, b) => {
+  withMetrics.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+    if (b.buchholzCut1 !== a.buchholzCut1) return b.buchholzCut1 - a.buchholzCut1;
+    if (b.sonnebornBerger !== a.sonnebornBerger) {
+      return b.sonnebornBerger - a.sonnebornBerger;
+    }
+    if (b.wins !== a.wins) return b.wins - a.wins;
     if (b.rating !== a.rating) return b.rating - a.rating;
     return a.seed - b.seed;
   });
 
-  return withBuchholz.map((s, i) => ({ ...s, rank: i + 1 }));
+  return withMetrics.map((s, i) => ({ ...s, rank: i + 1 }));
 }
 
 /**
@@ -427,7 +483,7 @@ export function computeSectionStandings(
   players: EnginePlayer[],
   pastGames: PastGame[],
   sectionPlayerIds: ReadonlySet<string>,
-): Array<PlayerState & { buchholz: number; rank: number }> {
+): Standing[] {
   const full = computeStandings(players, pastGames);
   if (sectionPlayerIds.size === 0) return [];
   return full

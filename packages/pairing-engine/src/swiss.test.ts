@@ -83,7 +83,9 @@ describe('pairSwissRound', () => {
       isBye: b.isBye,
     }));
     const standings = computeStandings(plist, past);
-    expect(standings[0].score).toBeGreaterThanOrEqual(standings[standings.length - 1].score);
+    expect(standings[0]!.score).toBeGreaterThanOrEqual(
+      standings[standings.length - 1]!.score,
+    );
     expect(standings.every((s) => s.rank >= 1)).toBe(true);
   });
 
@@ -140,6 +142,94 @@ describe('pairSwissRound', () => {
     expect(byId[b!.id]).toBe(0);
     expect(byId[c!.id]).toBe(0);
     expect(byId[d!.id]).toBe(0);
+  });
+
+  it('applies Buchholz Cut-1, Sonneborn-Berger, and wins after score/Buchholz ties', () => {
+    // Four players, equal scores after round-robin-ish results engineered so
+    // A and B both have 1.5 with same Buchholz; SB / wins break the tie.
+    const plist: EnginePlayer[] = [
+      { id: 'a', name: 'A', rating: 1500, seed: 1 },
+      { id: 'b', name: 'B', rating: 1500, seed: 2 },
+      { id: 'c', name: 'C', rating: 1500, seed: 3 },
+      { id: 'd', name: 'D', rating: 1500, seed: 4 },
+    ];
+    const past: PastGame[] = [
+      // Round 1: A beats C, B draws D
+      { round: 1, whiteId: 'a', blackId: 'c', result: '1-0', isBye: false },
+      { round: 1, whiteId: 'b', blackId: 'd', result: '1/2-1/2', isBye: false },
+      // Round 2: A draws B, C beats D → A=1.5 B=1 C=1 D=0.5
+      { round: 2, whiteId: 'a', blackId: 'b', result: '1/2-1/2', isBye: false },
+      { round: 2, whiteId: 'c', blackId: 'd', result: '1-0', isBye: false },
+      // Round 3: A draws D, B beats C → A=2 B=2 C=1 D=1
+      { round: 3, whiteId: 'a', blackId: 'd', result: '1/2-1/2', isBye: false },
+      { round: 3, whiteId: 'b', blackId: 'c', result: '1-0', isBye: false },
+    ];
+    const standings = computeStandings(plist, past);
+    const a = standings.find((s) => s.id === 'a')!;
+    const b = standings.find((s) => s.id === 'b')!;
+    expect(a.score).toBe(2);
+    expect(b.score).toBe(2);
+    // A: opponents C(1), B(2), D(1) → BH=4; Cut-1=4-1=3; wins=1
+    // B: opponents D(1), A(2), C(1) → BH=4; Cut-1=4-1=3; wins=1
+    expect(a.buchholz).toBe(4);
+    expect(b.buchholz).toBe(4);
+    expect(a.buchholzCut1).toBe(3);
+    expect(b.buchholzCut1).toBe(3);
+    // SB: A = 1*C(1) + 0.5*B(2) + 0.5*D(1) = 1+1+0.5 = 2.5
+    //     B = 0.5*D(1) + 0.5*A(2) + 1*C(1) = 0.5+1+1 = 2.5
+    expect(a.sonnebornBerger).toBe(2.5);
+    expect(b.sonnebornBerger).toBe(2.5);
+    expect(a.wins).toBe(1);
+    expect(b.wins).toBe(1);
+    // Same through wins → rating/seed: A (seed 1) ranks above B
+    expect(standings[0]!.id).toBe('a');
+    expect(standings[1]!.id).toBe('b');
+  });
+
+  it('does not add opponents or Buchholz from bye rounds', () => {
+    const plist: EnginePlayer[] = [
+      { id: 'a', name: 'A', rating: 1600, seed: 1 },
+      { id: 'b', name: 'B', rating: 1500, seed: 2 },
+      { id: 'c', name: 'C', rating: 1400, seed: 3 },
+    ];
+    const past: PastGame[] = [
+      { round: 1, whiteId: 'a', blackId: 'b', result: '1-0', isBye: false },
+      { round: 1, whiteId: 'c', blackId: null, result: 'bye', isBye: true },
+    ];
+    const standings = computeStandings(plist, past);
+    const c = standings.find((s) => s.id === 'c')!;
+    expect(c.score).toBe(1);
+    expect(c.opponents).toEqual([]);
+    expect(c.buchholz).toBe(0);
+    expect(c.buchholzCut1).toBe(0);
+    expect(c.sonnebornBerger).toBe(0);
+    expect(c.wins).toBe(0);
+    // Same score as C; A ranks first via higher rating after empty BH chain
+    expect(standings[0]!.id).toBe('a');
+  });
+
+  it('ranks higher Sonneborn-Berger ahead when score and Buchholz match', () => {
+    const plist: EnginePlayer[] = [
+      { id: 'w', name: 'Winner', rating: 1400, seed: 2 },
+      { id: 'x', name: 'Drawer', rating: 1400, seed: 1 },
+      { id: 'y', name: 'Strong', rating: 1400, seed: 3 },
+      { id: 'z', name: 'Weak', rating: 1400, seed: 4 },
+    ];
+    // W and X both finish on 2 with BH 4; W has higher SB (beat stronger Y).
+    const past: PastGame[] = [
+      { round: 1, whiteId: 'w', blackId: 'y', result: '1-0', isBye: false },
+      { round: 1, whiteId: 'x', blackId: 'z', result: '1-0', isBye: false },
+      { round: 2, whiteId: 'w', blackId: 'z', result: '1/2-1/2', isBye: false },
+      { round: 2, whiteId: 'x', blackId: 'y', result: '1/2-1/2', isBye: false },
+      { round: 3, whiteId: 'w', blackId: 'x', result: '1/2-1/2', isBye: false },
+      { round: 3, whiteId: 'y', blackId: 'z', result: '1-0', isBye: false },
+    ];
+    const standings = computeStandings(plist, past);
+    expect(standings[0]!.id).toBe('w');
+    expect(standings[1]!.id).toBe('x');
+    expect(standings[0]!.score).toBe(standings[1]!.score);
+    expect(standings[0]!.buchholz).toBe(standings[1]!.buchholz);
+    expect(standings[0]!.sonnebornBerger).toBeGreaterThan(standings[1]!.sonnebornBerger);
   });
 
   it('does not give consecutive byes when avoidable', () => {

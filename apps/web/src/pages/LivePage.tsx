@@ -7,6 +7,7 @@ import {
   type PublicLivePayload,
 } from '../api/client';
 import TableSearch from '../components/TableSearch';
+import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
 import { matchesTextSearch } from '../lib/textSearch';
 import {
   buildPlayerHistory,
@@ -404,12 +405,15 @@ export default function LivePage() {
               ))}
             </div>
           )}
-          <p className="form-hint standings-prize-hint">
-            Prize places: top {prizePlacesN}
-            {standingsCatId
-              ? ` · ${data.categories.find((c) => c.id === standingsCatId)?.name ?? ''}`
-              : ''}
-          </p>
+          <div className="standings-heading-row">
+            <p className="form-hint standings-prize-hint">
+              Prize places: top {prizePlacesN}
+              {standingsCatId
+                ? ` · ${data.categories.find((c) => c.id === standingsCatId)?.name ?? ''}`
+                : ''}
+            </p>
+            <TiebreakRulesHelp />
+          </div>
           {standings.length === 0 ? (
             <p className="form-hint">No standings yet — results will appear here.</p>
           ) : (
@@ -419,7 +423,10 @@ export default function LivePage() {
                   <th>Rank</th>
                   <th>Name</th>
                   <th>Score</th>
-                  <th>Buchholz</th>
+                  <th title="Buchholz">BH</th>
+                  <th title="Buchholz Cut-1">BH-C1</th>
+                  <th title="Sonneborn-Berger">SB</th>
+                  <th title="Wins">Wins</th>
                 </tr>
               </thead>
               <tbody>
@@ -433,6 +440,9 @@ export default function LivePage() {
                       </td>
                       <td>{resultPointsLabel(s.score)}</td>
                       <td>{resultPointsLabel(s.buchholz)}</td>
+                      <td>{resultPointsLabel(s.buchholzCut1)}</td>
+                      <td>{resultPointsLabel(s.sonnebornBerger)}</td>
+                      <td>{s.wins}</td>
                     </tr>
                   );
                 })}
