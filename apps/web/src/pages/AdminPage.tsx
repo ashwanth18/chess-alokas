@@ -3,12 +3,43 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { apiAdminOverview, type AdminOverview } from '../api/client';
 
+/** Format UTC ISO for display in the viewer's local timezone, with TZ abbreviation. */
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
   } catch {
     return '—';
+  }
+}
+
+function viewerTimeZoneLabel(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'draft':
+      return 'Draft';
+    case 'ready':
+      return 'Ready';
+    case 'in_progress':
+      return 'In progress';
+    case 'completed':
+      return 'Completed';
+    default:
+      return status;
   }
 }
 
@@ -356,6 +387,9 @@ export default function AdminPage() {
 
       <section className="admin-panel">
         <h3>Accounts</h3>
+        <p className="admin-metric-detail">
+          Times shown in your timezone ({viewerTimeZoneLabel()}); stored as UTC.
+        </p>
         {!data && loading ? (
           <p className="admin-metric-detail">Loading…</p>
         ) : (
@@ -392,6 +426,12 @@ export default function AdminPage() {
 
       <section className="admin-panel">
         <h3>Recent tournaments</h3>
+        <p className="admin-metric-detail">
+          Status is the tournament lifecycle (draft → ready → in progress → completed). There is no
+          cancelled state. <strong>Public live</strong> is whether the parent viewer link is
+          enabled. Times are stored in UTC and shown in your timezone ({viewerTimeZoneLabel()}),
+          not the tournament owner’s.
+        </p>
         <div className="table-scroll">
           <table className="data-table admin-table">
             <thead>
@@ -401,19 +441,23 @@ export default function AdminPage() {
                 <th>Owner</th>
                 <th>Players</th>
                 <th>Round</th>
-                <th>Live</th>
-                <th>Updated</th>
+                <th>Public live</th>
+                <th>Created</th>
+                <th>Completed</th>
+                <th>Last update</th>
               </tr>
             </thead>
             <tbody>
               {(data?.recentTournaments ?? []).map((t) => (
                 <tr key={t.id}>
                   <td>{t.name}</td>
-                  <td>{t.status}</td>
+                  <td>{statusLabel(t.status)}</td>
                   <td>{t.ownerEmail ?? '—'}</td>
                   <td>{t.participantCount}</td>
                   <td>{t.currentRound}</td>
-                  <td>{t.publicEnabled ? 'On' : '—'}</td>
+                  <td>{t.publicEnabled ? 'On' : 'Off'}</td>
+                  <td>{fmtDate(t.createdAt)}</td>
+                  <td>{t.status === 'completed' ? fmtDate(t.completedAt ?? t.updatedAt) : '—'}</td>
                   <td>{fmtDate(t.updatedAt)}</td>
                 </tr>
               ))}

@@ -58,8 +58,12 @@ export type AdminOverview = {
     participantCount: number;
     publicEnabled: boolean;
     currentRound: number;
+    createdAt: string;
+    completedAt: string | null;
     updatedAt: string;
   }>;
+  /** IANA timezone hint for clients; timestamps are always UTC ISO. */
+  timestampsAreUtc: true;
 };
 
 function pct(part: number, whole: number): number {
@@ -297,6 +301,8 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
             participant_count: string;
             public_enabled: boolean;
             current_round: number;
+            created_at: string;
+            completed_at: string | null;
             updated_at: string;
           }[]
         >`
@@ -312,6 +318,8 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
             ) AS participant_count,
             COALESCE(t.public_enabled, false) AS public_enabled,
             COALESCE(t.current_round, 0) AS current_round,
+            t.created_at,
+            t.completed_at,
             t.updated_at
           FROM tournaments t
           LEFT JOIN auth.users u ON u.id = t.owner_id
@@ -409,8 +417,11 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
             participantCount: Number(t.participant_count),
             publicEnabled: t.public_enabled,
             currentRound: t.current_round,
+            createdAt: t.created_at,
+            completedAt: t.completed_at,
             updatedAt: t.updated_at,
           })),
+          timestampsAreUtc: true,
         };
 
         return overview;

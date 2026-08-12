@@ -516,8 +516,11 @@ export type AdminOverview = {
     participantCount: number;
     publicEnabled: boolean;
     currentRound: number;
+    createdAt: string;
+    completedAt: string | null;
     updatedAt: string;
   }>;
+  timestampsAreUtc: true;
 };
 
 export async function apiAdminOverview() {

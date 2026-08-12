@@ -927,7 +927,11 @@ export class PostgresStore implements Store {
         public_token = ${m.publicToken ?? null},
         public_enabled = ${m.publicEnabled ?? false},
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
-        deleted_at = ${m.deletedAt ?? null}
+        deleted_at = ${m.deletedAt ?? null},
+        completed_at = CASE
+          WHEN ${m.status} = 'completed' THEN COALESCE(completed_at, ${m.updatedAt}::timestamptz)
+          ELSE NULL
+        END
       WHERE id = ${id} RETURNING *
     `;
     const row = rows[0];
@@ -1446,7 +1450,12 @@ export class PostgresStore implements Store {
           shared_places = EXCLUDED.shared_places,
           owner_id = COALESCE(EXCLUDED.owner_id, tournaments.owner_id),
           client_id = EXCLUDED.client_id,
-          updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
+          updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at,
+          completed_at = CASE
+            WHEN EXCLUDED.status = 'completed'
+              THEN COALESCE(tournaments.completed_at, EXCLUDED.updated_at)
+            ELSE NULL
+          END
         WHERE EXCLUDED.updated_at > tournaments.updated_at
       `;
       // public_token / public_enabled are server-owned (enable/rotate/disable API only).
