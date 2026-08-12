@@ -1,7 +1,9 @@
-import { mkdtemp, unlink, rm, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdtemp, unlink, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import sax from 'sax';
 import yauzl from 'yauzl';
 import type { Sql } from 'postgres';
@@ -9,18 +11,8 @@ import type { FideImportStatus } from './types.js';
 
 export const FIDE_XML_ZIP_URL = 'https://ratings.fide.com/download/players_list_xml.zip';
 
-type StagingRow = [
-  number,
-  string,
-  string | null,
-  number | null,
-  string | null,
-  string | null,
-  number | null,
-  number | null,
-  number | null,
-  boolean,
-];
+/** Don't kill an import that updated progress recently (API redeploys). */
+const STALE_RUNNING_MS = 15 * 60 * 1000;
 
 let importRunning = false;
 
@@ -29,6 +21,16 @@ function num(v: string | undefined): number | null {
   const t = v.trim();
   if (!t || !/^\d+$/.test(t)) return null;
   return Number(t);
+}
+
+function csvCell(v: string | number | boolean | null): string {
+  if (v == null) return '';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return String(v);
+  if (/[",\n\r]/.test(v) || v.includes('\\')) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
 }
 
 function openZip(path: string): Promise<yauzl.ZipFile> {
@@ -58,85 +60,34 @@ async function downloadZip(url: string, dest: string): Promise<void> {
   await writeFile(dest, buf);
 }
 
-async function flushStagingBatch(sql: Sql, rows: StagingRow[]): Promise<void> {
-  if (rows.length === 0) return;
-  const objects = rows.map((row) => ({
-    fide_id: row[0],
-    name: row[1],
-    federation: row[2],
-    birth_year: row[3],
-    title: row[4],
-    sex: row[5],
-    standard: row[6],
-    rapid: row[7],
-    blitz: row[8],
-    inactive: row[9],
-  }));
-  await sql`
-    INSERT INTO fide_players_staging ${sql(
-      objects,
-      'fide_id',
-      'name',
-      'federation',
-      'birth_year',
-      'title',
-      'sex',
-      'standard',
-      'rapid',
-      'blitz',
-      'inactive',
-    )}
-    ON CONFLICT (fide_id) DO UPDATE SET
-      name = EXCLUDED.name,
-      federation = EXCLUDED.federation,
-      birth_year = EXCLUDED.birth_year,
-      title = EXCLUDED.title,
-      sex = EXCLUDED.sex,
-      standard = EXCLUDED.standard,
-      rapid = EXCLUDED.rapid,
-      blitz = EXCLUDED.blitz,
-      inactive = EXCLUDED.inactive
-  `;
-}
-
-async function parseXmlIntoStaging(
-  xmlStream: Readable,
-  sql: Sql,
-  onBatch: (n: number) => void,
-): Promise<number> {
+/** Parse XML → local CSV (no DB round-trips). Returns row count. */
+async function parseXmlToCsv(xmlStream: Readable, csvPath: string): Promise<number> {
+  const out = createWriteStream(csvPath, { encoding: 'utf8' });
   const parser = sax.createStream(true, { trim: true, normalize: true });
   let current: Record<string, string> | null = null;
   let currentTag = '';
-  let batch: StagingRow[] = [];
   let total = 0;
-  let flushing: Promise<void> = Promise.resolve();
+  let writeChain: Promise<void> = Promise.resolve();
   let failed: Error | null = null;
 
-  const enqueueFlush = () => {
-    if (batch.length === 0) return;
-    const rows = batch;
-    batch = [];
-    xmlStream.pause();
-    flushing = flushing
-      .then(async () => {
-        await flushStagingBatch(sql, rows);
-        total += rows.length;
-        onBatch(total);
-        xmlStream.resume();
-      })
-      .catch((err: Error) => {
-        failed = err;
-        xmlStream.destroy(err);
-      });
+  const writeLine = (line: string) => {
+    writeChain = writeChain.then(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          if (!out.write(line)) {
+            out.once('drain', () => resolve());
+          } else {
+            resolve();
+          }
+          out.once('error', reject);
+        }),
+    );
   };
 
   return new Promise((resolve, reject) => {
     parser.on('opentag', (node) => {
-      if (node.name === 'player') {
-        current = {};
-      } else if (current) {
-        currentTag = node.name;
-      }
+      if (node.name === 'player') current = {};
+      else if (current) currentTag = node.name;
     });
 
     parser.on('text', (text) => {
@@ -151,29 +102,39 @@ async function parseXmlIntoStaging(
         const playerName = (current['name'] ?? '').trim();
         if (fideId != null && playerName) {
           const flag = (current['flag'] ?? '').toLowerCase();
-          batch.push([
-            fideId,
-            playerName,
-            (current['country'] ?? '').trim() || null,
-            num(current['birthday']),
-            (current['title'] ?? '').trim() || null,
-            (current['sex'] ?? '').trim() || null,
-            num(current['rating']),
-            num(current['rapid_rating']),
-            num(current['blitz_rating']),
-            flag.startsWith('i'),
-          ]);
-          if (batch.length >= 2000) enqueueFlush();
+          const line =
+            [
+              csvCell(fideId),
+              csvCell(playerName),
+              csvCell((current['country'] ?? '').trim() || null),
+              csvCell(num(current['birthday'])),
+              csvCell((current['title'] ?? '').trim() || null),
+              csvCell((current['sex'] ?? '').trim() || null),
+              csvCell(num(current['rating'])),
+              csvCell(num(current['rapid_rating'])),
+              csvCell(num(current['blitz_rating'])),
+              csvCell(flag.startsWith('i')),
+            ].join(',') + '\n';
+          writeLine(line);
+          total += 1;
         }
         current = null;
       }
       currentTag = '';
     });
 
-    parser.on('error', (err) => reject(err));
+    parser.on('error', (err) => {
+      failed = err;
+      out.destroy(err);
+      reject(err);
+    });
+
     parser.on('end', () => {
-      enqueueFlush();
-      flushing
+      writeChain
+        .then(() => {
+          out.end();
+          return finished(out);
+        })
         .then(() => {
           if (failed) reject(failed);
           else resolve(total);
@@ -183,6 +144,133 @@ async function parseXmlIntoStaging(
 
     xmlStream.on('error', reject);
     xmlStream.pipe(parser);
+  });
+}
+
+/** Bulk-load CSV into staging. Prefer COPY; fall back to unnest batches. */
+async function loadCsvIntoStaging(sql: Sql, csvPath: string, rowCount: number): Promise<void> {
+  await sql`TRUNCATE fide_players_staging`;
+
+  try {
+    const csv = await readFile(csvPath);
+    const stream = await sql`
+      COPY fide_players_staging
+        (fide_id, name, federation, birth_year, title, sex, standard, rapid, blitz, inactive)
+      FROM STDIN WITH (FORMAT csv, NULL '')
+    `.writable();
+    stream.end(csv);
+    await finished(stream);
+    return;
+  } catch (err) {
+    // Transaction poolers often reject COPY — fall back to chunked INSERT.
+    console.warn(
+      '[fide] COPY unavailable, using batched INSERT:',
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  const text = await readFile(csvPath, 'utf8');
+  const lines = text.split('\n').filter((l) => l.length > 0);
+  const BATCH = 8000;
+  for (let i = 0; i < lines.length; i += BATCH) {
+    const chunk = lines.slice(i, i + BATCH);
+    const objects = chunk.map((line) => {
+      // Simple CSV parse for our known shape (name may be quoted)
+      const cols: string[] = [];
+      let cur = '';
+      let inQ = false;
+      for (let c = 0; c < line.length; c++) {
+        const ch = line[c]!;
+        if (inQ) {
+          if (ch === '"' && line[c + 1] === '"') {
+            cur += '"';
+            c++;
+          } else if (ch === '"') {
+            inQ = false;
+          } else {
+            cur += ch;
+          }
+        } else if (ch === '"') {
+          inQ = true;
+        } else if (ch === ',') {
+          cols.push(cur);
+          cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      cols.push(cur);
+      const toInt = (s: string) => (s === '' ? null : Number(s));
+      return {
+        fide_id: Number(cols[0]),
+        name: cols[1] ?? '',
+        federation: cols[2] || null,
+        birth_year: toInt(cols[3] ?? ''),
+        title: cols[4] || null,
+        sex: cols[5] || null,
+        standard: toInt(cols[6] ?? ''),
+        rapid: toInt(cols[7] ?? ''),
+        blitz: toInt(cols[8] ?? ''),
+        inactive: cols[9] === 'true',
+      };
+    });
+    await sql`
+      INSERT INTO fide_players_staging ${sql(
+        objects,
+        'fide_id',
+        'name',
+        'federation',
+        'birth_year',
+        'title',
+        'sex',
+        'standard',
+        'rapid',
+        'blitz',
+        'inactive',
+      )}
+    `;
+    if (i % (BATCH * 5) === 0) {
+      await setMeta(sql, {
+        status: 'running',
+        playerCount: Math.min(i + chunk.length, rowCount),
+        sourceUrl: FIDE_XML_ZIP_URL,
+        error: null,
+      }).catch(() => undefined);
+    }
+  }
+}
+
+async function swapStagingToLive(sql: Sql): Promise<void> {
+  // Rename swap is far faster than TRUNCATE + INSERT SELECT over the pooler.
+  await sql.begin(async (tx) => {
+    await tx`DROP TABLE IF EXISTS fide_players_old`;
+    await tx`ALTER TABLE fide_players RENAME TO fide_players_old`;
+    await tx`ALTER TABLE fide_players_staging RENAME TO fide_players`;
+    await tx`
+      CREATE TABLE fide_players_staging (
+        fide_id integer primary key,
+        name text not null,
+        federation text,
+        birth_year integer,
+        title text,
+        sex text,
+        standard integer,
+        rapid integer,
+        blitz integer,
+        inactive boolean not null default false
+      )
+    `;
+    await tx`DROP TABLE fide_players_old`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_fide_players_name ON fide_players (name)`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_fide_players_fed_yob ON fide_players (federation, birth_year)`;
+    await tx`
+      CREATE INDEX IF NOT EXISTS idx_fide_players_name_trgm
+      ON fide_players USING gin (lower(name) gin_trgm_ops)
+    `;
+    await tx`ALTER TABLE fide_players ENABLE ROW LEVEL SECURITY`;
+    await tx`ALTER TABLE fide_players_staging ENABLE ROW LEVEL SECURITY`;
+    await tx`REVOKE ALL ON TABLE fide_players FROM anon, authenticated`;
+    await tx`REVOKE ALL ON TABLE fide_players_staging FROM anon, authenticated`;
   });
 }
 
@@ -280,7 +368,6 @@ export function isFideRefreshDue(
   status: Pick<FideImportStatus, 'status' | 'importedAt' | 'playerCount'>,
   now: Date = new Date(),
 ): boolean {
-  // Only the in-process mutex blocks; DB "running" may be stale after a crash.
   if (importRunning) return false;
   if (status.status === 'running') return false;
 
@@ -312,12 +399,32 @@ export function startFideImport(sql: Sql): boolean {
 
 /**
  * Clear a DB "running" flag left behind when the API process died mid-import.
- * Without this, auto-refresh and Admin both stay blocked forever.
+ * Only if progress is stale — recent updates mean an import may still be alive.
  */
 export async function clearStaleFideImportLock(sql: Sql): Promise<boolean> {
   if (importRunning) return false;
   const status = await getFideImportStatus(sql);
   if (status.status !== 'running') return false;
+
+  const updatedMs = status.updatedAt ? new Date(status.updatedAt).getTime() : 0;
+  if (Number.isFinite(updatedMs) && Date.now() - updatedMs < STALE_RUNNING_MS) {
+    return false;
+  }
+
+  const live = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM fide_players`;
+  const liveCount = live[0]?.n ?? 0;
+  if (liveCount > 0) {
+    // Keep usable catalog; mark failed so auto won't loop on "running".
+    await setMeta(sql, {
+      status: 'ok',
+      importedAt: status.importedAt ?? new Date().toISOString(),
+      playerCount: liveCount,
+      error: 'Recovered: previous import interrupted, existing catalog kept',
+      sourceUrl: FIDE_XML_ZIP_URL,
+    });
+    return true;
+  }
+
   await setMeta(sql, {
     status: 'failed',
     error: 'Previous import did not finish (API restart). Retry when due.',
@@ -341,9 +448,9 @@ export async function maybeStartFideImport(sql: Sql, now: Date = new Date()): Pr
 export async function runFideImport(sql: Sql): Promise<number> {
   const dir = await mkdtemp(join(tmpdir(), 'fide-'));
   const zipPath = join(dir, 'players_list_xml.zip');
+  const csvPath = join(dir, 'players.csv');
   try {
-    await setMeta(sql, { status: 'running', error: null, sourceUrl: FIDE_XML_ZIP_URL });
-    await sql`TRUNCATE fide_players_staging`;
+    await setMeta(sql, { status: 'running', error: null, sourceUrl: FIDE_XML_ZIP_URL, playerCount: 0 });
     await downloadZip(FIDE_XML_ZIP_URL, zipPath);
 
     const zip = await openZip(zipPath);
@@ -365,34 +472,27 @@ export async function runFideImport(sql: Sql): Promise<number> {
     });
 
     const xmlStream = await readZipEntry(zip, entry);
-    let lastProgressAt = 0;
-    const count = await parseXmlIntoStaging(xmlStream, sql, (n) => {
-      const nowMs = Date.now();
-      if (nowMs - lastProgressAt < 15_000) return;
-      lastProgressAt = nowMs;
-      void setMeta(sql, {
-        status: 'running',
-        playerCount: n,
-        sourceUrl: FIDE_XML_ZIP_URL,
-        error: null,
-      }).catch(() => undefined);
+    await setMeta(sql, {
+      status: 'running',
+      playerCount: 0,
+      error: 'Parsing XML to local file…',
+      sourceUrl: FIDE_XML_ZIP_URL,
     });
+    const count = await parseXmlToCsv(xmlStream, csvPath);
     zip.close();
 
     if (count === 0) {
       throw new Error('FIDE XML contained no players');
     }
 
-    await sql.begin(async (tx) => {
-      await tx`TRUNCATE fide_players`;
-      await tx`
-        INSERT INTO fide_players
-          (fide_id, name, federation, birth_year, title, sex, standard, rapid, blitz, inactive)
-        SELECT fide_id, name, federation, birth_year, title, sex, standard, rapid, blitz, inactive
-        FROM fide_players_staging
-      `;
-      await tx`TRUNCATE fide_players_staging`;
+    await setMeta(sql, {
+      status: 'running',
+      playerCount: count,
+      error: 'Loading into database…',
+      sourceUrl: FIDE_XML_ZIP_URL,
     });
+    await loadCsvIntoStaging(sql, csvPath, count);
+    await swapStagingToLive(sql);
 
     const now = new Date().toISOString();
     await setMeta(sql, {
@@ -411,11 +511,12 @@ export async function runFideImport(sql: Sql): Promise<number> {
     throw err;
   } finally {
     await unlink(zipPath).catch(() => undefined);
+    await unlink(csvPath).catch(() => undefined);
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-/** Parse a local XML string/stream into row objects (for tests). */
+/** Parse a local XML string into row objects (for tests). */
 export async function parseFideXmlPlayers(
   xml: string,
 ): Promise<
