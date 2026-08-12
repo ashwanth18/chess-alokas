@@ -11,6 +11,11 @@ import {
 import TableSearch from '../components/TableSearch';
 import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
 import { displaySchool } from '../lib/importParse';
+import {
+  loadLiveBookmarks,
+  toggleLiveBookmark,
+  type LiveBookmark,
+} from '../lib/liveBookmarks';
 import { matchesTextSearch } from '../lib/textSearch';
 import {
   buildPlayerHistory,
@@ -37,7 +42,7 @@ function ColorPill({ color }: { color: 'white' | 'black' }) {
   return (
     <span className={`live-color-pill live-color-${color}`} aria-label={color}>
       <span className="live-color-dot" aria-hidden />
-      {color === 'white' ? 'White' : 'Black'}
+      <span className="live-color-label">{color === 'white' ? 'White' : 'Black'}</span>
     </span>
   );
 }
@@ -63,6 +68,33 @@ function LiveCardChips({ counts }: { counts?: PlayerCardCounts | null }) {
   );
 }
 
+function BookmarkButton({
+  active,
+  onToggle,
+  large,
+}: {
+  active: boolean;
+  onToggle: () => void;
+  large?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`live-bookmark-btn ${active ? 'is-active' : ''} ${large ? 'is-large' : ''}`}
+      aria-pressed={active}
+      aria-label={active ? 'Unpin player' : 'Pin player'}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onToggle();
+      }}
+    >
+      <span aria-hidden>{active ? '★' : '☆'}</span>
+      {large ? <span>{active ? 'Pinned' : 'Pin this player'}</span> : null}
+    </button>
+  );
+}
+
 function SideRow({
   color,
   name,
@@ -78,15 +110,17 @@ function SideRow({
 }) {
   const inner = (
     <>
-      <ColorPill color={color} />
-      <span className="live-side-main">
+      <div className="live-side-top">
+        <ColorPill color={color} />
         <span className="live-side-name">{name}</span>
+      </div>
+      <div className="live-side-bottom">
         <LiveCardChips counts={cards} />
-      </span>
-      <span className="live-side-pts" title="Tournament points so far">
-        {resultPointsLabel(points)}
-        <small>pts</small>
-      </span>
+        <span className="live-side-pts" title="Tournament points so far">
+          {resultPointsLabel(points)}
+          <small>pts</small>
+        </span>
+      </div>
     </>
   );
 
@@ -98,6 +132,11 @@ function SideRow({
     );
   }
   return <div className={`live-side live-side-${color}`}>{inner}</div>;
+}
+
+function initialOf(name: string): string {
+  const t = name.trim();
+  return t ? t[0]!.toUpperCase() : '?';
 }
 
 export default function LivePage() {
@@ -113,6 +152,12 @@ export default function LivePage() {
   const [tab, setTab] = useState<LiveTab>('boards');
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [standingsCatId, setStandingsCatId] = useState('');
+  const [showTiebreaks, setShowTiebreaks] = useState(false);
+  const [bookmarks, setBookmarks] = useState<LiveBookmark[]>([]);
+
+  useEffect(() => {
+    setBookmarks(loadLiveBookmarks(token));
+  }, [token]);
 
   const refresh = useCallback(async () => {
     if (!token) return;
@@ -172,6 +217,8 @@ export default function LivePage() {
     [data],
   );
 
+  const bookmarkedIds = useMemo(() => new Set(bookmarks.map((b) => b.id)), [bookmarks]);
+
   const rounds = useMemo(() => {
     if (!data) return [];
     const fromGames = [...new Set(data.games.map((g) => g.round))].sort((a, b) => a - b);
@@ -192,7 +239,7 @@ export default function LivePage() {
   const filteredPlayers = useMemo(() => {
     if (!data) return [];
     return data.players.filter((p) =>
-      matchesTextSearch(search, p.name, p.club, p.rating),
+      matchesTextSearch(search, p.name, p.club, p.school, p.city, p.rating),
     );
   }, [data, search]);
 
@@ -214,6 +261,12 @@ export default function LivePage() {
     return computeLiveStandings(data, hasCats ? standingsCatId || null : null);
   }, [data, standingsCatId]);
 
+  const endRankById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of standings) map.set(s.id, s.rank);
+    return map;
+  }, [standings]);
+
   const prizePlacesN = useMemo(() => {
     if (!data) return 3;
     const cat = data.categories.find((c) => c.id === standingsCatId);
@@ -222,6 +275,11 @@ export default function LivePage() {
       cat ? { prizePlaces: cat.prizePlaces } : undefined,
     );
   }, [data, standingsCatId]);
+
+  function pinPlayer(player: { id: string; name: string }) {
+    if (!token) return;
+    setBookmarks(toggleLiveBookmark(token, player));
+  }
 
   if (!token) {
     return (
@@ -265,6 +323,8 @@ export default function LivePage() {
         error={error}
         displayRound={displayRound}
         rounds={rounds}
+        bookmarks={bookmarks}
+        onToggleBookmark={pinPlayer}
         onRoundChange={setSelectedRound}
         onBack={() => navigate(`/live/${token}`)}
       />
@@ -322,6 +382,8 @@ export default function LivePage() {
                     player={p}
                     game={gameForPlayerRound(data.games, p.id, displayRound)}
                     score={runningScore(data.games, p.id, displayRound)}
+                    bookmarked={bookmarkedIds.has(p.id)}
+                    onToggleBookmark={() => pinPlayer(p)}
                     onOpen={() => navigate(`/live/${token}/p/${p.id}`)}
                   />
                 </li>
@@ -329,9 +391,40 @@ export default function LivePage() {
             )}
           </ul>
         )}
+
+        <div className="live-my-players">
+          <div className="live-my-players-head">
+            <span>My players</span>
+            {bookmarks.length === 0 ? (
+              <span className="live-my-players-hint">Star a player to pin them here</span>
+            ) : null}
+          </div>
+          {bookmarks.length > 0 ? (
+            <ul className="live-my-players-list">
+              {bookmarks.map((b) => {
+                const live = playerById.get(b.id);
+                const label = live?.name ?? b.name;
+                return (
+                  <li key={b.id}>
+                    <button
+                      type="button"
+                      className="live-my-player-chip"
+                      onClick={() => navigate(`/live/${token}/p/${b.id}`)}
+                    >
+                      <span className="live-my-player-avatar" aria-hidden>
+                        {initialOf(label)}
+                      </span>
+                      <span className="live-my-player-name">{label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </div>
       </div>
 
-      <div className="tabs live-tabs">
+      <div className="tabs live-tabs" role="tablist">
         <button
           type="button"
           className={`tab ${tab === 'boards' ? 'active' : ''}`}
@@ -369,7 +462,10 @@ export default function LivePage() {
               </button>
             ))}
           </div>
-          <p className="live-hint-inline">Tap a player for full history. Points shown are totals so far.</p>
+          <p className="live-hint-inline">
+            Tap a player for history. Points are totals so far. Star someone under Players or
+            search to pin them.
+          </p>
           {filteredBoards.length === 0 ? (
             <p className="form-hint">
               {q
@@ -378,21 +474,27 @@ export default function LivePage() {
             </p>
           ) : (
             <ul className="live-board-list">
-              {filteredBoards.map((g) => (
-                <BoardCard
-                  key={`${g.round}-${g.board}-${g.whiteId}-${g.blackId}`}
-                  game={g}
-                  white={g.whiteId ? playerById.get(g.whiteId) : null}
-                  black={g.blackId ? playerById.get(g.blackId) : null}
-                  whitePts={
-                    g.whiteId ? runningScore(data.games, g.whiteId, displayRound) : 0
-                  }
-                  blackPts={
-                    g.blackId ? runningScore(data.games, g.blackId, displayRound) : 0
-                  }
-                  onOpen={(id) => navigate(`/live/${token}/p/${id}`)}
-                />
-              ))}
+              {filteredBoards.map((g) => {
+                const highlighted =
+                  (g.whiteId != null && bookmarkedIds.has(g.whiteId)) ||
+                  (g.blackId != null && bookmarkedIds.has(g.blackId));
+                return (
+                  <BoardCard
+                    key={`${g.round}-${g.board}-${g.whiteId}-${g.blackId}`}
+                    game={g}
+                    highlighted={highlighted}
+                    white={g.whiteId ? playerById.get(g.whiteId) : null}
+                    black={g.blackId ? playerById.get(g.blackId) : null}
+                    whitePts={
+                      g.whiteId ? runningScore(data.games, g.whiteId, displayRound) : 0
+                    }
+                    blackPts={
+                      g.blackId ? runningScore(data.games, g.blackId, displayRound) : 0
+                    }
+                    onOpen={(id) => navigate(`/live/${token}/p/${id}`)}
+                  />
+                );
+              })}
             </ul>
           )}
         </section>
@@ -421,104 +523,137 @@ export default function LivePage() {
                 ? ` · ${data.categories.find((c) => c.id === standingsCatId)?.name ?? ''}`
                 : ''}
             </p>
-            <TiebreakRulesHelp />
+            <div className="live-standings-tools">
+              <button
+                type="button"
+                className={`btn btn-sm ${showTiebreaks ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setShowTiebreaks((v) => !v)}
+              >
+                {showTiebreaks ? 'Hide tiebreaks' : 'Show tiebreaks'}
+              </button>
+              <TiebreakRulesHelp />
+            </div>
           </div>
           {standings.length === 0 ? (
             <p className="form-hint">No standings yet — results will appear here.</p>
           ) : (
-            <table className="data-table standings-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th title="Start rank">Start</th>
-                  <th>Name</th>
-                  <th>Score</th>
-                  <th title="Buchholz">BH</th>
-                  <th title="Buchholz Cut-1">BH-C1</th>
-                  <th title="Sonneborn-Berger">SB</th>
-                  <th title="Progressive">Prog</th>
-                  <th title="Wins">Wins</th>
-                </tr>
-              </thead>
-              <tbody>
-                {standings.map((s) => {
-                  const isPrize = s.rank <= prizePlacesN;
-                  const start = data.players.find((p) => p.id === s.id)?.seed;
-                  return (
-                    <tr key={s.id} className={isPrize ? 'rank-prize' : ''}>
-                      <td>{s.rank}</td>
-                      <td>{start ?? '—'}</td>
-                      <td>
-                        <Link to={`/live/${token}/p/${s.id}`}>{s.name}</Link>
-                      </td>
-                      <td>{resultPointsLabel(s.score)}</td>
-                      <td>{resultPointsLabel(s.buchholz)}</td>
-                      <td>{resultPointsLabel(s.buchholzCut1)}</td>
-                      <td>{resultPointsLabel(s.sonnebornBerger)}</td>
-                      <td>{resultPointsLabel(s.progressive)}</td>
-                      <td>{s.wins}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="live-table-scroll">
+              <table
+                className={`data-table standings-table live-standings-table ${
+                  showTiebreaks ? 'is-expanded' : 'is-compact'
+                }`}
+              >
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th className="live-col-start">Start</th>
+                    <th className="live-col-name">Name</th>
+                    <th>Score</th>
+                    {showTiebreaks ? (
+                      <>
+                        <th title="Buchholz">BH</th>
+                        <th title="Buchholz Cut-1">BH-C1</th>
+                        <th title="Sonneborn-Berger">SB</th>
+                        <th title="Progressive">Prog</th>
+                        <th title="Wins">Wins</th>
+                      </>
+                    ) : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {standings.map((s) => {
+                    const isPrize = s.rank <= prizePlacesN;
+                    const start = data.players.find((p) => p.id === s.id)?.seed;
+                    return (
+                      <tr
+                        key={s.id}
+                        className={[
+                          isPrize ? 'rank-prize' : '',
+                          bookmarkedIds.has(s.id) ? 'live-row-pinned' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
+                        <td>{s.rank}</td>
+                        <td className="live-col-start">{start ?? '—'}</td>
+                        <td className="live-col-name">
+                          <Link to={`/live/${token}/p/${s.id}`}>{s.name}</Link>
+                        </td>
+                        <td>{resultPointsLabel(s.score)}</td>
+                        {showTiebreaks ? (
+                          <>
+                            <td>{resultPointsLabel(s.buchholz)}</td>
+                            <td>{resultPointsLabel(s.buchholzCut1)}</td>
+                            <td>{resultPointsLabel(s.sonnebornBerger)}</td>
+                            <td>{resultPointsLabel(s.progressive)}</td>
+                            <td>{s.wins}</td>
+                          </>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
       )}
 
       {tab === 'players' && (
         <section className="live-section">
-          <p className="form-hint">
-            Rated players first, then unrated A–Z. Tap a name for full profile.
+          <p className="live-hint-inline">
+            Rated first, then unrated A–Z. Tap a card for details, or star to pin under My players.
           </p>
-          <table className="data-table standings-table">
-            <thead>
-              <tr>
-                <th>Start</th>
-                <th>End</th>
-                <th>Name</th>
-                <th>FIDE</th>
-                <th>YOB</th>
-                <th>School</th>
-                <th>City</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortRoster(
-                data.players.filter((p) =>
-                  matchesTextSearch(
-                    search,
-                    p.name,
-                    p.school,
-                    p.club,
-                    p.city,
-                    p.state,
-                    p.rating,
-                    p.yearOfBirth,
-                  ),
+          <ul className="live-player-cards">
+            {sortRoster(
+              data.players.filter((p) =>
+                matchesTextSearch(
+                  search,
+                  p.name,
+                  p.school,
+                  p.club,
+                  p.city,
+                  p.state,
+                  p.rating,
+                  p.yearOfBirth,
                 ),
-              ).map((p) => {
-                const end =
-                  standings.find((s) => s.id === p.id)?.rank ??
-                  null;
-                return (
-                  <tr key={p.id}>
-                    <td>{p.seed ?? '—'}</td>
-                    <td>{end ?? '—'}</td>
-                    <td>
-                      <Link to={`/live/${token}/p/${p.id}`}>{p.name}</Link>
-                    </td>
-                    <td>{p.rating && p.rating > 0 ? p.rating : '—'}</td>
-                    <td>{p.yearOfBirth ?? '—'}</td>
-                    <td>{displaySchool(p) ?? '—'}</td>
-                    <td>{p.city ?? '—'}</td>
-                    <td>{p.state ?? '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+              ),
+            ).map((p) => {
+              const end = endRankById.get(p.id) ?? null;
+              const pinned = bookmarkedIds.has(p.id);
+              return (
+                <li key={p.id}>
+                  <div className={`live-player-card ${pinned ? 'is-pinned' : ''}`}>
+                    <button
+                      type="button"
+                      className="live-player-card-main"
+                      onClick={() => navigate(`/live/${token}/p/${p.id}`)}
+                    >
+                      <div className="live-player-card-ranks">
+                        <span>
+                          Start <strong>{p.seed ?? '—'}</strong>
+                        </span>
+                        <span>
+                          End <strong>{end ?? '—'}</strong>
+                        </span>
+                      </div>
+                      <strong className="live-player-card-name">{p.name}</strong>
+                      <span className="live-player-card-meta">
+                        {p.rating && p.rating > 0 ? `FIDE ${p.rating}` : 'Unrated'}
+                        {displaySchool(p) ? ` · ${displaySchool(p)}` : ''}
+                      </span>
+                      {(p.city || p.state) && (
+                        <span className="live-player-card-place">
+                          {[p.city, p.state, p.country ?? 'Malaysia'].filter(Boolean).join(', ')}
+                        </span>
+                      )}
+                    </button>
+                    <BookmarkButton active={pinned} onToggle={() => pinPlayer(p)} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </section>
       )}
     </div>
@@ -529,11 +664,15 @@ function SearchHit({
   player,
   game,
   score,
+  bookmarked,
+  onToggleBookmark,
   onOpen,
 }: {
   player: LivePlayer;
   game: LiveGame | null;
   score: number;
+  bookmarked: boolean;
+  onToggleBookmark: () => void;
   onOpen: () => void;
 }) {
   const isBye = Boolean(game && (game.isBye || game.result === 'bye'));
@@ -545,27 +684,31 @@ function SearchHit({
       : null;
 
   return (
-    <button type="button" className="live-search-hit" onClick={onOpen}>
-      <div className="live-search-hit-main">
-        <strong>{player.name}</strong>
-        <span className="live-search-hit-pts">
-          {resultPointsLabel(score)} pts
-        </span>
-      </div>
-      <div className="live-search-hit-meta">
-        {!game ? (
-          <span className="live-chip live-chip-muted">Not paired yet</span>
-        ) : isBye ? (
-          <span className="live-chip">Bye</span>
-        ) : (
-          <>
-            <span className="live-chip live-chip-table">Table {game.board}</span>
-            {color && <ColorPill color={color} />}
-          </>
-        )}
-        <span className="live-search-hit-cta">Details →</span>
-      </div>
-    </button>
+    <div className="live-search-hit">
+      <button type="button" className="live-search-hit-body" onClick={onOpen}>
+        <div className="live-search-hit-main">
+          <strong className="live-search-hit-name">{player.name}</strong>
+          <span className="live-search-hit-pts">
+            {resultPointsLabel(score)}
+            <small>pts</small>
+          </span>
+        </div>
+        <div className="live-search-hit-meta">
+          {!game ? (
+            <span className="live-chip live-chip-muted">Not paired yet</span>
+          ) : isBye ? (
+            <span className="live-chip">Bye</span>
+          ) : (
+            <>
+              <span className="live-chip live-chip-table">Table {game.board}</span>
+              {color && <ColorPill color={color} />}
+            </>
+          )}
+          <span className="live-search-hit-cta">Details →</span>
+        </div>
+      </button>
+      <BookmarkButton active={bookmarked} onToggle={onToggleBookmark} />
+    </div>
   );
 }
 
@@ -575,6 +718,7 @@ function BoardCard({
   black,
   whitePts,
   blackPts,
+  highlighted,
   onOpen,
 }: {
   game: LiveGame;
@@ -582,20 +726,24 @@ function BoardCard({
   black: LivePlayer | null | undefined;
   whitePts: number;
   blackPts: number;
+  highlighted?: boolean;
   onOpen: (id: string) => void;
 }) {
   if (game.isBye || game.result === 'bye') {
     const byeId = game.whiteId ?? game.blackId;
     const byeName = white?.name ?? black?.name ?? 'Player';
     return (
-      <li className="live-board-card live-board-bye">
+      <li
+        className={`live-board-card live-board-bye ${highlighted ? 'is-pinned-board' : ''}`}
+      >
         <div className="live-board-top">
           <span className="live-board-badge">Bye</span>
+          {highlighted ? <span className="live-pinned-tag">My player</span> : null}
           <span className="live-result-pill">1 pt</span>
         </div>
         {byeId ? (
           <button type="button" className="live-bye-player" onClick={() => onOpen(byeId)}>
-            <span>{byeName}</span>
+            <span className="live-bye-name">{byeName}</span>
             <span className="live-side-pts">
               {resultPointsLabel(whitePts || blackPts)}
               <small>pts</small>
@@ -609,9 +757,10 @@ function BoardCard({
   }
 
   return (
-    <li className="live-board-card">
+    <li className={`live-board-card ${highlighted ? 'is-pinned-board' : ''}`}>
       <div className="live-board-top">
         <span className="live-board-badge">Table {game.board}</span>
+        {highlighted ? <span className="live-pinned-tag">My player</span> : null}
         <span
           className={`live-result-pill ${
             game.result === 'pending' ? 'is-pending' : 'is-done'
@@ -651,6 +800,8 @@ function LivePlayerView({
   error,
   displayRound,
   rounds,
+  bookmarks,
+  onToggleBookmark,
   onRoundChange,
   onBack,
 }: {
@@ -661,6 +812,8 @@ function LivePlayerView({
   error: string | null;
   displayRound: number;
   rounds: number[];
+  bookmarks: LiveBookmark[];
+  onToggleBookmark: (player: { id: string; name: string }) => void;
   onRoundChange: (r: number) => void;
   onBack: () => void;
 }) {
@@ -684,11 +837,14 @@ function LivePlayerView({
   const oppScore = opponentId
     ? runningScore(data.games, opponentId, displayRound)
     : null;
+  const endRank =
+    computeLiveStandings(data, null).find((s) => s.id === playerId)?.rank ?? null;
+  const pinned = bookmarks.some((b) => b.id === playerId);
 
   if (!player) {
     return (
       <div className="live-page">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}>
+        <button type="button" className="btn btn-ghost btn-sm live-back-btn" onClick={onBack}>
           ← All tables
         </button>
         <p className="form-error">Player not found in this tournament.</p>
@@ -704,7 +860,7 @@ function LivePlayerView({
     <div className="live-page">
       <header className="live-header">
         <div className="live-header-row">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}>
+          <button type="button" className="btn btn-ghost btn-sm live-back-btn" onClick={onBack}>
             ← All tables
           </button>
           <span className="table-score-conn" title={online ? 'Online' : 'Offline'}>
@@ -714,6 +870,11 @@ function LivePlayerView({
         </div>
         <p className="live-brand">{data.tournament.name}</p>
         <h1>{player.name}</h1>
+        <BookmarkButton
+          active={pinned}
+          large
+          onToggle={() => onToggleBookmark(player)}
+        />
         <dl className="live-player-profile">
           <div>
             <dt>Year of birth</dt>
@@ -725,10 +886,7 @@ function LivePlayerView({
           </div>
           <div>
             <dt>End rank</dt>
-            <dd>
-              {computeLiveStandings(data, null).find((s) => s.id === playerId)?.rank ??
-                '—'}
-            </dd>
+            <dd>{endRank ?? '—'}</dd>
           </div>
           <div>
             <dt>FIDE rating</dt>
@@ -860,7 +1018,7 @@ function LivePlayerView({
                   </span>
                 </div>
                 <div className="live-history-body">
-                  <span>
+                  <span className="live-history-opp">
                     {row.isBye ? (
                       'Bye'
                     ) : row.opponentId ? (
