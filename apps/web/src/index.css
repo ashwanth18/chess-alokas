@@ -3696,6 +3696,30 @@ a.landing-download-option:hover {
   text-transform: uppercase;
   color: var(--ink-300);
 }
+.live-player-profile {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.45rem 0.75rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+.live-player-profile div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.live-player-profile dt {
+  margin: 0;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-300);
+}
+.live-player-profile dd {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-100);
+}
 .live-header h1 {
   margin: 0.2rem 0;
   font-size: 1.65rem;

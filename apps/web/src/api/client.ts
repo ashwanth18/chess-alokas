@@ -388,8 +388,10 @@ export async function apiDirectorRemoveCard(
 ) {
   return req<{
     ok: true;
+    game: Game;
     whiteCards: PlayerCardCounts;
     blackCards: PlayerCardCounts;
+    unlocked: boolean;
   }>(`/tournaments/${tournamentId}/games/${gameId}/cards/${cardId}`, {
     method: 'DELETE',
   });
@@ -414,6 +416,11 @@ export type PublicLivePayload = {
     name: string;
     rating: number | null;
     club: string | null;
+    school: string | null;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    yearOfBirth: number | null;
     seed: number | null;
     categoryIds: string[];
   }>;

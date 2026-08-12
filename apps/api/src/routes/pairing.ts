@@ -3,8 +3,6 @@ import { z } from 'zod';
 import {
   GameCardTypeSchema,
   GameResultSchema,
-  countCardsForPlayer,
-  emptyCardCounts,
   isStyleImplemented,
 } from '@chess-alokas/shared';
 import {
@@ -17,7 +15,7 @@ import type { EnginePlayer, PastGame } from '@chess-alokas/pairing-engine';
 import type { Participant, Game, Category } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { issueGameCard } from '../lib/gameCards.js';
+import { issueGameCard, removeGameCard } from '../lib/gameCards.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -380,34 +378,22 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     if (!game || game.deletedAt || game.tournamentId !== tournamentId) {
       return reply.code(404).send({ error: 'Game not found' });
     }
-    if (game.result !== 'pending' || game.resultLockedAt) {
-      return reply
-        .code(409)
-        .send({ error: 'Cannot remove cards after the result is entered or locked' });
-    }
-    if ((tournament.confirmedRounds ?? 0) >= game.round) {
-      return reply.code(409).send({ error: 'Round is confirmed — cards are locked' });
-    }
 
-    const cards = await store.listGameCards(gameId);
-    const target = cards.find((c) => c.id === cardId);
-    if (!target) {
-      return reply.code(404).send({ error: 'Card not found' });
+    const removed = await removeGameCard(store, {
+      game,
+      cardId,
+      confirmedRounds: tournament.confirmedRounds ?? 0,
+    });
+    if (!removed.ok) {
+      return reply.code(removed.status).send({ error: removed.error });
     }
-    const removed = await store.softDeleteGameCard(cardId);
-    if (!removed) {
-      return reply.code(404).send({ error: 'Card not found' });
-    }
-    const remaining = await store.listGameCards(gameId);
     return {
       ok: true,
-      card: removed,
-      whiteCards: game.whiteId
-        ? countCardsForPlayer(remaining, game.whiteId)
-        : emptyCardCounts(),
-      blackCards: game.blackId
-        ? countCardsForPlayer(remaining, game.blackId)
-        : emptyCardCounts(),
+      card: removed.card,
+      game: removed.game,
+      whiteCards: removed.whiteCounts,
+      blackCards: removed.blackCounts,
+      unlocked: removed.unlocked,
     };
   });
 

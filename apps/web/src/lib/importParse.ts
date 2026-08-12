@@ -31,11 +31,11 @@ export function normalizeGender(raw: string | undefined | null): string | undefi
   return raw.trim();
 }
 
-/**
- * Malaysian NRIC birth date: first 6 digits YYMMDD.
- * Returns approximate age in whole years, or null if unparsable.
- */
-export function ageFromNric(nric: string | null | undefined, asOf: Date = new Date()): number | null {
+/** Parse Malaysian NRIC first 6 digits into a Date, or null. */
+export function birthDateFromNric(
+  nric: string | null | undefined,
+  asOf: Date = new Date(),
+): Date | null {
   if (!nric) return null;
   const digits = String(nric).replace(/\D/g, '');
   if (digits.length < 6) return null;
@@ -48,7 +48,18 @@ export function ageFromNric(nric: string | null | undefined, asOf: Date = new Da
   const century = yy <= yearNow % 100 ? 2000 : 1900;
   const birth = new Date(century + yy, mm - 1, dd);
   if (Number.isNaN(birth.getTime())) return null;
+  return birth;
+}
 
+/**
+ * Malaysian NRIC birth date: first 6 digits YYMMDD.
+ * Returns approximate age in whole years, or null if unparsable.
+ */
+export function ageFromNric(nric: string | null | undefined, asOf: Date = new Date()): number | null {
+  const birth = birthDateFromNric(nric, asOf);
+  if (!birth) return null;
+
+  const yearNow = asOf.getFullYear();
   let age = yearNow - birth.getFullYear();
   const hadBirthday =
     asOf.getMonth() > birth.getMonth() ||
@@ -56,6 +67,40 @@ export function ageFromNric(nric: string | null | undefined, asOf: Date = new Da
   if (!hadBirthday) age -= 1;
   if (age < 0 || age > 120) return null;
   return age;
+}
+
+export function yearOfBirthFromNric(
+  nric: string | null | undefined,
+  asOf: Date = new Date(),
+): number | null {
+  const birth = birthDateFromNric(nric, asOf);
+  if (!birth) return null;
+  const y = birth.getFullYear();
+  if (y < 1900 || y > asOf.getFullYear()) return null;
+  return y;
+}
+
+export function resolveYearOfBirth(opts: {
+  yearRaw?: string;
+  nric?: string;
+  asOf?: Date;
+}): number | null {
+  const parsed = parseInt(opts.yearRaw ?? '', 10);
+  if (Number.isFinite(parsed) && parsed >= 1900 && parsed <= (opts.asOf ?? new Date()).getFullYear()) {
+    return parsed;
+  }
+  return yearOfBirthFromNric(opts.nric, opts.asOf);
+}
+
+/** Prefer school; fall back to legacy club. */
+export function displaySchool(p: {
+  school?: string | null;
+  club?: string | null;
+}): string | null {
+  const s = p.school?.trim();
+  if (s) return s;
+  const c = p.club?.trim();
+  return c || null;
 }
 
 /** Parse labels like "UNDER 12", "U12", "Under-18" into an age band upper bound. */

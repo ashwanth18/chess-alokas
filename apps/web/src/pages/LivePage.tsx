@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { sortRoster } from '@chess-alokas/pairing-engine';
+import { ILLEGAL_MOVE_LIMIT, WARNING_LIMIT } from '@chess-alokas/shared';
 import {
   apiPublicLiveGet,
   checkOnline,
@@ -8,6 +10,7 @@ import {
 } from '../api/client';
 import TableSearch from '../components/TableSearch';
 import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
+import { displaySchool } from '../lib/importParse';
 import { matchesTextSearch } from '../lib/textSearch';
 import {
   buildPlayerHistory,
@@ -20,9 +23,8 @@ import {
   type LivePlayer,
 } from '../lib/liveViewer';
 import { resolvePrizePlaces } from '../lib/prizePlaces';
-import { ILLEGAL_MOVE_LIMIT, WARNING_LIMIT } from '@chess-alokas/shared';
 
-type LiveTab = 'boards' | 'standings';
+type LiveTab = 'boards' | 'standings' | 'players';
 
 function networkErrorMessage(raw: string): string {
   if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(raw)) {
@@ -344,6 +346,13 @@ export default function LivePage() {
         >
           Standings
         </button>
+        <button
+          type="button"
+          className={`tab ${tab === 'players' ? 'active' : ''}`}
+          onClick={() => setTab('players')}
+        >
+          Players
+        </button>
       </div>
 
       {tab === 'boards' && (
@@ -421,6 +430,7 @@ export default function LivePage() {
               <thead>
                 <tr>
                   <th>Rank</th>
+                  <th title="Start rank">Start</th>
                   <th>Name</th>
                   <th>Score</th>
                   <th title="Buchholz">BH</th>
@@ -433,9 +443,11 @@ export default function LivePage() {
               <tbody>
                 {standings.map((s) => {
                   const isPrize = s.rank <= prizePlacesN;
+                  const start = data.players.find((p) => p.id === s.id)?.seed;
                   return (
                     <tr key={s.id} className={isPrize ? 'rank-prize' : ''}>
                       <td>{s.rank}</td>
+                      <td>{start ?? '—'}</td>
                       <td>
                         <Link to={`/live/${token}/p/${s.id}`}>{s.name}</Link>
                       </td>
@@ -451,6 +463,62 @@ export default function LivePage() {
               </tbody>
             </table>
           )}
+        </section>
+      )}
+
+      {tab === 'players' && (
+        <section className="live-section">
+          <p className="form-hint">
+            Rated players first, then unrated A–Z. Tap a name for full profile.
+          </p>
+          <table className="data-table standings-table">
+            <thead>
+              <tr>
+                <th>Start</th>
+                <th>End</th>
+                <th>Name</th>
+                <th>FIDE</th>
+                <th>YOB</th>
+                <th>School</th>
+                <th>City</th>
+                <th>State</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortRoster(
+                data.players.filter((p) =>
+                  matchesTextSearch(
+                    search,
+                    p.name,
+                    p.school,
+                    p.club,
+                    p.city,
+                    p.state,
+                    p.rating,
+                    p.yearOfBirth,
+                  ),
+                ),
+              ).map((p) => {
+                const end =
+                  standings.find((s) => s.id === p.id)?.rank ??
+                  null;
+                return (
+                  <tr key={p.id}>
+                    <td>{p.seed ?? '—'}</td>
+                    <td>{end ?? '—'}</td>
+                    <td>
+                      <Link to={`/live/${token}/p/${p.id}`}>{p.name}</Link>
+                    </td>
+                    <td>{p.rating && p.rating > 0 ? p.rating : '—'}</td>
+                    <td>{p.yearOfBirth ?? '—'}</td>
+                    <td>{displaySchool(p) ?? '—'}</td>
+                    <td>{p.city ?? '—'}</td>
+                    <td>{p.state ?? '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </section>
       )}
     </div>
@@ -646,6 +714,43 @@ function LivePlayerView({
         </div>
         <p className="live-brand">{data.tournament.name}</p>
         <h1>{player.name}</h1>
+        <dl className="live-player-profile">
+          <div>
+            <dt>Year of birth</dt>
+            <dd>{player.yearOfBirth ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Start rank</dt>
+            <dd>{player.seed ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>End rank</dt>
+            <dd>
+              {computeLiveStandings(data, null).find((s) => s.id === playerId)?.rank ??
+                '—'}
+            </dd>
+          </div>
+          <div>
+            <dt>FIDE rating</dt>
+            <dd>{player.rating && player.rating > 0 ? player.rating : 'Unrated'}</dd>
+          </div>
+          <div>
+            <dt>School</dt>
+            <dd>{displaySchool(player) ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>City</dt>
+            <dd>{player.city ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>State</dt>
+            <dd>{player.state ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Country</dt>
+            <dd>{player.country ?? 'Malaysia'}</dd>
+          </div>
+        </dl>
       </header>
 
       {!online && (

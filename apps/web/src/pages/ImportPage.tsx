@@ -12,6 +12,7 @@ import {
   isNumericAgeColumn,
   normalizeGender,
   resolveImportAge,
+  resolveYearOfBirth,
 } from '../lib/importParse';
 
 interface RawRow {
@@ -24,6 +25,11 @@ interface MappedParticipant {
   gender?: string;
   rating?: number;
   club?: string;
+  school?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  yearOfBirth?: number | null;
   email?: string;
   ageCategoryLabel?: string;
   customFields: Record<string, unknown>;
@@ -31,8 +37,41 @@ interface MappedParticipant {
 }
 
 const REQUIRED_FIELDS = ['name'] as const;
-const OPTIONAL_FIELDS = ['age', 'gender', 'rating', 'club', 'email'] as const;
+const OPTIONAL_FIELDS = [
+  'age',
+  'gender',
+  'rating',
+  'school',
+  'club',
+  'city',
+  'state',
+  'country',
+  'yearOfBirth',
+  'email',
+] as const;
 const ALL_FIELDS = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS] as const;
+
+const FIELD_LABELS: Record<(typeof ALL_FIELDS)[number], string> = {
+  name: 'Name',
+  age: 'Age',
+  gender: 'Gender',
+  rating: 'FIDE rating',
+  school: 'School',
+  club: 'Club (legacy)',
+  city: 'City',
+  state: 'State',
+  country: 'Country',
+  yearOfBirth: 'Year of birth',
+  email: 'Email',
+};
+
+function findColumn(cols: string[], patterns: RegExp[]): string | undefined {
+  for (const re of patterns) {
+    const hit = cols.find((c) => re.test(c));
+    if (hit) return hit;
+  }
+  return undefined;
+}
 
 /** XLSX cells are often numbers; CSV is strings — normalize before trim/parse. */
 function cellText(value: unknown): string {
@@ -63,8 +102,22 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
       const ratingCol = mapping['rating'];
       const ratingRaw = ratingCol ? cellText(row[ratingCol]) : '';
       const rating = ratingRaw ? parseInt(ratingRaw, 10) || undefined : undefined;
+      const schoolCol = mapping['school'];
+      const school = schoolCol ? cellText(row[schoolCol]) || undefined : undefined;
       const clubCol = mapping['club'];
       const club = clubCol ? cellText(row[clubCol]) || undefined : undefined;
+      const cityCol = mapping['city'];
+      const city = cityCol ? cellText(row[cityCol]) || undefined : undefined;
+      const stateCol = mapping['state'];
+      const state = stateCol ? cellText(row[stateCol]) || undefined : undefined;
+      const countryCol = mapping['country'];
+      const countryRaw = countryCol ? cellText(row[countryCol]) : '';
+      const country = countryRaw || 'Malaysia';
+      const yobCol = mapping['yearOfBirth'];
+      const yearOfBirth = resolveYearOfBirth({
+        yearRaw: yobCol ? cellText(row[yobCol]) : '',
+        nric,
+      });
       const emailCol = mapping['email'];
       const email = emailCol ? cellText(row[emailCol]) || undefined : undefined;
 
@@ -77,7 +130,21 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
         }
       }
 
-      return { name, age, gender, rating, club, email, ageCategoryLabel, customFields };
+      return {
+        name,
+        age,
+        gender,
+        rating,
+        school: school || club,
+        club,
+        city,
+        state,
+        country,
+        yearOfBirth,
+        email,
+        ageCategoryLabel,
+        customFields,
+      };
     });
 }
 
@@ -154,21 +221,37 @@ export default function ImportPage() {
   }, [caps, tournamentId, navigate]);
 
   function autoDetectMapping(cols: string[]): Record<string, string> {
-    const lower = cols.map((c) => c.toLowerCase().trim());
     const detected: Record<string, string> = {};
 
-    const matchers: Record<string, string[]> = {
-      name: ['name', 'player', 'full name', 'nama', 'player name'],
-      gender: ['gender', 'sex', 'm/f', 'male/female', 'jantina'],
-      rating: ['rating', 'elo', 'fide', 'national rating', 'rtg'],
-      club: ['club', 'team', 'school', 'academy', 'federation', 'sekolah'],
-      email: ['email', 'e-mail', 'mail', 'email address', 'e_mail'],
-    };
+    const name = findColumn(cols, [/^name$/i, /full\s*name/i, /\bnama\b/i, /player\s*name/i]);
+    if (name) detected.name = name;
 
-    for (const [field, keywords] of Object.entries(matchers)) {
-      const idx = lower.findIndex((c) => keywords.some((k) => c.includes(k)));
-      if (idx !== -1 && cols[idx] !== undefined) detected[field] = cols[idx]!;
-    }
+    const gender = findColumn(cols, [/gender/i, /\bsex\b/i, /jantina/i, /m\/f/i]);
+    if (gender) detected.gender = gender;
+
+    const rating = findColumn(cols, [/fide/i, /\brating\b/i, /\belo\b/i, /\brtg\b/i]);
+    if (rating) detected.rating = rating;
+
+    const school = findColumn(cols, [/school/i, /sekolah/i, /academy/i]);
+    if (school) detected.school = school;
+
+    const club = findColumn(cols, [/\bclub\b/i, /\bteam\b/i, /federation/i]);
+    if (club && club !== school) detected.club = club;
+
+    const city = findColumn(cols, [/\bcity\b/i, /bandar/i, /town/i]);
+    if (city) detected.city = city;
+
+    const state = findColumn(cols, [/\bstate\b/i, /negeri/i, /province/i]);
+    if (state) detected.state = state;
+
+    const country = findColumn(cols, [/country/i, /negara/i]);
+    if (country) detected.country = country;
+
+    const yob = findColumn(cols, [/year\s*of\s*birth/i, /\byob\b/i, /birth\s*year/i, /tahun\s*lahir/i]);
+    if (yob) detected.yearOfBirth = yob;
+
+    const email = findColumn(cols, [/e-?mail/i]);
+    if (email) detected.email = email;
 
     // Prefer a true numeric age column; never map "AGE CATEGORY" → age.
     const ageIdx = cols.findIndex((c) => isNumericAgeColumn(c));
@@ -287,6 +370,11 @@ export default function ImportPage() {
           gender: p.gender ?? null,
           rating: p.rating ?? null,
           club: p.club ?? null,
+          school: p.school ?? null,
+          city: p.city ?? null,
+          state: p.state ?? null,
+          country: p.country ?? 'Malaysia',
+          yearOfBirth: p.yearOfBirth ?? null,
           email: p.email ?? null,
           customFields: p.customFields,
           categoryIds: catIds,
@@ -391,13 +479,14 @@ export default function ImportPage() {
               <section className="mapping-section">
                 <h3>Column Mapping</h3>
                 <p className="form-hint">
-                  Map your file&apos;s columns to participant fields. Name is required. Age can be inferred from NRIC or AGE CATEGORY.
+                  Map your file&apos;s columns to participant fields. Name is required. Age and year of
+                  birth can be inferred from NRIC. Country defaults to Malaysia.
                 </p>
                 <div className="mapping-grid">
                   {ALL_FIELDS.map((field) => (
                     <div key={field} className="mapping-row">
                       <label className="mapping-label">
-                        {field.charAt(0).toUpperCase() + field.slice(1)}
+                        {FIELD_LABELS[field]}
                         {REQUIRED_FIELDS.includes(field as never) && (
                           <span className="required-star">*</span>
                         )}

@@ -132,13 +132,21 @@ export const ParticipantSchema = z.object({
   name: z.string().min(1),
   age: z.number().int().nonnegative(),
   gender: z.string().nullable().optional(),
+  /** FIDE (or other) rating; null/0 = unrated. */
   rating: z.number().int().nullable().optional(),
+  /** Legacy club field; prefer school when both exist. */
   club: z.string().nullable().optional(),
+  school: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  yearOfBirth: z.number().int().nullable().optional(),
   email: z
     .union([z.string().email(), z.literal(''), z.null()])
     .optional(),
   customFields: z.record(z.unknown()).default({}),
   categoryIds: z.array(z.string().uuid()).default([]),
+  /** Start rank / pairing number for the tournament. */
   seed: z.number().int().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
@@ -324,6 +332,11 @@ export const ColumnMappingSchema = z.object({
   gender: z.string().optional(),
   rating: z.string().optional(),
   club: z.string().optional(),
+  school: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  country: z.string().optional(),
+  yearOfBirth: z.string().optional(),
   email: z.string().optional(),
 });
 export type ColumnMapping = z.infer<typeof ColumnMappingSchema>;

@@ -156,3 +156,109 @@ export async function countsForGame(store: Store, game: Game): Promise<{
       : emptyCardCounts(),
   };
 }
+
+function isCardAutoForfeit(result: string): boolean {
+  return result === '1-0F' || result === '0-1F';
+}
+
+/** True when remaining cards for either side are still at/over a card limit. */
+function stillAtCardLimit(
+  game: Game,
+  cards: GameCard[],
+): boolean {
+  for (const pid of [game.whiteId, game.blackId]) {
+    if (!pid) continue;
+    const c = countCardsForPlayer(cards, pid);
+    if (c.illegalMove >= ILLEGAL_MOVE_LIMIT || c.warning >= WARNING_LIMIT) return true;
+  }
+  return false;
+}
+
+export type RemoveCardResult =
+  | {
+      ok: true;
+      card: GameCard;
+      game: Game;
+      whiteCounts: PlayerCardCounts;
+      blackCounts: PlayerCardCounts;
+      unlocked: boolean;
+    }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Soft-delete a card. If the board was auto-forfeited by a card limit and counts
+ * drop below the limit, clear the forfeit and unlock the result.
+ */
+export async function removeGameCard(
+  store: Store,
+  input: {
+    game: Game;
+    cardId: string;
+    confirmedRounds: number;
+  },
+): Promise<RemoveCardResult> {
+  const { game, cardId } = input;
+
+  if ((input.confirmedRounds ?? 0) >= game.round) {
+    return { ok: false, status: 409, error: 'This round is already confirmed closed' };
+  }
+
+  const cards = await store.listGameCards(game.id);
+  const target = cards.find((c) => c.id === cardId);
+  if (!target) {
+    return { ok: false, status: 404, error: 'Card not found' };
+  }
+
+  const wasCardForfeit =
+    Boolean(game.resultLockedAt) && isCardAutoForfeit(game.result);
+
+  // Allow remove while pending, or while locked only if it was a card auto-forfeit.
+  if (game.result !== 'pending' && !wasCardForfeit) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'Cannot remove cards after the result is entered or locked',
+    };
+  }
+  if (game.result === 'pending' && game.resultLockedAt && !wasCardForfeit) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'Cannot remove cards after the result is entered or locked',
+    };
+  }
+
+  const removed = await store.softDeleteGameCard(cardId);
+  if (!removed) {
+    return { ok: false, status: 404, error: 'Card not found' };
+  }
+
+  const remaining = await store.listGameCards(game.id);
+  let updatedGame = game;
+  let unlocked = false;
+
+  if (wasCardForfeit && !stillAtCardLimit(game, remaining)) {
+    const cleared = await store.updateGame(game.id, {
+      result: 'pending',
+      resultLockedAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+    if (cleared) {
+      updatedGame = cleared;
+      unlocked = true;
+    }
+  }
+
+  return {
+    ok: true,
+    card: removed,
+    game: updatedGame,
+    whiteCounts: game.whiteId
+      ? countCardsForPlayer(remaining, game.whiteId)
+      : emptyCardCounts(),
+    blackCounts: game.blackId
+      ? countCardsForPlayer(remaining, game.blackId)
+      : emptyCardCounts(),
+    unlocked,
+  };
+}

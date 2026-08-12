@@ -20,6 +20,13 @@ export {
 } from './swiss.js';
 
 export {
+  compareRosterOrder,
+  sortRoster,
+  assignStartRanks,
+  withStartRanks,
+} from './roster.js';
+
+export {
   pairRound,
   STYLE_META,
   UnsupportedPairingStyleError,

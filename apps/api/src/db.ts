@@ -571,6 +571,12 @@ export class MemoryStore implements Store {
         gender: (payload['gender'] as string | null | undefined) ?? null,
         rating: payload['rating'] != null ? Number(payload['rating']) : null,
         club: (payload['club'] as string | null | undefined) ?? null,
+        school: (payload['school'] as string | null | undefined) ?? null,
+        city: (payload['city'] as string | null | undefined) ?? null,
+        state: (payload['state'] as string | null | undefined) ?? null,
+        country: (payload['country'] as string | null | undefined) ?? null,
+        yearOfBirth:
+          payload['yearOfBirth'] != null ? Number(payload['yearOfBirth']) : null,
         email: (payload['email'] as string | null | undefined) || null,
         customFields: (payload['customFields'] as Record<string, unknown>) ?? {},
         categoryIds: (payload['categoryIds'] as string[]) ?? [],
@@ -660,6 +666,11 @@ interface ParticipantRow {
   gender: string | null;
   rating: number | null;
   club: string | null;
+  school: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  year_of_birth: number | null;
   email: string | null;
   custom_fields: Record<string, unknown>;
   category_ids: string[];
@@ -769,6 +780,11 @@ function rowToParticipant(row: ParticipantRow): Participant {
     gender: row.gender ?? undefined,
     rating: row.rating ?? undefined,
     club: row.club ?? undefined,
+    school: row.school ?? undefined,
+    city: row.city ?? undefined,
+    state: row.state ?? undefined,
+    country: row.country ?? undefined,
+    yearOfBirth: row.year_of_birth ?? undefined,
     email: row.email ?? undefined,
     customFields: row.custom_fields ?? {},
     categoryIds: row.category_ids ?? [],
@@ -985,10 +1001,13 @@ export class PostgresStore implements Store {
   async createParticipant(p: Participant): Promise<Participant> {
     const rows = await this.sql<ParticipantRow[]>`
       INSERT INTO participants
-        (id, tournament_id, name, age, gender, rating, club, email, custom_fields, category_ids, seed, updated_at, deleted_at)
+        (id, tournament_id, name, age, gender, rating, club, school, city, state, country,
+         year_of_birth, email, custom_fields, category_ids, seed, updated_at, deleted_at)
       VALUES
         (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
-         ${p.rating ?? null}, ${p.club ?? null}, ${p.email ?? null}, ${this.j(p.customFields)},
+         ${p.rating ?? null}, ${p.club ?? null}, ${p.school ?? null}, ${p.city ?? null},
+         ${p.state ?? null}, ${p.country ?? null}, ${p.yearOfBirth ?? null},
+         ${p.email ?? null}, ${this.j(p.customFields)},
            ${p.categoryIds}, ${p.seed ?? null}, ${p.updatedAt}, ${p.deletedAt ?? null})
       RETURNING *
     `;
@@ -1001,14 +1020,19 @@ export class PostgresStore implements Store {
     for (const p of participants) {
       const rows = await this.sql<ParticipantRow[]>`
         INSERT INTO participants
-          (id, tournament_id, name, age, gender, rating, club, email, custom_fields, category_ids, seed, updated_at, deleted_at)
+          (id, tournament_id, name, age, gender, rating, club, school, city, state, country,
+           year_of_birth, email, custom_fields, category_ids, seed, updated_at, deleted_at)
         VALUES
           (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
-           ${p.rating ?? null}, ${p.club ?? null}, ${p.email ?? null}, ${this.j(p.customFields)},
+           ${p.rating ?? null}, ${p.club ?? null}, ${p.school ?? null}, ${p.city ?? null},
+           ${p.state ?? null}, ${p.country ?? null}, ${p.yearOfBirth ?? null},
+           ${p.email ?? null}, ${this.j(p.customFields)},
            ${p.categoryIds}, ${p.seed ?? null}, ${p.updatedAt}, ${p.deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, age = EXCLUDED.age, gender = EXCLUDED.gender,
-          rating = EXCLUDED.rating, club = EXCLUDED.club, email = EXCLUDED.email,
+          rating = EXCLUDED.rating, club = EXCLUDED.club, school = EXCLUDED.school,
+          city = EXCLUDED.city, state = EXCLUDED.state, country = EXCLUDED.country,
+          year_of_birth = EXCLUDED.year_of_birth, email = EXCLUDED.email,
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
           seed = EXCLUDED.seed, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
@@ -1446,17 +1470,24 @@ export class PostgresStore implements Store {
       const categoryIds = (p['categoryIds'] as string[]) ?? [];
       await this.sql`
         INSERT INTO participants
-          (id, tournament_id, name, age, gender, rating, club, email, custom_fields, category_ids, seed, updated_at, deleted_at)
+          (id, tournament_id, name, age, gender, rating, club, school, city, state, country,
+           year_of_birth, email, custom_fields, category_ids, seed, updated_at, deleted_at)
         VALUES
           (${id}, ${String(p['tournamentId'] ?? '')}, ${String(p['name'] ?? '')},
            ${Number(p['age'] ?? 0)}, ${(p['gender'] as string) ?? null},
            ${p['rating'] != null ? Number(p['rating']) : null},
-           ${(p['club'] as string) ?? null}, ${(p['email'] as string) ?? null}, ${this.j(customFields)},
+           ${(p['club'] as string) ?? null}, ${(p['school'] as string) ?? null},
+           ${(p['city'] as string) ?? null}, ${(p['state'] as string) ?? null},
+           ${(p['country'] as string) ?? null},
+           ${p['yearOfBirth'] != null ? Number(p['yearOfBirth']) : null},
+           ${(p['email'] as string) ?? null}, ${this.j(customFields)},
            ${categoryIds}, ${p['seed'] != null ? Number(p['seed']) : null},
            ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           tournament_id = EXCLUDED.tournament_id, name = EXCLUDED.name, age = EXCLUDED.age,
           gender = EXCLUDED.gender, rating = EXCLUDED.rating, club = EXCLUDED.club,
+          school = EXCLUDED.school, city = EXCLUDED.city, state = EXCLUDED.state,
+          country = EXCLUDED.country, year_of_birth = EXCLUDED.year_of_birth,
           email = EXCLUDED.email,
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
           seed = EXCLUDED.seed, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at

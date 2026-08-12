@@ -1,7 +1,14 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { pairRound, computeStandings, computeSectionStandings } from '@chess-alokas/pairing-engine';
+import {
+  pairRound,
+  computeStandings,
+  computeSectionStandings,
+  assignStartRanks,
+  sortRoster,
+} from '@chess-alokas/pairing-engine';
+import { displaySchool } from '../lib/importParse';
 import type { FilterGroup, FilterOp, GameCardType, GameResult, TiebreakKey } from '@chess-alokas/shared';
 import {
   ILLEGAL_MOVE_LIMIT,
@@ -457,8 +464,19 @@ export default function TournamentPage() {
 
   const playerById = new Map((participants ?? []).map((p) => [p.id, p]));
 
-  const filteredParticipants = (participants ?? []).filter((p) =>
-    matchesTextSearch(playerSearch, p.name, p.club, p.rating),
+  const filteredParticipants = sortRoster(
+    (participants ?? []).filter((p) =>
+      matchesTextSearch(
+        playerSearch,
+        p.name,
+        p.club,
+        p.school,
+        p.city,
+        p.state,
+        p.rating,
+        p.yearOfBirth,
+      ),
+    ),
   );
 
   const filteredBoards = boardsForRound.filter((game) => {
@@ -728,6 +746,45 @@ export default function TournamentPage() {
       const round = nextPairingRound;
       const now = nowIso();
 
+      // Persist start ranks before Round 1 (rated first, then unrated A–Z).
+      if (round === 1) {
+        if (mix || !hasCategories) {
+          const ranks = assignStartRanks(participants);
+          for (const p of participants) {
+            const seed = ranks.get(p.id);
+            if (seed != null && p.seed !== seed) {
+              await db.participants.update(p.id, {
+                seed,
+                updatedAt: now,
+                dirty: 1,
+              });
+            }
+          }
+        } else {
+          for (const cat of categories ?? []) {
+            if (cat.deletedAt) continue;
+            const pool = participants.filter((p) => p.categoryIds?.includes(cat.id));
+            const ranks = assignStartRanks(pool);
+            for (const p of pool) {
+              const seed = ranks.get(p.id);
+              if (seed != null && p.seed !== seed) {
+                await db.participants.update(p.id, {
+                  seed,
+                  updatedAt: now,
+                  dirty: 1,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      const seedById = new Map(
+        (await db.participants.where('tournamentId').equals(id).toArray())
+          .filter((p) => !p.deletedAt)
+          .map((p) => [p.id, p.seed] as const),
+      );
+
       if (mix || !hasCategories) {
         const already = (games ?? []).some((g) => !g.deletedAt && g.round === round);
         if (already) {
@@ -740,7 +797,7 @@ export default function TournamentPage() {
           id: p.id,
           name: p.name,
           rating: p.rating ?? undefined,
-          seed: p.seed,
+          seed: seedById.get(p.id) ?? p.seed,
         }));
         const pastGames = (games ?? []).map((g) => ({
           round: g.round,
@@ -799,7 +856,7 @@ export default function TournamentPage() {
             id: p.id,
             name: p.name,
             rating: p.rating ?? undefined,
-            seed: p.seed,
+            seed: seedById.get(p.id) ?? p.seed,
           }));
           const pastGames = pastGamesForCat.map((g) => ({
             round: g.round,
@@ -1001,8 +1058,12 @@ export default function TournamentPage() {
     async (gameId: string, playerId: string) => {
       if (!id || !tournament) return;
       const game = (games ?? []).find((g) => g.id === gameId);
-      if (!game || game.result !== 'pending' || game.resultLockedAt) return;
+      if (!game) return;
+      const cardForfeit =
+        Boolean(game.resultLockedAt) &&
+        (game.result === '1-0F' || game.result === '0-1F');
       if (!canEditRoundResults(tournament, game.round)) return;
+      if (game.result !== 'pending' && !cardForfeit) return;
       const last = [...roundCards]
         .filter((c) => c.gameId === gameId && c.playerId === playerId)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
@@ -1010,14 +1071,26 @@ export default function TournamentPage() {
       if (!window.confirm('Remove the last card for this player?')) return;
       setCardBusyId(gameId);
       setPairError(null);
+      setCardMsg(null);
       try {
         const res = await apiDirectorRemoveCard(id, gameId, last.id);
         if (!res.ok) {
           setPairError(res.error || 'Could not remove card');
           return;
         }
+        if (res.data?.game) {
+          await db.games.update(gameId, {
+            result: res.data.game.result as GameResult,
+            resultLockedAt: res.data.game.resultLockedAt ?? null,
+            updatedAt: res.data.game.updatedAt || nowIso(),
+            dirty: 0,
+          });
+        }
         const cardsRes = await apiListGameCards(id, displayRound);
         if (cardsRes.ok && cardsRes.data?.cards) setRoundCards(cardsRes.data.cards);
+        if (res.data?.unlocked) {
+          setCardMsg('Card removed — board unlocked (forfeit cleared).');
+        }
       } finally {
         setCardBusyId(null);
       }
@@ -1116,6 +1189,12 @@ export default function TournamentPage() {
       return [];
     }
   }, [participants, games, activeCatId, mix, tournament?.tiebreakOrder, tournament?.sharedPlaces]);
+
+  const endRankById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of standings) map.set(s.id, s.rank);
+    return map;
+  }, [standings]);
 
   const standingsEmptyReason = useMemo(() => {
     if (!participants || participants.length === 0) return 'no-players' as const;
@@ -1458,7 +1537,7 @@ export default function TournamentPage() {
               id="player-search"
               value={playerSearch}
               onChange={setPlayerSearch}
-              placeholder="Search name, club, or rating…"
+              placeholder="Search name, school, city, or rating…"
               resultCount={filteredParticipants.length}
               totalCount={participants?.length}
             />
@@ -1481,26 +1560,32 @@ export default function TournamentPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>#</th>
+                  <th title="Start rank">Start</th>
+                  <th title="Current / end rank">End</th>
                   <th>Name</th>
-                  <th>Rating</th>
-                  <th>Age</th>
-                  <th>Gender</th>
-                  <th>Club</th>
+                  <th>FIDE</th>
+                  <th>YOB</th>
+                  <th>School</th>
+                  <th>City</th>
+                  <th>State</th>
+                  <th>Country</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredParticipants.map((p) => {
-                  const rosterNum =
-                    (participants ?? []).findIndex((x) => x.id === p.id) + 1;
+                  const startRank = p.seed ?? '—';
+                  const endRank = endRankById.get(p.id) ?? '—';
                   return (
                   <tr key={p.id}>
-                    <td>{rosterNum}</td>
+                    <td>{startRank}</td>
+                    <td>{endRank}</td>
                     <td>{p.name}</td>
-                    <td>{p.rating ?? '—'}</td>
-                    <td>{p.age}</td>
-                    <td>{p.gender ?? '—'}</td>
-                    <td>{p.club ?? '—'}</td>
+                    <td>{p.rating && p.rating > 0 ? p.rating : '—'}</td>
+                    <td>{p.yearOfBirth ?? '—'}</td>
+                    <td>{displaySchool(p) ?? '—'}</td>
+                    <td>{p.city ?? '—'}</td>
+                    <td>{p.state ?? '—'}</td>
+                    <td>{p.country ?? 'Malaysia'}</td>
                   </tr>
                   );
                 })}
@@ -1899,12 +1984,20 @@ export default function TournamentPage() {
                 const blackCounts = game.blackId
                   ? countCardsForPlayer(gameCards, game.blackId)
                   : emptyCardCounts();
+                const cardForfeitLocked =
+                  Boolean(game.resultLockedAt) &&
+                  (game.result === '1-0F' || game.result === '0-1F');
                 const canCard =
                   Boolean(tournament) &&
                   !game.isBye &&
                   !game.resultLockedAt &&
                   game.result === 'pending' &&
                   canEditRoundResults(tournament!, game.round);
+                const canUndoCard =
+                  Boolean(tournament) &&
+                  !game.isBye &&
+                  canEditRoundResults(tournament!, game.round) &&
+                  (canCard || cardForfeitLocked);
                 return (
                   <div key={game.id} className={`board-card ${game.isBye ? 'board-bye' : ''}`}>
                     <div className="board-card-head">
@@ -1965,21 +2058,22 @@ export default function TournamentPage() {
                                 >
                                   Illegal
                                 </button>
-                                {(whiteCounts.warning > 0 || whiteCounts.illegalMove > 0) &&
-                                  game.whiteId && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm btn-ghost"
-                                      disabled={cardBusyId === game.id}
-                                      onClick={() =>
-                                        void undoLastDirectorCard(game.id, game.whiteId!)
-                                      }
-                                    >
-                                      Undo last
-                                    </button>
-                                  )}
                               </>
                             )}
+                            {canUndoCard &&
+                              (whiteCounts.warning > 0 || whiteCounts.illegalMove > 0) &&
+                              game.whiteId && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-ghost"
+                                  disabled={cardBusyId === game.id}
+                                  onClick={() =>
+                                    void undoLastDirectorCard(game.id, game.whiteId!)
+                                  }
+                                >
+                                  Undo last
+                                </button>
+                              )}
                           </div>
                         )}
                       </div>
@@ -2019,21 +2113,22 @@ export default function TournamentPage() {
                                 >
                                   Illegal
                                 </button>
-                                {(blackCounts.warning > 0 || blackCounts.illegalMove > 0) &&
-                                  game.blackId && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm btn-ghost"
-                                      disabled={cardBusyId === game.id}
-                                      onClick={() =>
-                                        void undoLastDirectorCard(game.id, game.blackId!)
-                                      }
-                                    >
-                                      Undo last
-                                    </button>
-                                  )}
                               </>
                             )}
+                            {canUndoCard &&
+                              (blackCounts.warning > 0 || blackCounts.illegalMove > 0) &&
+                              game.blackId && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-ghost"
+                                  disabled={cardBusyId === game.id}
+                                  onClick={() =>
+                                    void undoLastDirectorCard(game.id, game.blackId!)
+                                  }
+                                >
+                                  Undo last
+                                </button>
+                              )}
                           </div>
                         </div>
                       )}

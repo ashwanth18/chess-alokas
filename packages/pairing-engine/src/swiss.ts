@@ -1,4 +1,5 @@
 import type { GameResult } from '@chess-alokas/shared';
+import { compareRosterOrder } from './roster.js';
 
 export type PlayerId = string;
 
@@ -54,13 +55,13 @@ export function buildPlayerStates(
   const states = new Map<PlayerId, PlayerState>();
 
   const sorted = [...players].sort((a, b) => {
-    const ra = a.rating ?? 0;
-    const rb = b.rating ?? 0;
-    if (rb !== ra) return rb - ra;
     const sa = a.seed ?? Number.MAX_SAFE_INTEGER;
     const sb = b.seed ?? Number.MAX_SAFE_INTEGER;
-    if (sa !== sb) return sa - sb;
-    return a.name.localeCompare(b.name);
+    if (a.seed != null && b.seed != null && sa !== sb) return sa - sb;
+    return compareRosterOrder(
+      { id: a.id, name: a.name, rating: a.rating },
+      { id: b.id, name: b.name, rating: b.rating },
+    );
   });
 
   sorted.forEach((p, index) => {
@@ -290,9 +291,26 @@ function selectByePlayer(players: PlayerState[]): PlayerState {
   return chosen;
 }
 
+/** Classic Dutch fold: seed i vs seed i + n/2 (after sorting by seed). */
+function dutchFoldPairs(pool: PlayerState[]): Array<[PlayerState, PlayerState]> {
+  const sorted = [...pool].sort((a, b) => a.seed - b.seed || a.name.localeCompare(b.name));
+  const half = sorted.length / 2;
+  const pairs: Array<[PlayerState, PlayerState]> = [];
+  for (let i = 0; i < half; i++) {
+    const top = sorted[i]!;
+    const bottom = sorted[i + half]!;
+    pairs.push([top, bottom]);
+  }
+  return pairs;
+}
+
+function isFirstRound(input: PairingInput): boolean {
+  return input.round === 1 || input.pastGames.length === 0;
+}
+
 /**
- * Generate FIDE Swiss (Dutch-inspired) pairings for one round.
- * Uses score groups with downfloaters and rematch-avoiding matching.
+ * Generate FIDE Swiss pairings for one round.
+ * Round 1 uses classic Dutch top-half vs bottom-half; later rounds use score groups.
  */
 export function pairSwissRound(input: PairingInput): PairingOutput {
   const states = buildPlayerStates(input.players, input.pastGames);
@@ -308,9 +326,13 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
     pool = pool.filter((p) => p.id !== byePlayer!.id);
   }
 
+  let allPairs: Array<[PlayerState, PlayerState]>;
+
+  if (isFirstRound(input)) {
+    allPairs = dutchFoldPairs(pool);
+  } else {
   // Try global rematch-free matching first (best for small fields)
   const globalNoRematch = findPerfectMatching(pool, false);
-  let allPairs: Array<[PlayerState, PlayerState]>;
 
   if (globalNoRematch) {
     allPairs = globalNoRematch;
@@ -356,6 +378,7 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
       allPairs = findPerfectMatching(pool, true) ?? allPairs;
     }
   }
+  }
 
   const boards: PairingBoard[] = [];
   let boardNum = 1;
@@ -364,6 +387,9 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
     const sx = x[0].score + x[1].score;
     const sy = y[0].score + y[1].score;
     if (sy !== sx) return sy - sx;
+    if (isFirstRound(input)) {
+      return Math.min(x[0].seed, x[1].seed) - Math.min(y[0].seed, y[1].seed);
+    }
     return (
       Math.max(x[0].rating, x[1].rating) - Math.max(y[0].rating, y[1].rating)
     );

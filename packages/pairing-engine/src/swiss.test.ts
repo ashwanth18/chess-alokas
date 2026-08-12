@@ -11,6 +11,8 @@ import {
   getSimulationStandings,
   UnsupportedPairingStyleError,
   pairRound,
+  assignStartRanks,
+  sortRoster,
   type EnginePlayer,
   type PastGame,
 } from '../src/index.js';
@@ -24,6 +26,21 @@ function players(n: number): EnginePlayer[] {
   }));
 }
 
+describe('roster order', () => {
+  it('puts rated players before unrated, then A–Z among unrated', () => {
+    const list = sortRoster([
+      { id: 'u2', name: 'Zoe', rating: null },
+      { id: 'r1', name: 'Ada', rating: 1500 },
+      { id: 'u1', name: 'Amy', rating: 0 },
+      { id: 'r2', name: 'Bob', rating: 1800 },
+    ]);
+    expect(list.map((p) => p.id)).toEqual(['r2', 'r1', 'u1', 'u2']);
+    const ranks = assignStartRanks(list);
+    expect(ranks.get('r2')).toBe(1);
+    expect(ranks.get('u2')).toBe(4);
+  });
+});
+
 describe('pairSwissRound', () => {
   it('pairs even number of players without byes', () => {
     const result = pairSwissRound({
@@ -33,6 +50,30 @@ describe('pairSwissRound', () => {
     });
     expect(result.boards.filter((b) => !b.isBye)).toHaveLength(4);
     expect(result.byePlayerId).toBeNull();
+  });
+
+  it('uses classic Dutch fold in round 1 (1–5, 2–6, 3–7, 4–8)', () => {
+    const plist = players(8);
+    const result = pairSwissRound({
+      players: plist,
+      pastGames: [],
+      round: 1,
+    });
+    const byId = new Map(plist.map((p) => [p.id, p]));
+    const pairs = result.boards
+      .filter((b) => !b.isBye)
+      .map((b) => {
+        const a = byId.get(b.whiteId!)!.seed!;
+        const bSeed = byId.get(b.blackId!)!.seed!;
+        return [Math.min(a, bSeed), Math.max(a, bSeed)] as const;
+      })
+      .sort((x, y) => x[0] - y[0]);
+    expect(pairs).toEqual([
+      [1, 5],
+      [2, 6],
+      [3, 7],
+      [4, 8],
+    ]);
   });
 
   it('assigns a bye when odd number of players', () => {
@@ -45,6 +86,8 @@ describe('pairSwissRound', () => {
     expect(result.boards.some((b) => b.isBye)).toBe(true);
     const paired = result.boards.filter((b) => !b.isBye);
     expect(paired).toHaveLength(3);
+    // With seeds 1–7, bye goes to highest seed (7); fold 1–4, 2–5, 3–6
+    expect(result.byePlayerId).toBe('p7');
   });
 
   it('avoids rematches across rounds', () => {

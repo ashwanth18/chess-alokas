@@ -67,9 +67,15 @@ export interface LocalParticipant {
   gender?: string | null;
   rating?: number | null;
   club?: string | null;
+  school?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  yearOfBirth?: number | null;
   email?: string | null;
   customFields: Record<string, unknown>;
   categoryIds: string[];
+  /** Start rank / pairing number */
   seed?: number;
   updatedAt: string;
   deletedAt?: string | null;
