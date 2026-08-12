@@ -10,7 +10,7 @@ import {
 } from '../api/client';
 import TableSearch from '../components/TableSearch';
 import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
-import { displaySchool } from '../lib/importParse';
+import { displaySchool, displayYearOfBirth } from '../lib/importParse';
 import {
   loadLiveBookmarks,
   toggleLiveBookmark,
@@ -22,6 +22,7 @@ import {
   computeLiveStandings,
   formatResultLabel,
   gameForPlayerRound,
+  liveStartRankMap,
   resultPointsLabel,
   runningScore,
   type LiveGame,
@@ -277,6 +278,8 @@ export default function LivePage() {
     for (const s of standings) map.set(s.id, s.rank);
     return map;
   }, [standings]);
+
+  const startRankById = useMemo(() => (data ? liveStartRankMap(data) : new Map()), [data]);
 
   const prizePlacesN = useMemo(() => {
     if (!data) return 3;
@@ -574,7 +577,7 @@ export default function LivePage() {
                 <tbody>
                   {standings.map((s) => {
                     const isPrize = s.rank <= prizePlacesN;
-                    const start = data.players.find((p) => p.id === s.id)?.seed;
+                    const start = startRankById.get(s.id);
                     return (
                       <tr
                         key={s.id}
@@ -642,7 +645,7 @@ export default function LivePage() {
                     >
                       <div className="live-player-card-ranks">
                         <span>
-                          Start <strong>{p.seed ?? '—'}</strong>
+                          Start <strong>{startRankById.get(p.id) ?? '—'}</strong>
                         </span>
                         <span>
                           End <strong>{end ?? '—'}</strong>
@@ -851,6 +854,7 @@ function LivePlayerView({
   const endRank =
     computeLiveStandings(data, null).find((s) => s.id === playerId)?.rank ?? null;
   const pinned = bookmarks.some((b) => b.id === playerId);
+  const startRankById = useMemo(() => liveStartRankMap(data), [data]);
 
   if (!player) {
     return (
@@ -889,11 +893,11 @@ function LivePlayerView({
         <dl className="live-player-profile">
           <div>
             <dt>Year of birth</dt>
-            <dd>{player.yearOfBirth ?? '—'}</dd>
+            <dd>{displayYearOfBirth(player) ?? '—'}</dd>
           </div>
           <div>
             <dt>Start rank</dt>
-            <dd>{player.seed ?? '—'}</dd>
+            <dd>{startRankById.get(player.id) ?? '—'}</dd>
           </div>
           <div>
             <dt>End rank</dt>

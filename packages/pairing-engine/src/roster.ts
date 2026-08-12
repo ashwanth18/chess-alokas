@@ -43,3 +43,48 @@ export function withStartRanks(players: EnginePlayer[]): EnginePlayer[] {
     seed: ranks.get(p.id) ?? p.seed,
   }));
 }
+
+type Rankable = {
+  id: string;
+  name: string;
+  rating?: number | null;
+  seed?: number | null;
+  categoryIds?: string[];
+};
+
+/**
+ * Start ranks for display: prefer persisted seed, otherwise rated-first then A–Z.
+ * When not mixed, ranks are 1…n within each category.
+ */
+export function computeStartRankMap(
+  players: Rankable[],
+  opts?: { mixCategories?: boolean },
+): Map<string, number> {
+  const map = new Map<string, number>();
+  const mix = opts?.mixCategories !== false;
+
+  const applyPool = (pool: Rankable[]) => {
+    const assigned = assignStartRanks(pool);
+    for (const p of pool) {
+      const stored = p.seed != null && p.seed > 0 ? p.seed : null;
+      map.set(p.id, stored ?? assigned.get(p.id) ?? 0);
+    }
+  };
+
+  if (mix) {
+    applyPool(players);
+    return map;
+  }
+
+  const byCat = new Map<string, Rankable[]>();
+  for (const p of players) {
+    const cats = p.categoryIds?.length ? p.categoryIds : ['_none'];
+    for (const c of cats) {
+      const list = byCat.get(c) ?? [];
+      list.push(p);
+      byCat.set(c, list);
+    }
+  }
+  for (const pool of byCat.values()) applyPool(pool);
+  return map;
+}

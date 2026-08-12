@@ -7,7 +7,7 @@ const NRIC_KEY_HINT = /nric|ic\b|mykad|identification/i;
 export function isNumericAgeColumn(columnName: string): boolean {
   const c = columnName.toLowerCase().trim();
   if (AGE_CATEGORY_HINT.test(c)) return false;
-  if (c === 'age' || c === 'years' || c === 'yr' || c === 'dob') return true;
+  if (c === 'age' || c === 'years' || c === 'yr') return true;
   if (/\bage\b/.test(c) && !AGE_CATEGORY_HINT.test(c)) return true;
   return c === 'years old' || c === 'umur';
 }
@@ -80,16 +80,62 @@ export function yearOfBirthFromNric(
   return y;
 }
 
+export function yearOfBirthFromAge(
+  age: number | null | undefined,
+  asOf: Date = new Date(),
+): number | null {
+  if (age == null || age <= 0 || age > 120) return null;
+  return asOf.getFullYear() - age;
+}
+
+/** Parse a YOB column, full DOB string, or 4-digit year. */
+export function parseYearOfBirthValue(raw: string | undefined | null, asOf: Date = new Date()): number | null {
+  const t = String(raw ?? '').trim();
+  if (!t) return null;
+  const maxYear = asOf.getFullYear();
+  if (/^\d{4}$/.test(t)) {
+    const y = parseInt(t, 10);
+    if (y >= 1900 && y <= maxYear) return y;
+    return null;
+  }
+  const iso = t.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (iso) {
+    const y = parseInt(iso[1]!, 10);
+    if (y >= 1900 && y <= maxYear) return y;
+  }
+  const dmy = t.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (dmy) {
+    const y = parseInt(dmy[3]!, 10);
+    if (y >= 1900 && y <= maxYear) return y;
+  }
+  const parsed = new Date(t);
+  if (!Number.isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    if (y >= 1900 && y <= maxYear) return y;
+  }
+  return null;
+}
+
 export function resolveYearOfBirth(opts: {
   yearRaw?: string;
   nric?: string;
+  age?: number;
   asOf?: Date;
 }): number | null {
-  const parsed = parseInt(opts.yearRaw ?? '', 10);
-  if (Number.isFinite(parsed) && parsed >= 1900 && parsed <= (opts.asOf ?? new Date()).getFullYear()) {
-    return parsed;
-  }
-  return yearOfBirthFromNric(opts.nric, opts.asOf);
+  const asOf = opts.asOf ?? new Date();
+  const fromRaw = parseYearOfBirthValue(opts.yearRaw, asOf);
+  if (fromRaw) return fromRaw;
+  const fromNric = yearOfBirthFromNric(opts.nric, asOf);
+  if (fromNric) return fromNric;
+  return yearOfBirthFromAge(opts.age, asOf);
+}
+
+export function displayYearOfBirth(p: {
+  yearOfBirth?: number | null;
+  age?: number | null;
+}): number | null {
+  if (p.yearOfBirth != null && p.yearOfBirth >= 1900) return p.yearOfBirth;
+  return yearOfBirthFromAge(p.age);
 }
 
 /** Prefer school; fall back to legacy club. */

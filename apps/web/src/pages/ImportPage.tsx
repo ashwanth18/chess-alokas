@@ -117,6 +117,7 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
       const yearOfBirth = resolveYearOfBirth({
         yearRaw: yobCol ? cellText(row[yobCol]) : '',
         nric,
+        age,
       });
       const emailCol = mapping['email'];
       const email = emailCol ? cellText(row[emailCol]) || undefined : undefined;
@@ -247,7 +248,15 @@ export default function ImportPage() {
     const country = findColumn(cols, [/country/i, /negara/i]);
     if (country) detected.country = country;
 
-    const yob = findColumn(cols, [/year\s*of\s*birth/i, /\byob\b/i, /birth\s*year/i, /tahun\s*lahir/i]);
+    const yob = findColumn(cols, [
+      /year\s*of\s*birth/i,
+      /\byob\b/i,
+      /birth\s*year/i,
+      /tahun\s*lahir/i,
+      /date\s*of\s*birth/i,
+      /\bdob\b/i,
+      /tarikh\s*lahir/i,
+    ]);
     if (yob) detected.yearOfBirth = yob;
 
     const email = findColumn(cols, [/e-?mail/i]);

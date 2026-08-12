@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
@@ -6,9 +6,10 @@ import {
   computeStandings,
   computeSectionStandings,
   assignStartRanks,
+  computeStartRankMap,
   sortRoster,
 } from '@chess-alokas/pairing-engine';
-import { displaySchool } from '../lib/importParse';
+import { displaySchool, displayYearOfBirth } from '../lib/importParse';
 import type { FilterGroup, FilterOp, GameCardType, GameResult, TiebreakKey } from '@chess-alokas/shared';
 import {
   ILLEGAL_MOVE_LIMIT,
@@ -74,6 +75,35 @@ const FILTER_OP_LABELS: Record<FilterOp, string> = {
   gte: '≥',
   in: 'in',
 };
+
+async function persistMissingSeedsAndYob(
+  players: Array<{
+    id: string;
+    name: string;
+    rating?: number | null;
+    seed?: number | null;
+    categoryIds?: string[];
+    yearOfBirth?: number | null;
+    age?: number | null;
+  }>,
+  mixCategories: boolean,
+) {
+  const now = nowIso();
+  const ranks = computeStartRankMap(players, { mixCategories });
+  for (const p of players) {
+    const seed = ranks.get(p.id);
+    const yob = displayYearOfBirth(p);
+    const patch: { seed?: number; yearOfBirth?: number } = {};
+    if ((p.seed == null || p.seed <= 0) && seed != null && seed > 0) patch.seed = seed;
+    if (p.yearOfBirth == null && yob != null) patch.yearOfBirth = yob;
+    if (Object.keys(patch).length === 0) continue;
+    await db.participants.update(p.id, {
+      ...patch,
+      updatedAt: now,
+      dirty: 1,
+    });
+  }
+}
 
 function formatFilterSummary(filter: FilterGroup | null | undefined): string {
   if (!filter?.rules?.length) return 'No filter (matches everyone)';
@@ -464,6 +494,31 @@ export default function TournamentPage() {
 
   const playerById = new Map((participants ?? []).map((p) => [p.id, p]));
 
+  const startRankById = useMemo(
+    () =>
+      computeStartRankMap(participants ?? [], {
+        mixCategories: mix || !hasCategories,
+      }),
+    [participants, mix, hasCategories],
+  );
+
+  const backfillKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !participants?.length || !caps) return;
+    if (caps.stage === 'draft') return;
+    const needs = participants.some(
+      (p) =>
+        p.seed == null ||
+        p.seed <= 0 ||
+        (p.yearOfBirth == null && displayYearOfBirth(p) != null),
+    );
+    if (!needs) return;
+    const key = `${id}:${participants.length}`;
+    if (backfillKey.current === key) return;
+    backfillKey.current = key;
+    void persistMissingSeedsAndYob(participants, mix || !hasCategories);
+  }, [id, participants, caps, mix, hasCategories]);
+
   const filteredParticipants = sortRoster(
     (participants ?? []).filter((p) =>
       matchesTextSearch(
@@ -487,6 +542,9 @@ export default function TournamentPage() {
 
   async function markReady() {
     if (!id || !caps?.canMarkReady) return;
+    if (participants?.length) {
+      await persistMissingSeedsAndYob(participants, mix || !hasCategories);
+    }
     await db.tournaments.update(id, {
       status: 'ready',
       updatedAt: nowIso(),
@@ -777,6 +835,7 @@ export default function TournamentPage() {
             }
           }
         }
+        await persistMissingSeedsAndYob(participants, mix || !hasCategories);
       }
 
       const seedById = new Map(
@@ -1573,15 +1632,16 @@ export default function TournamentPage() {
               </thead>
               <tbody>
                 {filteredParticipants.map((p) => {
-                  const startRank = p.seed ?? '—';
+                  const startRank = startRankById.get(p.id) ?? p.seed ?? '—';
                   const endRank = endRankById.get(p.id) ?? '—';
+                  const yob = displayYearOfBirth(p);
                   return (
                   <tr key={p.id}>
                     <td>{startRank}</td>
                     <td>{endRank}</td>
                     <td>{p.name}</td>
                     <td>{p.rating && p.rating > 0 ? p.rating : '—'}</td>
-                    <td>{p.yearOfBirth ?? '—'}</td>
+                    <td>{yob ?? '—'}</td>
                     <td>{displaySchool(p) ?? '—'}</td>
                     <td>{p.city ?? '—'}</td>
                     <td>{p.state ?? '—'}</td>

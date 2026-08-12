@@ -421,6 +421,7 @@ export type PublicLivePayload = {
     state: string | null;
     country: string | null;
     yearOfBirth: number | null;
+    age?: number | null;
     seed: number | null;
     categoryIds: string[];
   }>;

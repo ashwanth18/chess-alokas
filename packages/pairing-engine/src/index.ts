@@ -24,6 +24,7 @@ export {
   sortRoster,
   assignStartRanks,
   withStartRanks,
+  computeStartRankMap,
 } from './roster.js';
 
 export {

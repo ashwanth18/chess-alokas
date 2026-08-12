@@ -1,5 +1,9 @@
 import type { GameResult } from '@chess-alokas/shared';
-import { computeSectionStandings, computeStandings } from '@chess-alokas/pairing-engine';
+import {
+  computeSectionStandings,
+  computeStandings,
+  computeStartRankMap,
+} from '@chess-alokas/pairing-engine';
 import type { PublicLivePayload } from '../api/client';
 
 export type LivePlayer = PublicLivePayload['players'][number];
@@ -148,6 +152,11 @@ export function computeLiveStandings(
     : players;
   if (catPlayers.length === 0) return [];
   return computeStandings(toEngine(catPlayers), toPast(catGames));
+}
+
+export function liveStartRankMap(payload: PublicLivePayload): Map<string, number> {
+  const mix = payload.tournament.mixCategories || payload.categories.length === 0;
+  return computeStartRankMap(payload.players, { mixCategories: mix });
 }
 
 export function livePublicUrl(token: string): string {

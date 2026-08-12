@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { computeStartRankMap } from '@chess-alokas/pairing-engine';
 import { countCardsForPlayer, emptyCardCounts } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 
@@ -36,6 +37,12 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
       cardsByGame.set(card.gameId, list);
     }
 
+    const activeCategories = categories.filter((c) => !c.deletedAt);
+    const activePlayers = participants.filter((p) => !p.deletedAt);
+    const mix = tournament.mixCategories === true || activeCategories.length === 0;
+    const startRanks = computeStartRankMap(activePlayers, { mixCategories: mix });
+    const yearNow = new Date().getFullYear();
+
     return {
       tournament: {
         name: tournament.name,
@@ -47,16 +54,15 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
         status: tournament.status,
         prizePlaces: tournament.prizePlaces ?? 3,
       },
-      categories: categories
-        .filter((c) => !c.deletedAt)
-        .map((c) => ({
-          id: c.id,
-          name: c.name,
-          prizePlaces: c.prizePlaces ?? null,
-        })),
-      players: participants
-        .filter((p) => !p.deletedAt)
-        .map((p) => ({
+      categories: activeCategories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        prizePlaces: c.prizePlaces ?? null,
+      })),
+      players: activePlayers.map((p) => {
+        const fromAge =
+          p.age != null && p.age > 0 && p.age < 80 ? yearNow - p.age : null;
+        return {
           id: p.id,
           name: p.name,
           rating: p.rating ?? null,
@@ -65,10 +71,12 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
           city: p.city ?? null,
           state: p.state ?? null,
           country: p.country ?? 'Malaysia',
-          yearOfBirth: p.yearOfBirth ?? null,
-          seed: p.seed ?? null,
+          age: p.age ?? null,
+          yearOfBirth: p.yearOfBirth ?? fromAge,
+          seed: p.seed ?? startRanks.get(p.id) ?? null,
           categoryIds: p.categoryIds ?? [],
-        })),
+        };
+      }),
       games: games
         .filter((g) => !g.deletedAt)
         .map((g) => {

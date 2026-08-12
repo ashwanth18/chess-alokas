@@ -13,6 +13,7 @@ import {
   pairRound,
   assignStartRanks,
   sortRoster,
+  computeStartRankMap,
   type EnginePlayer,
   type PastGame,
 } from '../src/index.js';
@@ -37,6 +38,20 @@ describe('roster order', () => {
     expect(list.map((p) => p.id)).toEqual(['r2', 'r1', 'u1', 'u2']);
     const ranks = assignStartRanks(list);
     expect(ranks.get('r2')).toBe(1);
+    expect(ranks.get('u2')).toBe(4);
+  });
+
+  it('computeStartRankMap prefers stored seed, else rated-first order', () => {
+    const players = [
+      { id: 'u2', name: 'Zoe', rating: null, seed: null },
+      { id: 'r1', name: 'Ada', rating: 1500, seed: null },
+      { id: 'u1', name: 'Amy', rating: 0, seed: null },
+      { id: 'r2', name: 'Bob', rating: 1800, seed: 9 },
+    ];
+    const ranks = computeStartRankMap(players, { mixCategories: true });
+    expect(ranks.get('r2')).toBe(9);
+    expect(ranks.get('r1')).toBe(2);
+    expect(ranks.get('u1')).toBe(3);
     expect(ranks.get('u2')).toBe(4);
   });
 });
