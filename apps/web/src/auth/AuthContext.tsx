@@ -8,8 +8,10 @@ import {
   type ReactNode,
 } from 'react';
 import type { Provider, Session, User } from '@supabase/supabase-js';
+import * as Sentry from '@sentry/react';
 import { authRedirectTo, supabase, supabaseConfigured } from '../lib/supabase';
 import { db } from '../db/local';
+import { sentryEnabled } from '../instrument';
 
 interface AuthContextValue {
   configured: boolean;
@@ -90,6 +92,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshProfile();
   }, [refreshProfile]);
+
+  useEffect(() => {
+    if (!sentryEnabled) return;
+    if (session?.user) {
+      Sentry.setUser({
+        id: session.user.id,
+        email: session.user.email ?? undefined,
+      });
+    } else {
+      Sentry.setUser(null);
+    }
+  }, [session?.user]);
 
   const getAccessToken = useCallback(async () => {
     if (!supabase) return null;
@@ -190,6 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!supabase) return;
         await supabase.auth.signOut({ scope });
         await persistOwnerId(null);
+        if (sentryEnabled) Sentry.setUser(null);
       },
     }),
     [loading, session, displayName, isPlatformAdmin, getAccessToken, refreshProfile],

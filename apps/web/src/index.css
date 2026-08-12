@@ -2710,6 +2710,13 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   justify-content: space-between;
   gap: 1rem;
 }
+.admin-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.65rem;
+}
 .admin-page .page-subtitle {
   color: var(--color-fg-dim);
 }

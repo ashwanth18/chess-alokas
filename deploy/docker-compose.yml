@@ -13,6 +13,8 @@ services:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM: ${RESEND_FROM:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
     expose:
       - "3001"
 
@@ -24,6 +26,13 @@ services:
         VITE_API_URL: https://chess-manager.alokas.com/api
         VITE_SUPABASE_URL: ${SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
+        VITE_APP_VERSION: ${VITE_APP_VERSION:-}
+        VITE_SENTRY_ORG_URL: ${VITE_SENTRY_ORG_URL:-}
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+        SENTRY_ORG: ${SENTRY_ORG:-}
+        SENTRY_PROJECT: ${SENTRY_PROJECT:-}
     restart: unless-stopped
     depends_on:
       - api

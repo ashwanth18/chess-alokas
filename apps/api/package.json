@@ -17,6 +17,7 @@
     "@chess-alokas/shared": "workspace:*",
     "@fastify/cors": "^10.0.2",
     "@fastify/multipart": "^9.0.1",
+    "@sentry/node": "^10.70.0",
     "@supabase/supabase-js": "^2.110.2",
     "fastify": "^5.2.1",
     "papaparse": "^5.4.1",

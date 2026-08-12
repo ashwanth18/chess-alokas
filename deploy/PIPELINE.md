@@ -69,8 +69,15 @@ See [`DOKPLOY.md`](./DOKPLOY.md) §3. Required:
 | `SUPABASE_SECRET_KEY` | api |
 | `SUPABASE_ANON_KEY` | api + web **build args** |
 | `RESEND_API_KEY` / `RESEND_FROM` | api (optional email) |
+| `VITE_SENTRY_DSN` | web **build args** (client errors; free Developer plan) |
+| `SENTRY_DSN` | api (server 500s) |
+| `VITE_SENTRY_ORG_URL` | web build (Admin → Issues link) |
+| `VITE_APP_VERSION` | web build (optional release tag) |
+| `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` | web build only (optional source maps) |
 
-Web Vite env is baked at **image build** time (`VITE_*` from compose). Changing Supabase anon URL/key requires a **rebuild**, not only a container restart.
+**Sentry free-tier policy:** errors + light tracing (`tracesSampleRate` 0.1 in prod). Do **not** enable Session Replay, profiling, or Seer. SDK no-ops when DSN is unset.
+
+Web Vite env is baked at **image build** time (`VITE_*` from compose). Changing Supabase anon URL/key or Sentry DSN requires a **rebuild**, not only a container restart.
 
 ### Local parity
 

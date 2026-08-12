@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { resolveApiBaseUrl } from '../api/client';
+import { copySupportInfo } from '../lib/supportInfo';
 
 interface SessionRow {
   id: string;
@@ -225,6 +226,29 @@ export default function AccountPage() {
               Save profile
             </button>
           </form>
+          <div className="account-actions">
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={busy}
+              onClick={() => {
+                void (async () => {
+                  const res = await copySupportInfo({
+                    email: auth.user?.email,
+                    displayName: auth.displayName,
+                  });
+                  if (res.ok) setMessage('Support info copied to clipboard');
+                  else setError(res.error);
+                })();
+              }}
+            >
+              Copy support info
+            </button>
+          </div>
+          <p className="form-hint">
+            Paste this when emailing support — includes app version, runtime, and last Sentry event
+            id if any.
+          </p>
         </section>
 
         <section className="account-panel">

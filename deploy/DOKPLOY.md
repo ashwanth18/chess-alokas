@@ -25,8 +25,12 @@ Create an **A record** (or CNAME) for `chess-manager.alokas.com` pointing at you
 | `SUPABASE_SECRET_KEY` | api only | server secret / service_role |
 | `SUPABASE_ANON_KEY` | api + web build | publishable/anon for JWT verify + client |
 | `RESEND_API_KEY` / `RESEND_FROM` | api | optional certificate email |
+| `SENTRY_DSN` | api | Node/Fastify DSN (free plan) |
+| `VITE_SENTRY_DSN` | web build | React DSN (same or separate project) |
+| `VITE_SENTRY_ORG_URL` | web build | optional Admin link to Issues |
+| `SENTRY_AUTH_TOKEN` (+ `SENTRY_ORG` / `SENTRY_PROJECT`) | web build | optional source maps |
 
-Web build args are wired in compose from `SUPABASE_URL` / `SUPABASE_ANON_KEY`.
+Web build args are wired in compose from `SUPABASE_URL` / `SUPABASE_ANON_KEY` / Sentry vars.
 
 ## 4. Supabase Auth dashboard
 

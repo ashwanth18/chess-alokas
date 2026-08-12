@@ -1,3 +1,5 @@
+import './sentry.js';
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
@@ -13,6 +15,7 @@ import { publicLivePlugin } from './routes/publicLive.js';
 import { floorPlugin } from './routes/floor.js';
 import { adminPlugin } from './routes/admin.js';
 import { publicAnalyticsPlugin } from './routes/publicAnalytics.js';
+import { Sentry, sentryEnabled } from './sentry.js';
 
 const PORT = Number(process.env['PORT'] ?? 3001);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
@@ -20,6 +23,51 @@ const HOST = process.env['HOST'] ?? '0.0.0.0';
 const app = Fastify({
   logger: true,
   bodyLimit: 50 * 1024 * 1024,
+});
+
+app.addHook('onRequest', async (request) => {
+  if (!sentryEnabled) return;
+  Sentry.setTag('route', request.routeOptions.url ?? request.url);
+});
+
+app.addHook('preHandler', async (request) => {
+  if (!sentryEnabled) return;
+  if (request.userId) {
+    Sentry.setUser({
+      id: request.userId,
+      email: request.user?.email ?? undefined,
+    });
+  }
+});
+
+// Capture 500s only (not 401/403) — free-tier noise control
+app.setErrorHandler((error, request, reply) => {
+  const statusCode =
+    typeof (error as { statusCode?: number }).statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+
+  if (sentryEnabled && statusCode >= 500) {
+    Sentry.captureException(error);
+  }
+
+  if (statusCode >= 500) {
+    request.log.error(error);
+  } else {
+    request.log.info({ err: error }, 'request error');
+  }
+
+  const message =
+    statusCode >= 500
+      ? 'Internal Server Error'
+      : error instanceof Error
+        ? error.message
+        : 'Request failed';
+
+  void reply.code(statusCode).send({
+    error: message,
+    message,
+  });
 });
 
 const store = createStore();
@@ -57,11 +105,12 @@ app.get('/health', async () => {
       : process.env['SUPABASE_URL']
         ? 'enabled'
         : 'disabled';
-  return { ok: true, mode, storage, auth };
+  return { ok: true, mode, storage, auth, sentry: sentryEnabled };
 });
 
 app.listen({ port: PORT, host: HOST }, (err, address) => {
   if (err) {
+    if (sentryEnabled) Sentry.captureException(err);
     app.log.error(err);
     process.exit(1);
   }

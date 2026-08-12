@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import * as Sentry from '@sentry/react';
 import { useAuth } from '../auth/AuthContext';
 import { apiAdminOverview, type AdminOverview } from '../api/client';
+import { sentryEnabled } from '../instrument';
 
 /** Format UTC ISO for display in the viewer's local timezone, with TZ abbreviation. */
 function fmtDate(iso: string | null | undefined): string {
@@ -192,6 +194,7 @@ export default function AdminPage() {
   const totals = data?.totals;
   const pv = data?.pageViews;
   const adoption = data?.adoption;
+  const sentryOrgUrl = (import.meta.env.VITE_SENTRY_ORG_URL as string | undefined)?.trim();
 
   return (
     <div className="page-container admin-page">
@@ -215,6 +218,55 @@ export default function AdminPage() {
           {error}
         </p>
       )}
+
+      <section className="admin-panel" aria-label="Error monitoring">
+        <h3>Error monitoring (Sentry)</h3>
+        <p className="admin-metric-detail">
+          Free Developer plan: errors + light tracing only. Session Replay and paid features are
+          disabled. Full triage is in the Sentry Issues dashboard.
+        </p>
+        <p className="admin-metric-detail">
+          Client SDK: {sentryEnabled ? 'enabled' : 'not configured (set VITE_SENTRY_DSN)'}
+        </p>
+        <div className="admin-actions-row">
+          {sentryOrgUrl ? (
+            <a className="btn btn-outline" href={sentryOrgUrl} target="_blank" rel="noreferrer">
+              Open Sentry Issues
+            </a>
+          ) : (
+            <span className="admin-metric-detail">
+              Set VITE_SENTRY_ORG_URL to link your Issues page.
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={!sentryEnabled}
+            onClick={() => {
+              Sentry.captureException(new Error('Chess Alokas admin Sentry test error'));
+              void Sentry.flush(2000).then(() => {
+                window.alert('Test error sent — check Sentry Issues in a few seconds.');
+              });
+            }}
+          >
+            Send test error
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              void import('../lib/supportInfo').then(({ copySupportInfo }) =>
+                copySupportInfo({
+                  email: auth.user?.email,
+                  displayName: auth.displayName,
+                }),
+              );
+            }}
+          >
+            Copy support info
+          </button>
+        </div>
+      </section>
 
       {totals && pv && adoption && (
         <>

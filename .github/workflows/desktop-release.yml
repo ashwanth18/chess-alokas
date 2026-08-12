@@ -44,6 +44,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           # Do not pass empty VITE_SUPABASE_* secrets — they override apps/web/.env.desktop.
           VITE_API_URL: https://chess-manager.alokas.com/api
+          # Optional: set repo secret VITE_SENTRY_DSN for desktop error reporting (free tier).
+          # Empty secrets are stripped in apps/web/vite.config.ts so .env.desktop can still apply.
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: production
+          VITE_APP_VERSION: desktop@${{ github.ref_name }}
         run: pnpm run build:desktop
 
       - name: Upload release artifacts
