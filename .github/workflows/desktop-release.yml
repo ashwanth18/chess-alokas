@@ -30,7 +30,9 @@ jobs:
       SENTRYCLI_SKIP_DOWNLOAD: '1'
       # Authenticated Electron binary download (avoids GitHub rate limits / hang-ups).
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       electron_config_cache: ${{ github.workspace }}/.cache/electron
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
 
     steps:
       - uses: actions/checkout@v4
@@ -56,10 +58,29 @@ jobs:
         shell: bash
         run: |
           set +e
-          for i in 1 2 3; do
-            pnpm install --frozen-lockfile && exit 0
-            echo "pnpm install failed (attempt $i/3), retrying in 15s..."
-            sleep 15
+          # Electron postinstall downloads a large binary and often flakes on runners
+          # (truncated zip / ECONNRESET). Install packages without scripts first, then
+          # fetch Electron with dedicated retries after clearing partial cache files.
+          for i in 1 2 3 4 5; do
+            if pnpm install --frozen-lockfile --ignore-scripts; then
+              break
+            fi
+            echo "pnpm install failed (attempt $i/5), retrying..."
+            sleep $((20 * i))
+            if [ "$i" -eq 5 ]; then exit 1; fi
+          done
+
+          # esbuild (and a few others) need their platform binary postinstall.
+          pnpm rebuild esbuild 2>/dev/null || true
+
+          for i in 1 2 3 4 5; do
+            # Drop incomplete downloads that fail checksum on the next attempt.
+            find "${ELECTRON_CACHE}" -type f \( -name '*.zip' -o -name '*.zip.part' \) -delete 2>/dev/null || true
+            if node node_modules/electron/install.js; then
+              exit 0
+            fi
+            echo "electron install failed (attempt $i/5), retrying..."
+            sleep $((20 * i))
           done
           exit 1
 
