@@ -58,13 +58,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsPlatformAdmin(false);
       return;
     }
-    const { data } = await supabase
+    const jwtAdmin = Boolean(
+      (session.user.app_metadata as Record<string, unknown> | undefined)?.['platform_admin'],
+    );
+    const { data, error } = await supabase
       .from('profiles')
       .select('display_name, is_platform_admin')
       .eq('id', session.user.id)
       .maybeSingle();
+    if (error) {
+      console.warn('[auth] profiles select failed; using JWT admin claim', error.message);
+      setDisplayName(null);
+      setIsPlatformAdmin(jwtAdmin);
+      return;
+    }
     setDisplayName((data?.display_name as string | null) ?? null);
-    setIsPlatformAdmin(Boolean(data?.is_platform_admin));
+    // Profile is source of truth when readable; JWT claim covers select failures / cache lag.
+    setIsPlatformAdmin(Boolean(data?.is_platform_admin) || jwtAdmin);
   }, [session?.user]);
 
   useEffect(() => {

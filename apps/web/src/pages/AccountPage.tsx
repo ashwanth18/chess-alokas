@@ -206,7 +206,15 @@ export default function AccountPage() {
                 {p.provider}
               </span>
             ))}
+            {auth.isPlatformAdmin && (
+              <span className="account-badge account-badge-admin">Platform admin</span>
+            )}
           </div>
+          {auth.isPlatformAdmin && (
+            <p className="form-hint" style={{ marginTop: '0.5rem' }}>
+              <Link to="/admin">Open Admin dashboard →</Link>
+            </p>
+          )}
         </div>
       </section>
 
