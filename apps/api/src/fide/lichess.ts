@@ -11,9 +11,11 @@ export type LichessFidePlayer = {
   year?: number | null;
   title?: string | null;
   sex?: string | null;
+  gender?: string | null;
   standard?: number | null;
   rapid?: number | null;
   blitz?: number | null;
+  inactive?: boolean;
 };
 
 function ratingOrNull(v: unknown): number | null {
@@ -24,17 +26,18 @@ function ratingOrNull(v: unknown): number | null {
 }
 
 export function mapLichessPlayer(p: LichessFidePlayer): FidePlayerRow {
+  const sexRaw = p.sex ?? p.gender;
   return {
     fideId: Number(p.id),
     name: String(p.name ?? '').trim(),
     federation: p.federation ? String(p.federation).trim().toUpperCase() : null,
     birthYear: p.year != null && Number(p.year) > 1900 ? Number(p.year) : null,
     title: p.title ? String(p.title) : null,
-    sex: p.sex ? String(p.sex) : null,
+    sex: sexRaw ? String(sexRaw) : null,
     standard: ratingOrNull(p.standard),
     rapid: ratingOrNull(p.rapid),
     blitz: ratingOrNull(p.blitz),
-    inactive: false,
+    inactive: Boolean(p.inactive),
   };
 }
 

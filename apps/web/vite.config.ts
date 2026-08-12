@@ -8,6 +8,7 @@ const DESKTOP_ENV_KEYS = [
   'VITE_SUPABASE_ANON_KEY',
   'VITE_API_URL',
   'VITE_SENTRY_DSN',
+  'VITE_SENTRY_ORG_URL',
 ] as const;
 
 export default defineConfig(({ mode }) => {

@@ -221,7 +221,8 @@ export default function FideLookupModal({
 
         <p className="form-hint">
           Looks up players via Lichess FIDE data. Only high-confidence matches are pre-selected —
-          confirm names or enter a FIDE ID when unsure.
+          confirm names or enter a FIDE ID when unsure. Std/Rap/Blz blank means FIDE has no rating
+          yet (common for new juniors) — Apply still links the ID as Unr.
         </p>
 
         <div className="fide-lookup-controls">

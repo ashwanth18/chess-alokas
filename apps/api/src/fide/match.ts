@@ -80,6 +80,27 @@ async function searchVariants(queries: string[]): Promise<FidePlayerRow[]> {
   return dedupe(collected);
 }
 
+function hasAnyRating(row: FidePlayerRow): boolean {
+  return (
+    (row.standard != null && row.standard > 0) ||
+    (row.rapid != null && row.rapid > 0) ||
+    (row.blitz != null && row.blitz > 0)
+  );
+}
+
+/** Search hits sometimes omit ratings; pull profile when sparse (still Unr. if FIDE has none). */
+async function hydrateSparseProfiles(rows: FidePlayerRow[]): Promise<FidePlayerRow[]> {
+  return mapPool(rows, 3, async (row) => {
+    if (hasAnyRating(row)) return row;
+    try {
+      const full = await lichessGetById(row.fideId);
+      return full ?? row;
+    } catch {
+      return row;
+    }
+  });
+}
+
 export async function matchOnePlayer(player: FideLookupPlayerIn): Promise<FideLookupResult> {
   if (player.fideId != null && player.fideId > 0) {
     const row = await lichessGetById(player.fideId);
@@ -114,6 +135,8 @@ export async function matchOnePlayer(player: FideLookupPlayerIn): Promise<FideLo
     .filter((c) => (scores.get(c.fideId) ?? 0) >= MIN_CANDIDATE_SCORE)
     .sort((a, b) => (scores.get(b.fideId) ?? 0) - (scores.get(a.fideId) ?? 0))
     .slice(0, CANDIDATE_LIMIT);
+
+  candidates = await hydrateSparseProfiles(candidates);
 
   const { status, selectedFideId } = decideMatchStatus(candidates, false, scores);
   return {
