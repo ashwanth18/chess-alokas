@@ -3317,6 +3317,14 @@ a.landing-download-option:hover {
   color: var(--ink-300);
   cursor: pointer;
 }
+.tiebreak-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.tiebreak-editor.is-compact {
+  gap: 0.5rem;
+}
 .tiebreak-order-list {
   margin: 0;
   padding: 0;
@@ -3336,9 +3344,25 @@ a.landing-download-option:hover {
   border: 1px solid rgba(196, 165, 116, 0.15);
   font-size: 0.86rem;
 }
+.tiebreak-order-item.is-locked {
+  opacity: 0.72;
+}
+.tiebreak-order-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  min-width: 0;
+}
 .tiebreak-order-actions {
   display: inline-flex;
   gap: 0.15rem;
+}
+.tiebreak-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
 .result-change-modal {
   background: #0c2a20;

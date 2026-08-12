@@ -47,21 +47,21 @@ export const TIEBREAK_LABELS: Record<TiebreakKey, string> = {
   seed: 'Seed',
 };
 
-/** Dedupe + fill missing keys so every known tiebreak appears once. */
+/** Dedupe valid keys; empty/null → default. Always keeps seed as final fallback. */
 export function normalizeTiebreakOrder(
   order: TiebreakKey[] | null | undefined,
 ): TiebreakKey[] {
+  const source = order?.length ? order : DEFAULT_TIEBREAK_ORDER;
   const seen = new Set<TiebreakKey>();
   const out: TiebreakKey[] = [];
-  for (const key of order?.length ? order : DEFAULT_TIEBREAK_ORDER) {
+  for (const key of source) {
     if (!TiebreakKeySchema.safeParse(key).success) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(key);
   }
-  for (const key of DEFAULT_TIEBREAK_ORDER) {
-    if (!seen.has(key)) out.push(key);
-  }
+  if (out.length === 0) return [...DEFAULT_TIEBREAK_ORDER];
+  if (!seen.has('seed')) out.push('seed');
   return out;
 }
 
@@ -303,6 +303,8 @@ export const CreateTournamentInputSchema = z.object({
   mixCategories: z.boolean().default(false),
   prizePlaces: z.number().int().min(1).max(20).default(3),
   awardScope: AwardScopeSchema.default('per_category'),
+  tiebreakOrder: z.array(TiebreakKeySchema).nullable().optional(),
+  sharedPlaces: z.boolean().default(true),
   categories: z
     .array(
       z.object({

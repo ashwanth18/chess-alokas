@@ -12,6 +12,8 @@ import {
   clampPrizePlaces,
 } from '../lib/prizePlaces';
 import NumberField from '../components/NumberField';
+import TiebreakOrderEditor from '../components/TiebreakOrderEditor';
+import { DEFAULT_TIEBREAK_ORDER, type TiebreakKey } from '@chess-alokas/shared';
 
 interface CategoryDraft {
   id: string;
@@ -59,6 +61,10 @@ export default function CreateTournamentPage() {
   const [prizePlaces, setPrizePlaces] = useState<number | null>(DEFAULT_PRIZE_PLACES);
   const [awardScope, setAwardScope] = useState<'overall' | 'per_category'>('per_category');
   const [mixCategories, setMixCategories] = useState(false);
+  const [tiebreakOrder, setTiebreakOrder] = useState<TiebreakKey[]>([
+    ...DEFAULT_TIEBREAK_ORDER,
+  ]);
+  const [sharedPlaces, setSharedPlaces] = useState(true);
   const [categories, setCategories] = useState<CategoryDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,6 +188,8 @@ export default function CreateTournamentPage() {
         mixCategories,
         prizePlaces: clampPrizePlaces(prizePlaces),
         awardScope,
+        tiebreakOrder,
+        sharedPlaces,
         ownerId: auth.user?.id ?? null,
         publicToken: null,
         publicEnabled: false,
@@ -287,6 +295,18 @@ export default function CreateTournamentPage() {
             <option value="per_category">Per category</option>
             <option value="overall">Overall standings</option>
           </select>
+        </div>
+
+        <div className="form-section">
+          <div className="form-section-header">
+            <h3>Tiebreaks</h3>
+          </div>
+          <TiebreakOrderEditor
+            order={tiebreakOrder}
+            sharedPlaces={sharedPlaces}
+            onOrderChange={setTiebreakOrder}
+            onSharedPlacesChange={setSharedPlaces}
+          />
         </div>
 
         <div className="form-group">

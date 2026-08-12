@@ -8,8 +8,6 @@ import {
   WARNING_LIMIT,
   countCardsForPlayer,
   emptyCardCounts,
-  DEFAULT_TIEBREAK_ORDER,
-  TIEBREAK_LABELS,
   normalizeTiebreakOrder,
 } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
@@ -31,6 +29,7 @@ import {
 import TournamentInstructions from '../components/TournamentInstructions';
 import TableSearch from '../components/TableSearch';
 import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
+import TiebreakOrderEditor from '../components/TiebreakOrderEditor';
 import { matchesTextSearch } from '../lib/textSearch';
 import { softDeleteTournament } from '../lib/deleteTournament';
 import { ensurePoolCategoryId, repairTournamentLocalData } from '../lib/poolCategory';
@@ -1264,84 +1263,27 @@ export default function TournamentPage() {
               <div className="settings-row settings-row-block">
                 <dt>Tiebreaks</dt>
                 <dd>
-                  <label className="settings-check">
-                    <input
-                      type="checkbox"
-                      checked={tournament.sharedPlaces ?? true}
-                      onChange={(e) => {
-                        void db.tournaments.update(tournament.id, {
-                          sharedPlaces: e.target.checked,
-                          updatedAt: nowIso(),
-                          dirty: 1,
-                        });
-                      }}
-                    />
-                    Shared places when performance tiebreaks match (e.g. 1, 2, 2, 4)
-                  </label>
-                  <ol className="tiebreak-order-list">
-                    {normalizeTiebreakOrder(
+                  <TiebreakOrderEditor
+                    compact
+                    order={normalizeTiebreakOrder(
                       (tournament.tiebreakOrder as TiebreakKey[] | null) ?? null,
-                    ).map((key, index, arr) => (
-                      <li key={key} className="tiebreak-order-item">
-                        <span>
-                          {index + 1}. {TIEBREAK_LABELS[key]}
-                        </span>
-                        <span className="tiebreak-order-actions">
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-ghost"
-                            disabled={index === 0}
-                            aria-label={`Move ${TIEBREAK_LABELS[key]} up`}
-                            onClick={() => {
-                              const next = [...arr];
-                              const tmp = next[index - 1]!;
-                              next[index - 1] = next[index]!;
-                              next[index] = tmp;
-                              void db.tournaments.update(tournament.id, {
-                                tiebreakOrder: next,
-                                updatedAt: nowIso(),
-                                dirty: 1,
-                              });
-                            }}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-ghost"
-                            disabled={index === arr.length - 1}
-                            aria-label={`Move ${TIEBREAK_LABELS[key]} down`}
-                            onClick={() => {
-                              const next = [...arr];
-                              const tmp = next[index + 1]!;
-                              next[index + 1] = next[index]!;
-                              next[index] = tmp;
-                              void db.tournaments.update(tournament.id, {
-                                tiebreakOrder: next,
-                                updatedAt: nowIso(),
-                                dirty: 1,
-                              });
-                            }}
-                          >
-                            ↓
-                          </button>
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => {
+                    )}
+                    sharedPlaces={tournament.sharedPlaces ?? true}
+                    onOrderChange={(next) => {
                       void db.tournaments.update(tournament.id, {
-                        tiebreakOrder: [...DEFAULT_TIEBREAK_ORDER],
+                        tiebreakOrder: next,
                         updatedAt: nowIso(),
                         dirty: 1,
                       });
                     }}
-                  >
-                    Reset tiebreak order
-                  </button>
+                    onSharedPlacesChange={(value) => {
+                      void db.tournaments.update(tournament.id, {
+                        sharedPlaces: value,
+                        updatedAt: nowIso(),
+                        dirty: 1,
+                      });
+                    }}
+                  />
                 </dd>
               </div>
               <div className="settings-row">
