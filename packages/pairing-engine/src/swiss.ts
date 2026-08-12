@@ -468,6 +468,87 @@ export function computeSectionStandings(
   return reRankSection(section, pastGames, options?.sharedPlaces !== false);
 }
 
+type RankablePlayer = {
+  id: string;
+  name: string;
+  rating?: number | null;
+  seed?: number | null;
+  categoryIds?: string[];
+};
+
+/**
+ * Current / end rank for every player in their pairing pool.
+ * Mixed (or no categories): one field ranking. Separate categories: 1…n within each section.
+ * Empty until at least one finished game exists.
+ */
+export function computeEndRankMap(
+  players: RankablePlayer[],
+  games: Array<{
+    round: number;
+    whiteId?: string | null;
+    blackId?: string | null;
+    result: string;
+    isBye: boolean;
+    categoryId?: string | null;
+  }>,
+  opts?: {
+    mixCategories?: boolean;
+    tiebreakOrder?: StandingsOptions['tiebreakOrder'];
+    sharedPlaces?: boolean;
+  },
+): Map<string, number> {
+  const map = new Map<string, number>();
+  const finished = games.filter((g) => g.result !== 'pending');
+  if (finished.length === 0 || players.length === 0) return map;
+
+  const standingsOpts: StandingsOptions = {
+    tiebreakOrder: opts?.tiebreakOrder ?? null,
+    sharedPlaces: opts?.sharedPlaces ?? true,
+  };
+  const mix = opts?.mixCategories !== false;
+  const toEngine = (list: RankablePlayer[]): EnginePlayer[] =>
+    list.map((p) => ({
+      id: p.id,
+      name: p.name,
+      rating: p.rating ?? undefined,
+      seed: p.seed ?? undefined,
+    }));
+  const toPast = (list: typeof finished): PastGame[] =>
+    list.map((g) => ({
+      round: g.round,
+      whiteId: g.whiteId ?? null,
+      blackId: g.blackId ?? null,
+      result: g.result as GameResult,
+      isBye: g.isBye,
+    }));
+  const write = (rows: Standing[]) => {
+    for (const s of rows) map.set(s.id, s.rank);
+  };
+
+  if (mix) {
+    write(computeStandings(toEngine(players), toPast(finished), standingsOpts));
+    return map;
+  }
+
+  const byCat = new Map<string, RankablePlayer[]>();
+  for (const p of players) {
+    const cats = p.categoryIds?.length ? p.categoryIds : ['_none'];
+    for (const c of cats) {
+      const list = byCat.get(c) ?? [];
+      list.push(p);
+      byCat.set(c, list);
+    }
+  }
+  for (const [catId, pool] of byCat) {
+    const catGames =
+      catId === '_none'
+        ? finished
+        : finished.filter((g) => !g.categoryId || g.categoryId === catId);
+    write(computeStandings(toEngine(pool), toPast(catGames), standingsOpts));
+  }
+  return map;
+}
+
 export function diagnosePairings(
   players: EnginePlayer[],
   pastGames: PastGame[],

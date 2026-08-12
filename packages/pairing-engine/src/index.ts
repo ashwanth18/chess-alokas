@@ -3,6 +3,7 @@ export {
   buildPlayerStates,
   computeStandings,
   computeSectionStandings,
+  computeEndRankMap,
   diagnosePairings,
   colorPreference,
   colorImbalance,

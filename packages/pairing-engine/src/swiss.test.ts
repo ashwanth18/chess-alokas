@@ -14,6 +14,7 @@ import {
   assignStartRanks,
   sortRoster,
   computeStartRankMap,
+  computeEndRankMap,
   type EnginePlayer,
   type PastGame,
 } from '../src/index.js';
@@ -53,6 +54,37 @@ describe('roster order', () => {
     expect(ranks.get('r1')).toBe(2);
     expect(ranks.get('u1')).toBe(3);
     expect(ranks.get('u2')).toBe(4);
+  });
+});
+
+describe('end rank map', () => {
+  it('is empty until a game is finished', () => {
+    const list = [
+      { id: 'a', name: 'Ada', rating: 1800, categoryIds: [] },
+      { id: 'b', name: 'Bob', rating: 1500, categoryIds: [] },
+    ];
+    expect(computeEndRankMap(list, [], { mixCategories: true }).size).toBe(0);
+    expect(
+      computeEndRankMap(
+        list,
+        [{ round: 1, whiteId: 'a', blackId: 'b', result: 'pending', isBye: false }],
+        { mixCategories: true },
+      ).size,
+    ).toBe(0);
+  });
+
+  it('ranks the winner first after a finished game', () => {
+    const list = [
+      { id: 'a', name: 'Ada', rating: 1800, categoryIds: [] },
+      { id: 'b', name: 'Bob', rating: 1500, categoryIds: [] },
+    ];
+    const ranks = computeEndRankMap(
+      list,
+      [{ round: 1, whiteId: 'a', blackId: 'b', result: '1-0', isBye: false }],
+      { mixCategories: true },
+    );
+    expect(ranks.get('a')).toBe(1);
+    expect(ranks.get('b')).toBe(2);
   });
 });
 

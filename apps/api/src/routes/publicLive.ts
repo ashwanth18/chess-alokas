@@ -53,6 +53,8 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
         mixCategories: tournament.mixCategories ?? false,
         status: tournament.status,
         prizePlaces: tournament.prizePlaces ?? 3,
+        tiebreakOrder: tournament.tiebreakOrder ?? null,
+        sharedPlaces: tournament.sharedPlaces ?? true,
       },
       categories: activeCategories.map((c) => ({
         id: c.id,

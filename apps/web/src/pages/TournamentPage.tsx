@@ -5,6 +5,7 @@ import {
   pairRound,
   computeStandings,
   computeSectionStandings,
+  computeEndRankMap,
   assignStartRanks,
   computeStartRankMap,
   sortRoster,
@@ -1249,11 +1250,15 @@ export default function TournamentPage() {
     }
   }, [participants, games, activeCatId, mix, tournament?.tiebreakOrder, tournament?.sharedPlaces]);
 
-  const endRankById = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of standings) map.set(s.id, s.rank);
-    return map;
-  }, [standings]);
+  const endRankById = useMemo(
+    () =>
+      computeEndRankMap(participants ?? [], games ?? [], {
+        mixCategories: mix || !hasCategories,
+        tiebreakOrder: (tournament?.tiebreakOrder as TiebreakKey[] | null | undefined) ?? null,
+        sharedPlaces: tournament?.sharedPlaces ?? true,
+      }),
+    [participants, games, mix, hasCategories, tournament?.tiebreakOrder, tournament?.sharedPlaces],
+  );
 
   const standingsEmptyReason = useMemo(() => {
     if (!participants || participants.length === 0) return 'no-players' as const;

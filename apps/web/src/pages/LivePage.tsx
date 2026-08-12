@@ -23,6 +23,7 @@ import {
   formatResultLabel,
   gameForPlayerRound,
   liveStartRankMap,
+  liveEndRankMap,
   resultPointsLabel,
   runningScore,
   type LiveGame,
@@ -273,11 +274,7 @@ export default function LivePage() {
     return computeLiveStandings(data, hasCats ? standingsCatId || null : null);
   }, [data, standingsCatId]);
 
-  const endRankById = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of standings) map.set(s.id, s.rank);
-    return map;
-  }, [standings]);
+  const endRankById = useMemo(() => (data ? liveEndRankMap(data) : new Map()), [data]);
 
   const startRankById = useMemo(() => (data ? liveStartRankMap(data) : new Map()), [data]);
 
@@ -851,8 +848,7 @@ function LivePlayerView({
   const oppScore = opponentId
     ? runningScore(data.games, opponentId, displayRound)
     : null;
-  const endRank =
-    computeLiveStandings(data, null).find((s) => s.id === playerId)?.rank ?? null;
+  const endRank = useMemo(() => liveEndRankMap(data).get(playerId) ?? null, [data, playerId]);
   const pinned = bookmarks.some((b) => b.id === playerId);
   const startRankById = useMemo(() => liveStartRankMap(data), [data]);
 

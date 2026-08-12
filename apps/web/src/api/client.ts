@@ -409,6 +409,8 @@ export type PublicLivePayload = {
     mixCategories: boolean;
     status: string;
     prizePlaces: number;
+    tiebreakOrder?: string[] | null;
+    sharedPlaces?: boolean;
   };
   categories: Array<{ id: string; name: string; prizePlaces: number | null }>;
   players: Array<{

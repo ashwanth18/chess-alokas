@@ -1,8 +1,9 @@
-import type { GameResult } from '@chess-alokas/shared';
+import type { GameResult, TiebreakKey } from '@chess-alokas/shared';
 import {
   computeSectionStandings,
   computeStandings,
   computeStartRankMap,
+  computeEndRankMap,
 } from '@chess-alokas/pairing-engine';
 import type { PublicLivePayload } from '../api/client';
 
@@ -139,11 +140,16 @@ export function computeLiveStandings(
       seed: p.seed ?? 0,
     }));
 
+  const tbOpts = {
+    tiebreakOrder: (tournament.tiebreakOrder as TiebreakKey[] | null | undefined) ?? null,
+    sharedPlaces: tournament.sharedPlaces ?? true,
+  };
+
   if (mix && categoryId) {
     const sectionIds = new Set(
       players.filter((p) => p.categoryIds.includes(categoryId)).map((p) => p.id),
     );
-    return computeSectionStandings(toEngine(players), toPast(games), sectionIds);
+    return computeSectionStandings(toEngine(players), toPast(games), sectionIds, tbOpts);
   }
 
   const catGames = categoryId ? games.filter((g) => g.categoryId === categoryId) : games;
@@ -151,12 +157,21 @@ export function computeLiveStandings(
     ? players.filter((p) => p.categoryIds.includes(categoryId))
     : players;
   if (catPlayers.length === 0) return [];
-  return computeStandings(toEngine(catPlayers), toPast(catGames));
+  return computeStandings(toEngine(catPlayers), toPast(catGames), tbOpts);
 }
 
 export function liveStartRankMap(payload: PublicLivePayload): Map<string, number> {
   const mix = payload.tournament.mixCategories || payload.categories.length === 0;
   return computeStartRankMap(payload.players, { mixCategories: mix });
+}
+
+export function liveEndRankMap(payload: PublicLivePayload): Map<string, number> {
+  const mix = payload.tournament.mixCategories || payload.categories.length === 0;
+  return computeEndRankMap(payload.players, payload.games, {
+    mixCategories: mix,
+    tiebreakOrder: (payload.tournament.tiebreakOrder as TiebreakKey[] | null | undefined) ?? null,
+    sharedPlaces: payload.tournament.sharedPlaces ?? true,
+  });
 }
 
 export function livePublicUrl(token: string): string {
