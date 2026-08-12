@@ -81,7 +81,7 @@ If Admin shows **Client SDK: not configured**, set `VITE_SENTRY_DSN` (+ optional
 
 Web Vite env is baked at **image build** time (`VITE_*` from compose). Changing Supabase anon URL/key or Sentry DSN requires a **rebuild**, not only a container restart.
 
-**FIDE list:** after deploy, open Admin → **Refresh FIDE list** once (monthly XML import). Lookup on the Players tab needs a non-empty `fide_players` table.
+**FIDE list:** the API auto-imports the monthly XML on boot / daily check when the catalog is empty or last success was a previous month (on/after the 8th UTC). Admin → **Refresh FIDE list** remains a manual override. Lookup on the Players tab needs a non-empty `fide_players` table.
 
 ### Local parity
 

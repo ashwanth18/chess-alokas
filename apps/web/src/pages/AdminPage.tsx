@@ -245,8 +245,9 @@ export default function AdminPage() {
       <section className="admin-panel" aria-label="FIDE rating list">
         <h3>FIDE rating list</h3>
         <p className="admin-metric-detail">
-          Official monthly XML from ratings.fide.com. Refresh after the 5th–10th of each month.
-          Directors look up players from this table — nothing is scraped per request.
+          Official monthly XML from ratings.fide.com. The API auto-refreshes once a month (on/after
+          the 8th, or immediately if the catalog is empty). Manual refresh is optional if an import
+          failed. Directors look up players from this table — nothing is scraped per request.
         </p>
         <p className="admin-metric-detail">
           Status:{' '}

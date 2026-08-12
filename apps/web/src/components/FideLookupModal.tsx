@@ -179,7 +179,8 @@ export default function FideLookupModal({
 
         <p className="form-hint">
           Uses the monthly FIDE list (not live scrape). Confirm matches, choose standard / rapid /
-          blitz, then apply. FIDE IDs are saved for next time.
+          blitz, then apply. FIDE IDs are saved for next time. Not found / new players stay blank
+          (—) — that&apos;s fine.
         </p>
 
         <div className="fide-lookup-controls">

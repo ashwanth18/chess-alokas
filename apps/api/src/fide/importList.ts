@@ -266,6 +266,36 @@ export function isFideImportRunning(): boolean {
   return importRunning;
 }
 
+/**
+ * Whether an automatic monthly refresh should download the FIDE zip.
+ * - Empty catalog → always due
+ * - Already running → not due
+ * - Last successful import in current UTC calendar month → not due
+ * - Before the 8th UTC (and catalog non-empty) → wait for typical FIDE publish window
+ * - On/after the 8th and last import is a previous month → due
+ */
+export function isFideRefreshDue(
+  status: Pick<FideImportStatus, 'status' | 'importedAt' | 'playerCount'>,
+  now: Date = new Date(),
+): boolean {
+  if (status.status === 'running' || importRunning) return false;
+
+  const importedAt = status.importedAt;
+  const empty = !importedAt || (status.playerCount ?? 0) <= 0;
+  if (empty) return true;
+
+  const day = now.getUTCDate();
+  if (day < 8) return false;
+
+  const imported = new Date(importedAt);
+  if (Number.isNaN(imported.getTime())) return true;
+
+  const sameMonth =
+    imported.getUTCFullYear() === now.getUTCFullYear() &&
+    imported.getUTCMonth() === now.getUTCMonth();
+  return !sameMonth;
+}
+
 /** Start import in background. Returns false if already running. */
 export function startFideImport(sql: Sql): boolean {
   if (importRunning) return false;
@@ -274,6 +304,17 @@ export function startFideImport(sql: Sql): boolean {
     importRunning = false;
   });
   return true;
+}
+
+/**
+ * If a monthly refresh is due, start it in the background.
+ * Returns whether an import was started.
+ */
+export async function maybeStartFideImport(sql: Sql, now: Date = new Date()): Promise<boolean> {
+  if (importRunning) return false;
+  const status = await getFideImportStatus(sql);
+  if (!isFideRefreshDue(status, now)) return false;
+  return startFideImport(sql);
 }
 
 export async function runFideImport(sql: Sql): Promise<number> {
