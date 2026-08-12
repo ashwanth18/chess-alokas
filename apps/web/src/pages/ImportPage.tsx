@@ -24,6 +24,7 @@ interface MappedParticipant {
   age: number;
   gender?: string;
   rating?: number;
+  fideId?: number;
   club?: string;
   school?: string;
   city?: string;
@@ -41,6 +42,7 @@ const OPTIONAL_FIELDS = [
   'age',
   'gender',
   'rating',
+  'fideId',
   'school',
   'club',
   'city',
@@ -56,6 +58,7 @@ const FIELD_LABELS: Record<(typeof ALL_FIELDS)[number], string> = {
   age: 'Age',
   gender: 'Gender',
   rating: 'FIDE rating',
+  fideId: 'FIDE ID',
   school: 'School',
   club: 'Club (legacy)',
   city: 'City',
@@ -102,6 +105,10 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
       const ratingCol = mapping['rating'];
       const ratingRaw = ratingCol ? cellText(row[ratingCol]) : '';
       const rating = ratingRaw ? parseInt(ratingRaw, 10) || undefined : undefined;
+      const fideIdCol = mapping['fideId'];
+      const fideIdRaw = fideIdCol ? cellText(row[fideIdCol]) : '';
+      const fideIdParsed = fideIdRaw ? parseInt(fideIdRaw.replace(/\D/g, ''), 10) : NaN;
+      const fideId = Number.isFinite(fideIdParsed) && fideIdParsed > 0 ? fideIdParsed : undefined;
       const schoolCol = mapping['school'];
       const school = schoolCol ? cellText(row[schoolCol]) || undefined : undefined;
       const clubCol = mapping['club'];
@@ -136,6 +143,7 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
         age,
         gender,
         rating,
+        fideId,
         school: school || club,
         club,
         city,
@@ -230,7 +238,13 @@ export default function ImportPage() {
     const gender = findColumn(cols, [/gender/i, /\bsex\b/i, /jantina/i, /m\/f/i]);
     if (gender) detected.gender = gender;
 
-    const rating = findColumn(cols, [/fide/i, /\brating\b/i, /\belo\b/i, /\brtg\b/i]);
+    const fideId = findColumn(cols, [/fide\s*id/i, /fideid/i, /fide[_-]id/i]);
+    if (fideId) detected.fideId = fideId;
+
+    const rating = findColumn(
+      cols.filter((c) => c !== fideId),
+      [/\brating\b/i, /\belo\b/i, /\brtg\b/i, /^fide$/i, /fide\s*rating/i],
+    );
     if (rating) detected.rating = rating;
 
     const school = findColumn(cols, [/school/i, /sekolah/i, /academy/i]);
@@ -378,6 +392,7 @@ export default function ImportPage() {
           age: p.age,
           gender: p.gender ?? null,
           rating: p.rating ?? null,
+          fideId: p.fideId ?? null,
           club: p.club ?? null,
           school: p.school ?? null,
           city: p.city ?? null,

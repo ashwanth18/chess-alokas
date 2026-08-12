@@ -5,8 +5,9 @@ import {
   FilterGroupSchema,
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { getDatabaseSql, requireAuth } from '../auth.js';
 import { generatePublicLiveToken } from '../floor/pin.js';
+import { countFidePlayers, matchPlayers } from '../fide/match.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -295,6 +296,68 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
         publicEnabled: updated.publicEnabled,
         updatedAt: updated.updatedAt,
       };
+    },
+  );
+
+  const FideLookupBodySchema = z.object({
+    ratingType: z.enum(['standard', 'rapid', 'blitz']).default('standard'),
+    players: z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          name: z.string().min(1),
+          country: z.string().nullable().optional(),
+          yearOfBirth: z.number().int().nullable().optional(),
+          fideId: z.number().int().positive().nullable().optional(),
+        }),
+      )
+      .min(1)
+      .max(2000),
+  });
+
+  app.post<{ Params: { id: string }; Body: unknown }>(
+    '/tournaments/:id/fide-lookup',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const tournament = await store.getTournament(id);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Tournament not found' });
+      }
+
+      const parsed = FideLookupBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
+      }
+
+      const sql = getDatabaseSql();
+      if (!sql) {
+        return reply.code(503).send({
+          error: 'FIDE lookup requires DATABASE_URL',
+          message: 'FIDE list not loaded — ask an admin to refresh.',
+        });
+      }
+
+      try {
+        const catalogCount = await countFidePlayers(sql);
+        if (catalogCount === 0) {
+          return reply.code(503).send({
+            error: 'FIDE list empty',
+            message: 'FIDE list not loaded — ask an admin to refresh.',
+          });
+        }
+
+        const results = await matchPlayers(sql, parsed.data.players);
+        return {
+          ratingType: parsed.data.ratingType,
+          catalogCount,
+          results,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'FIDE lookup failed';
+        return reply.code(500).send({ error: message });
+      }
     },
   );
 };

@@ -530,6 +530,73 @@ export async function apiAdminOverview() {
   return req<AdminOverview>('/admin/overview', { timeoutMs: 20_000 });
 }
 
+export type FideImportStatus = {
+  status: 'idle' | 'running' | 'failed' | 'ok';
+  importedAt: string | null;
+  playerCount: number;
+  sourceUrl: string | null;
+  error: string | null;
+  updatedAt: string | null;
+  started?: boolean;
+  message?: string;
+};
+
+export async function apiAdminFideStatus() {
+  return req<FideImportStatus>('/admin/fide/status', { timeoutMs: 15_000 });
+}
+
+export async function apiAdminFideRefresh() {
+  return req<FideImportStatus>('/admin/fide/refresh', {
+    method: 'POST',
+    body: JSON.stringify({}),
+    timeoutMs: 15_000,
+  });
+}
+
+export type FidePlayerCandidate = {
+  fideId: number;
+  name: string;
+  federation: string | null;
+  birthYear: number | null;
+  title: string | null;
+  sex: string | null;
+  standard: number | null;
+  rapid: number | null;
+  blitz: number | null;
+  inactive: boolean;
+};
+
+export type FideLookupResultRow = {
+  participantId: string;
+  status: 'exact' | 'unique' | 'ambiguous' | 'not_found';
+  selectedFideId: number | null;
+  candidates: FidePlayerCandidate[];
+};
+
+export async function apiFideLookup(
+  tournamentId: string,
+  body: {
+    ratingType: 'standard' | 'rapid' | 'blitz';
+    players: Array<{
+      id: string;
+      name: string;
+      country?: string | null;
+      yearOfBirth?: number | null;
+      fideId?: number | null;
+    }>;
+  },
+) {
+  return req<{
+    ratingType: 'standard' | 'rapid' | 'blitz';
+    catalogCount: number;
+    results: FideLookupResultRow[];
+  }>(`/tournaments/${tournamentId}/fide-lookup`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    timeoutMs: 120_000,
+  });
+}
+
 export async function apiDirectorSetGameResult(
   gameId: string,
   body: {

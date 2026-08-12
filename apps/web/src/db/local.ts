@@ -66,6 +66,8 @@ export interface LocalParticipant {
   age: number;
   gender?: string | null;
   rating?: number | null;
+  /** Official FIDE ID when known. */
+  fideId?: number | null;
   club?: string | null;
   school?: string | null;
   city?: string | null;
@@ -163,6 +165,16 @@ export class ChessDb extends Dexie {
     });
     // v6: floor arbiter tables + result lock field on games
     this.version(6).stores({
+      tournaments: 'id, ownerId, updatedAt, dirty',
+      categories: 'id, tournamentId, updatedAt, dirty',
+      participants: 'id, tournamentId, updatedAt, dirty',
+      games: 'id, tournamentId, categoryId, round, dirty',
+      certificateTemplates: 'id, tournamentId, updatedAt, dirty',
+      tournamentTables: 'id, tournamentId, tableNumber, slug, dirty',
+      meta: 'key',
+    });
+    // v7: fideId on participants (optional field; no index change)
+    this.version(7).stores({
       tournaments: 'id, ownerId, updatedAt, dirty',
       categories: 'id, tournamentId, updatedAt, dirty',
       participants: 'id, tournamentId, updatedAt, dirty',

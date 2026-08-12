@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as Sentry from '@sentry/react';
 import { useAuth } from '../auth/AuthContext';
-import { apiAdminOverview, type AdminOverview } from '../api/client';
+import {
+  apiAdminFideRefresh,
+  apiAdminFideStatus,
+  apiAdminOverview,
+  type AdminOverview,
+  type FideImportStatus,
+} from '../api/client';
 import { sentryEnabled } from '../instrument';
 
 /** Format UTC ISO for display in the viewer's local timezone, with TZ abbreviation. */
@@ -134,6 +140,14 @@ export default function AdminPage() {
   const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fideStatus, setFideStatus] = useState<FideImportStatus | null>(null);
+  const [fideBusy, setFideBusy] = useState(false);
+  const [fideMsg, setFideMsg] = useState<string | null>(null);
+
+  const loadFide = useCallback(async () => {
+    const res = await apiAdminFideStatus();
+    if (res.ok && res.data) setFideStatus(res.data);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,11 +161,20 @@ export default function AdminPage() {
     }
     setData(res.data);
     setLoading(false);
-  }, []);
+    void loadFide();
+  }, [loadFide]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (fideStatus?.status !== 'running') return;
+    const t = window.setInterval(() => {
+      void loadFide();
+    }, 4000);
+    return () => window.clearInterval(t);
+  }, [fideStatus?.status, loadFide]);
 
   const statusParts = useMemo(() => {
     const s = data?.totals.tournamentsByStatus ?? {};
@@ -218,6 +241,58 @@ export default function AdminPage() {
           {error}
         </p>
       )}
+
+      <section className="admin-panel" aria-label="FIDE rating list">
+        <h3>FIDE rating list</h3>
+        <p className="admin-metric-detail">
+          Official monthly XML from ratings.fide.com. Refresh after the 5th–10th of each month.
+          Directors look up players from this table — nothing is scraped per request.
+        </p>
+        <p className="admin-metric-detail">
+          Status:{' '}
+          <strong>{fideStatus?.status ?? '…'}</strong>
+          {fideStatus?.playerCount != null
+            ? ` · ${fideStatus.playerCount.toLocaleString()} players`
+            : ''}
+          {fideStatus?.importedAt ? ` · last import ${fmtDate(fideStatus.importedAt)}` : ''}
+        </p>
+        {fideStatus?.error && (
+          <p className="form-hint stage-banner-warn" role="alert">
+            {fideStatus.error}
+          </p>
+        )}
+        {fideMsg && <p className="form-hint">{fideMsg}</p>}
+        <div className="admin-actions-row">
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={fideBusy || fideStatus?.status === 'running'}
+            onClick={() => {
+              setFideBusy(true);
+              setFideMsg(null);
+              void apiAdminFideRefresh().then((res) => {
+                setFideBusy(false);
+                if (!res.ok) {
+                  setFideMsg(res.error);
+                  return;
+                }
+                if (res.data) setFideStatus(res.data);
+                setFideMsg(res.data?.message ?? 'Import started — this can take several minutes.');
+              });
+            }}
+          >
+            {fideStatus?.status === 'running' ? 'Import running…' : 'Refresh FIDE list'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={fideBusy}
+            onClick={() => void loadFide()}
+          >
+            Check status
+          </button>
+        </div>
+      </section>
 
       <section className="admin-panel" aria-label="Error monitoring">
         <h3>Error monitoring (Sentry)</h3>

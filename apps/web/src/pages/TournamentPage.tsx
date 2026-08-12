@@ -63,6 +63,7 @@ import {
 } from '../lib/tableStickers';
 import { livePublicUrl } from '../lib/liveViewer';
 import { useAuth } from '../auth/AuthContext';
+import FideLookupModal from '../components/FideLookupModal';
 
 type Tab = 'players' | 'pairings' | 'standings';
 
@@ -231,6 +232,7 @@ export default function TournamentPage() {
   >([]);
   const [cardBusyId, setCardBusyId] = useState<string | null>(null);
   const [cardMsg, setCardMsg] = useState<string | null>(null);
+  const [fideLookupOpen, setFideLookupOpen] = useState(false);
 
   const tournament = useLiveQuery(() => (id ? db.tournaments.get(id) : undefined), [id]);
   const categories = useLiveQuery(
@@ -1580,11 +1582,29 @@ export default function TournamentPage() {
           <div className="tab-actions">
             <span className="count-label">{participants?.length ?? 0} participants</span>
             {caps?.canImport && (
-              <Link to={importHref} className="btn btn-sm btn-outline">
-                {caps.importRequiresLateWarning ? 'Late entry CSV' : 'Import CSV'}
-              </Link>
+              <div className="tab-actions-buttons">
+                <Link to={importHref} className="btn btn-sm btn-outline">
+                  {caps.importRequiresLateWarning ? 'Late entry CSV' : 'Import CSV'}
+                </Link>
+                {(participants?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline"
+                    onClick={() => setFideLookupOpen(true)}
+                  >
+                    Look up FIDE ratings
+                  </button>
+                )}
+              </div>
             )}
           </div>
+          {fideLookupOpen && id && participants && (
+            <FideLookupModal
+              tournamentId={id}
+              participants={participants}
+              onClose={() => setFideLookupOpen(false)}
+            />
+          )}
           {(participants?.length ?? 0) > 0 && (
             <TableSearch
               id="player-search"

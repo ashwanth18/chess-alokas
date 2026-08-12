@@ -1,5 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getDatabaseSql, requireAuth, requirePlatformAdmin } from '../auth.js';
+import {
+  getFideImportStatus,
+  isFideImportRunning,
+  startFideImport,
+} from '../fide/importList.js';
 
 export type AdminAccountRow = {
   id: string;
@@ -429,6 +434,54 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
         const message = err instanceof Error ? err.message : 'Admin overview failed';
         return reply.code(500).send({ error: message });
       }
+    },
+  );
+
+  app.get(
+    '/admin/fide/status',
+    { preHandler: [requireAuth, requirePlatformAdmin] },
+    async (_request, reply) => {
+      const sql = getDatabaseSql();
+      if (!sql) {
+        return reply.code(503).send({ error: 'FIDE status requires DATABASE_URL' });
+      }
+      try {
+        return await getFideImportStatus(sql);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'FIDE status failed';
+        return reply.code(500).send({ error: message });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/fide/refresh',
+    { preHandler: [requireAuth, requirePlatformAdmin] },
+    async (_request, reply) => {
+      const sql = getDatabaseSql();
+      if (!sql) {
+        return reply.code(503).send({ error: 'FIDE refresh requires DATABASE_URL' });
+      }
+      if (isFideImportRunning()) {
+        return reply.code(202).send({
+          started: false,
+          message: 'FIDE import already running',
+          ...(await getFideImportStatus(sql)),
+        });
+      }
+      const started = startFideImport(sql);
+      if (!started) {
+        return reply.code(202).send({
+          started: false,
+          message: 'FIDE import already running',
+          ...(await getFideImportStatus(sql)),
+        });
+      }
+      return reply.code(202).send({
+        started: true,
+        message: 'FIDE import started — poll /admin/fide/status',
+        ...(await getFideImportStatus(sql)),
+      });
     },
   );
 };

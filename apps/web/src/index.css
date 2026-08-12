@@ -1243,7 +1243,14 @@ input[type=checkbox] {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
   margin-bottom: 1rem;
+}
+.tab-actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 .count-label { font-size: 0.8rem; color: var(--ink-300); }
 
@@ -3446,6 +3453,33 @@ a.landing-download-option:hover {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.35rem;
+}
+
+.fide-lookup-modal {
+  width: min(56rem, 100%);
+  max-height: min(90vh, 48rem);
+  overflow: hidden;
+}
+.fide-lookup-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+.fide-lookup-controls .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 10rem;
+}
+.fide-lookup-table-wrap {
+  overflow: auto;
+  max-height: min(50vh, 28rem);
+  border: 1px solid rgba(196, 165, 116, 0.25);
+  border-radius: var(--radius-md, 8px);
+}
+.fide-lookup-modal .data-table {
+  margin: 0;
 }
 
 .tiebreak-help {

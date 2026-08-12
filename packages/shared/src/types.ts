@@ -134,6 +134,8 @@ export const ParticipantSchema = z.object({
   gender: z.string().nullable().optional(),
   /** FIDE (or other) rating; null/0 = unrated. */
   rating: z.number().int().nullable().optional(),
+  /** Official FIDE ID when known; preferred for rating lookups. */
+  fideId: z.number().int().positive().nullable().optional(),
   /** Legacy club field; prefer school when both exist. */
   club: z.string().nullable().optional(),
   school: z.string().nullable().optional(),

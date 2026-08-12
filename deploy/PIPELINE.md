@@ -77,7 +77,11 @@ See [`DOKPLOY.md`](./DOKPLOY.md) §3. Required:
 
 **Sentry free-tier policy:** errors + light tracing (`tracesSampleRate` 0.1 in prod). Do **not** enable Session Replay, profiling, or Seer. SDK no-ops when DSN is unset.
 
+If Admin shows **Client SDK: not configured**, set `VITE_SENTRY_DSN` (+ optional `VITE_SENTRY_ORG_URL`) and **rebuild the web image**. Also set `SENTRY_DSN` on the API service for server 500s.
+
 Web Vite env is baked at **image build** time (`VITE_*` from compose). Changing Supabase anon URL/key or Sentry DSN requires a **rebuild**, not only a container restart.
+
+**FIDE list:** after deploy, open Admin → **Refresh FIDE list** once (monthly XML import). Lookup on the Players tab needs a non-empty `fide_players` table.
 
 ### Local parity
 
