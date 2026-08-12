@@ -24,8 +24,11 @@ await esbuild.build({
   banner: {
     js: "import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);",
   },
+  alias: {
+    '@sentry/node': path.join(__dirname, 'sentry-desktop-stub.js'),
+  },
   external: [],
-  sourcemap: true,
+  sourcemap: false,
   logLevel: 'info',
 });
 

@@ -14,6 +14,9 @@ extraResources:
     to: web
   - from: ../api/desktop-bundle
     to: api
+    filter:
+      - '**/*'
+      - '!**/*.map'
   - from: resources/api.env.example
     to: api.env.example
 publish:
@@ -22,6 +25,8 @@ publish:
   repo: chess-alokas
   releaseType: release
 win:
+  # Unsigned CI builds: keep rcedit metadata, skip Authenticode (no cert on runners).
+  signExecutable: false
   target:
     - target: nsis
       arch:

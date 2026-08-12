@@ -24,6 +24,10 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      SENTRYCLI_SKIP_DOWNLOAD: '1'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -37,11 +41,14 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
+        env:
+          SENTRYCLI_SKIP_DOWNLOAD: '1'
         run: pnpm install --frozen-lockfile
 
       - name: Build desktop (web + api + electron)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          SENTRYCLI_SKIP_DOWNLOAD: '1'
           # Do not pass empty VITE_SUPABASE_* secrets — they override apps/web/.env.desktop.
           VITE_API_URL: https://chess-manager.alokas.com/api
           # Optional: set repo secret VITE_SENTRY_DSN for desktop error reporting (free tier).

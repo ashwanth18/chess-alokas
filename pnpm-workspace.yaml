@@ -2,7 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
-  '@sentry/cli': true
+  '@sentry/cli': false
   electron: true
   electron-winstaller: true
   esbuild: true
