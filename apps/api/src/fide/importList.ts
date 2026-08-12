@@ -213,6 +213,8 @@ async function setMeta(
       imported_at = COALESCE(EXCLUDED.imported_at, fide_import_meta.imported_at),
       player_count = CASE
         WHEN EXCLUDED.status = 'ok' THEN EXCLUDED.player_count
+        WHEN EXCLUDED.status = 'running' AND EXCLUDED.player_count > 0 THEN EXCLUDED.player_count
+        WHEN EXCLUDED.status = 'failed' THEN fide_import_meta.player_count
         ELSE fide_import_meta.player_count
       END,
       source_url = COALESCE(EXCLUDED.source_url, fide_import_meta.source_url),
@@ -363,8 +365,17 @@ export async function runFideImport(sql: Sql): Promise<number> {
     });
 
     const xmlStream = await readZipEntry(zip, entry);
-    const count = await parseXmlIntoStaging(xmlStream, sql, () => {
-      /* progress tracked in meta at end */
+    let lastProgressAt = 0;
+    const count = await parseXmlIntoStaging(xmlStream, sql, (n) => {
+      const nowMs = Date.now();
+      if (nowMs - lastProgressAt < 15_000) return;
+      lastProgressAt = nowMs;
+      void setMeta(sql, {
+        status: 'running',
+        playerCount: n,
+        sourceUrl: FIDE_XML_ZIP_URL,
+        error: null,
+      }).catch(() => undefined);
     });
     zip.close();
 

@@ -341,9 +341,18 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       try {
         const catalogCount = await countFidePlayers(sql);
         if (catalogCount === 0) {
+          const { getFideImportStatus } = await import('../fide/importList.js');
+          const fideStatus = await getFideImportStatus(sql);
+          const staging = await sql<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM fide_players_staging
+          `;
+          const stagingCount = staging[0]?.n ?? 0;
+          const importing = fideStatus.status === 'running' || stagingCount > 0;
           return reply.code(503).send({
             error: 'FIDE list empty',
-            message: 'FIDE list not loaded — ask an admin to refresh.',
+            message: importing
+              ? `FIDE list is still importing (${stagingCount.toLocaleString()} staged) — wait a few minutes, then try again.`
+              : 'FIDE list not loaded yet — it will auto-refresh, or ask an admin to refresh.',
           });
         }
 
