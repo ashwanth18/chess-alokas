@@ -463,6 +463,47 @@ export async function apiPublicLiveDisable(tournamentId: string) {
   );
 }
 
+export type AdminOverview = {
+  accounts: Array<{
+    id: string;
+    email: string | null;
+    displayName: string | null;
+    createdAt: string;
+    lastSignInAt: string | null;
+    tournamentCount: number;
+    participantCount: number;
+    isPlatformAdmin: boolean;
+  }>;
+  totals: {
+    users: number;
+    tournaments: number;
+    tournamentsByStatus: Record<string, number>;
+    publicLiveEnabled: number;
+    participants: number;
+    games: number;
+    gamesPending: number;
+    gamesFinished: number;
+    floorTournaments: number;
+    certificateIssuesByStatus: Record<string, number>;
+    gameCardsByType: Record<string, number>;
+    resultEventsLast7dByRole: Record<string, number>;
+  };
+  recentTournaments: Array<{
+    id: string;
+    name: string;
+    status: string;
+    ownerEmail: string | null;
+    participantCount: number;
+    publicEnabled: boolean;
+    currentRound: number;
+    updatedAt: string;
+  }>;
+};
+
+export async function apiAdminOverview() {
+  return req<AdminOverview>('/admin/overview', { timeoutMs: 20_000 });
+}
+
 export async function apiDirectorSetGameResult(
   gameId: string,
   body: {

@@ -134,6 +134,11 @@ export default function Layout() {
           <NavLink to="/settings" onClick={closeMenu}>
             Settings
           </NavLink>
+          {auth.isPlatformAdmin && (
+            <NavLink to="/admin" onClick={closeMenu}>
+              Admin
+            </NavLink>
+          )}
           <div className="topnav-mobile-actions">
             <button
               type="button"

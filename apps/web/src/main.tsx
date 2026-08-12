@@ -18,6 +18,7 @@ import AuthCallbackPage from './pages/AuthCallbackPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import AccountPage from './pages/AccountPage';
 import SettingsPage from './pages/SettingsPage';
+import AdminPage from './pages/AdminPage';
 import LandingPage from './pages/LandingPage';
 import TableScoringPage from './pages/TableScoringPage';
 import LivePage from './pages/LivePage';
@@ -112,6 +113,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/simulator" element={<SimulatorPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/admin" element={<AdminPage />} />
           </Route>
           </Routes>
         </>

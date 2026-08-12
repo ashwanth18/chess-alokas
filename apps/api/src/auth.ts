@@ -47,7 +47,7 @@ export function getServiceSupabase(): SupabaseClient | null {
   });
 }
 
-function getSessionsSql(): Sql | null {
+export function getDatabaseSql(): Sql | null {
   if (sessionsSql !== undefined) return sessionsSql;
   const dbUrl = process.env['DATABASE_URL'];
   if (!dbUrl) {
@@ -56,6 +56,39 @@ function getSessionsSql(): Sql | null {
   }
   sessionsSql = postgres(dbUrl, { max: 2, prepare: false });
   return sessionsSql;
+}
+
+function getSessionsSql(): Sql | null {
+  return getDatabaseSql();
+}
+
+/** After requireAuth: 403 unless profiles.is_platform_admin. No-op when AUTH_DISABLED. */
+export async function requirePlatformAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  if (!authEnabled()) return;
+  if (!request.userId) {
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+  const sql = getDatabaseSql();
+  if (!sql) {
+    return reply.code(503).send({ error: 'Admin requires DATABASE_URL' });
+  }
+  try {
+    const rows = await sql<{ is_platform_admin: boolean }[]>`
+      SELECT is_platform_admin
+      FROM profiles
+      WHERE id = ${request.userId}::uuid
+      LIMIT 1
+    `;
+    if (!rows[0]?.is_platform_admin) {
+      return reply.code(403).send({ error: 'Forbidden', message: 'Platform admin required' });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Admin check failed';
+    return reply.code(500).send({ error: message });
+  }
 }
 
 function sessionIdFromBearer(request: FastifyRequest): string | null {

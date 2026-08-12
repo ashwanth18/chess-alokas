@@ -11,6 +11,7 @@ import { certificatesPlugin } from './routes/certificates.js';
 import { publicTablesPlugin } from './routes/publicTables.js';
 import { publicLivePlugin } from './routes/publicLive.js';
 import { floorPlugin } from './routes/floor.js';
+import { adminPlugin } from './routes/admin.js';
 
 const PORT = Number(process.env['PORT'] ?? 3001);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
@@ -39,6 +40,7 @@ await app.register(certificatesPlugin, { store });
 await app.register(publicTablesPlugin, { store });
 await app.register(publicLivePlugin, { store });
 await app.register(floorPlugin, { store });
+await app.register(adminPlugin);
 
 app.get('/health', async () => {
   const mode = process.env['DATABASE_URL'] ? 'postgres' : 'memory';

@@ -17,6 +17,7 @@ interface AuthContextValue {
   session: Session | null;
   user: User | null;
   displayName: string | null;
+  isPlatformAdmin: boolean;
   signInWithPassword: (email: string, password: string) => Promise<{ error?: string }>;
   signUpWithPassword: (
     email: string,
@@ -47,18 +48,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
   const refreshProfile = useCallback(async () => {
     if (!supabase || !session?.user) {
       setDisplayName(null);
+      setIsPlatformAdmin(false);
       return;
     }
     const { data } = await supabase
       .from('profiles')
-      .select('display_name')
+      .select('display_name, is_platform_admin')
       .eq('id', session.user.id)
       .maybeSingle();
     setDisplayName((data?.display_name as string | null) ?? null);
+    setIsPlatformAdmin(Boolean(data?.is_platform_admin));
   }, [session?.user]);
 
   useEffect(() => {
@@ -100,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       user: session?.user ?? null,
       displayName,
+      isPlatformAdmin,
       getAccessToken,
       refreshProfile,
       async signInWithPassword(email, password) {
@@ -187,7 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await persistOwnerId(null);
       },
     }),
-    [loading, session, displayName, getAccessToken, refreshProfile],
+    [loading, session, displayName, isPlatformAdmin, getAccessToken, refreshProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
