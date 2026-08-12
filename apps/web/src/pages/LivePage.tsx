@@ -28,6 +28,7 @@ import {
   type LivePlayer,
 } from '../lib/liveViewer';
 import { resolvePrizePlaces } from '../lib/prizePlaces';
+import { trackPageView } from '../lib/pageAnalytics';
 
 type LiveTab = 'boards' | 'standings' | 'players';
 
@@ -158,6 +159,16 @@ export default function LivePage() {
   useEffect(() => {
     setBookmarks(loadLiveBookmarks(token));
   }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const path = playerId ? `/live/${token}/p/${playerId}` : `/live/${token}`;
+    trackPageView({
+      routeKey: playerId ? 'live_player' : 'live',
+      path,
+      liveToken: token,
+    });
+  }, [token, playerId]);
 
   const refresh = useCallback(async () => {
     if (!token) return;

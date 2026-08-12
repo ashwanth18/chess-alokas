@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { NavLink, Outlet, Link } from 'react-router-dom';
+import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
 import { checkOnline } from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { getLastSyncAt } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
+import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -13,6 +14,7 @@ function formatSyncTime(iso: string | null): string {
 
 export default function Layout() {
   const auth = useAuth();
+  const location = useLocation();
   const [online, setOnline] = useState(navigator.onLine);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
@@ -22,6 +24,21 @@ export default function Layout() {
   useEffect(() => {
     getLastSyncAt().then(setLastSync);
   }, []);
+
+  useEffect(() => {
+    const routeKey = routeKeyFromAppPath(location.pathname);
+    if (!routeKey) return;
+    const tournamentMatch = location.pathname.match(/^\/tournaments\/([^/]+)/);
+    const tournamentId =
+      tournamentMatch && tournamentMatch[1] && tournamentMatch[1] !== 'new'
+        ? tournamentMatch[1]
+        : null;
+    trackPageView({
+      routeKey,
+      path: location.pathname,
+      tournamentId,
+    });
+  }, [location.pathname]);
 
   useEffect(() => {
     const onOnline = () => setOnline(true);

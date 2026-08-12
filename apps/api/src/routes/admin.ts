@@ -12,6 +12,14 @@ export type AdminAccountRow = {
   isPlatformAdmin: boolean;
 };
 
+export type AdminWeekBucket = {
+  weekStart: string;
+  users: number;
+  resultEvents: number;
+  pageViews: number;
+  certificates: number;
+};
+
 export type AdminOverview = {
   accounts: AdminAccountRow[];
   totals: {
@@ -24,9 +32,23 @@ export type AdminOverview = {
     gamesPending: number;
     gamesFinished: number;
     floorTournaments: number;
+    tournamentsWithCertificates: number;
     certificateIssuesByStatus: Record<string, number>;
     gameCardsByType: Record<string, number>;
     resultEventsLast7dByRole: Record<string, number>;
+  };
+  adoption: {
+    publicLivePct: number;
+    floorTablesPct: number;
+    certificatesPct: number;
+  };
+  growthByWeek: AdminWeekBucket[];
+  pageViews: {
+    last7d: number;
+    last30d: number;
+    byRouteKeyLast7d: Record<string, number>;
+    byDayLast14d: Array<{ day: string; count: number }>;
+    topLiveHashesLast7d: Array<{ hashPrefix: string; count: number }>;
   };
   recentTournaments: Array<{
     id: string;
@@ -39,6 +61,11 @@ export type AdminOverview = {
     updatedAt: string;
   }>;
 };
+
+function pct(part: number, whole: number): number {
+  if (whole <= 0) return 0;
+  return Math.round((part / whole) * 1000) / 10;
+}
 
 export const adminPlugin: FastifyPluginAsync = async (app) => {
   app.get(
@@ -105,6 +132,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
             games_pending: string;
             games_finished: string;
             floor_tournaments: string;
+            tournaments_with_certs: string;
           }[]
         >`
           SELECT
@@ -139,7 +167,11 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
               SELECT COUNT(*)::text
               FROM tournaments
               WHERE deleted_at IS NULL AND COALESCE(table_count, 0) > 0
-            ) AS floor_tournaments
+            ) AS floor_tournaments,
+            (
+              SELECT COUNT(DISTINCT tournament_id)::text
+              FROM certificate_issues
+            ) AS tournaments_with_certs
         `;
 
         const certRows = await sql<{ status: string; count: string }[]>`
@@ -160,6 +192,100 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           FROM game_result_events
           WHERE created_at >= now() - interval '7 days'
           GROUP BY actor_role
+        `;
+
+        // tournaments/participants have no created_at — use event-style growth proxies
+        const growthRows = await sql<
+          {
+            week_start: string;
+            users: string;
+            result_events: string;
+            page_views: string;
+            certificates: string;
+          }[]
+        >`
+          WITH weeks AS (
+            SELECT generate_series(
+              date_trunc('week', now() - interval '7 weeks'),
+              date_trunc('week', now()),
+              interval '1 week'
+            )::date AS week_start
+          )
+          SELECT
+            w.week_start::text AS week_start,
+            (
+              SELECT COUNT(*)::text
+              FROM profiles p
+              WHERE date_trunc('week', p.created_at)::date = w.week_start
+            ) AS users,
+            (
+              SELECT COUNT(*)::text
+              FROM game_result_events e
+              WHERE date_trunc('week', e.created_at)::date = w.week_start
+            ) AS result_events,
+            (
+              SELECT COUNT(*)::text
+              FROM page_views pv
+              WHERE date_trunc('week', pv.created_at)::date = w.week_start
+            ) AS page_views,
+            (
+              SELECT COUNT(*)::text
+              FROM certificate_issues c
+              WHERE date_trunc('week', c.created_at)::date = w.week_start
+            ) AS certificates
+          FROM weeks w
+          ORDER BY w.week_start ASC
+        `;
+
+        const [pvTotals] = await sql<{ last7d: string; last30d: string }[]>`
+          SELECT
+            (
+              SELECT COUNT(*)::text
+              FROM page_views
+              WHERE created_at >= now() - interval '7 days'
+            ) AS last7d,
+            (
+              SELECT COUNT(*)::text
+              FROM page_views
+              WHERE created_at >= now() - interval '30 days'
+            ) AS last30d
+        `;
+
+        const pvByRoute = await sql<{ route_key: string; count: string }[]>`
+          SELECT route_key, COUNT(*)::text AS count
+          FROM page_views
+          WHERE created_at >= now() - interval '7 days'
+          GROUP BY route_key
+          ORDER BY COUNT(*) DESC
+        `;
+
+        const pvByDay = await sql<{ day: string; count: string }[]>`
+          WITH days AS (
+            SELECT generate_series(
+              (current_date - 13)::timestamp,
+              current_date::timestamp,
+              interval '1 day'
+            )::date AS day
+          )
+          SELECT
+            d.day::text AS day,
+            (
+              SELECT COUNT(*)::text
+              FROM page_views pv
+              WHERE pv.created_at::date = d.day
+            ) AS count
+          FROM days d
+          ORDER BY d.day ASC
+        `;
+
+        const topLive = await sql<{ hash_prefix: string; count: string }[]>`
+          SELECT left(live_token_hash, 8) AS hash_prefix, COUNT(*)::text AS count
+          FROM page_views
+          WHERE created_at >= now() - interval '7 days'
+            AND live_token_hash IS NOT NULL
+          GROUP BY live_token_hash
+          ORDER BY COUNT(*) DESC
+          LIMIT 5
         `;
 
         const recent = await sql<
@@ -214,6 +340,16 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           resultEventsLast7dByRole[row.actor_role] = Number(row.count);
         }
 
+        const byRouteKeyLast7d: Record<string, number> = {};
+        for (const row of pvByRoute) {
+          byRouteKeyLast7d[row.route_key] = Number(row.count);
+        }
+
+        const tournamentCount = Number(totalsRow?.tournaments ?? 0);
+        const publicLive = Number(totalsRow?.public_live ?? 0);
+        const floorTournaments = Number(totalsRow?.floor_tournaments ?? 0);
+        const withCerts = Number(totalsRow?.tournaments_with_certs ?? 0);
+
         const overview: AdminOverview = {
           accounts: accounts.map((a) => ({
             id: a.id,
@@ -227,17 +363,43 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           })),
           totals: {
             users: Number(totalsRow?.users ?? 0),
-            tournaments: Number(totalsRow?.tournaments ?? 0),
+            tournaments: tournamentCount,
             tournamentsByStatus,
-            publicLiveEnabled: Number(totalsRow?.public_live ?? 0),
+            publicLiveEnabled: publicLive,
             participants: Number(totalsRow?.participants ?? 0),
             games: Number(totalsRow?.games ?? 0),
             gamesPending: Number(totalsRow?.games_pending ?? 0),
             gamesFinished: Number(totalsRow?.games_finished ?? 0),
-            floorTournaments: Number(totalsRow?.floor_tournaments ?? 0),
+            floorTournaments,
+            tournamentsWithCertificates: withCerts,
             certificateIssuesByStatus,
             gameCardsByType,
             resultEventsLast7dByRole,
+          },
+          adoption: {
+            publicLivePct: pct(publicLive, tournamentCount),
+            floorTablesPct: pct(floorTournaments, tournamentCount),
+            certificatesPct: pct(withCerts, tournamentCount),
+          },
+          growthByWeek: growthRows.map((g) => ({
+            weekStart: g.week_start,
+            users: Number(g.users),
+            resultEvents: Number(g.result_events),
+            pageViews: Number(g.page_views),
+            certificates: Number(g.certificates),
+          })),
+          pageViews: {
+            last7d: Number(pvTotals?.last7d ?? 0),
+            last30d: Number(pvTotals?.last30d ?? 0),
+            byRouteKeyLast7d,
+            byDayLast14d: pvByDay.map((d) => ({
+              day: d.day,
+              count: Number(d.count),
+            })),
+            topLiveHashesLast7d: topLive.map((t) => ({
+              hashPrefix: t.hash_prefix,
+              count: Number(t.count),
+            })),
           },
           recentTournaments: recent.map((t) => ({
             id: t.id,

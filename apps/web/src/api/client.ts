@@ -484,9 +484,29 @@ export type AdminOverview = {
     gamesPending: number;
     gamesFinished: number;
     floorTournaments: number;
+    tournamentsWithCertificates: number;
     certificateIssuesByStatus: Record<string, number>;
     gameCardsByType: Record<string, number>;
     resultEventsLast7dByRole: Record<string, number>;
+  };
+  adoption: {
+    publicLivePct: number;
+    floorTablesPct: number;
+    certificatesPct: number;
+  };
+  growthByWeek: Array<{
+    weekStart: string;
+    users: number;
+    resultEvents: number;
+    pageViews: number;
+    certificates: number;
+  }>;
+  pageViews: {
+    last7d: number;
+    last30d: number;
+    byRouteKeyLast7d: Record<string, number>;
+    byDayLast14d: Array<{ day: string; count: number }>;
+    topLiveHashesLast7d: Array<{ hashPrefix: string; count: number }>;
   };
   recentTournaments: Array<{
     id: string;
