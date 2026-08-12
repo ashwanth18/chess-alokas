@@ -109,9 +109,9 @@ export default function SettingsPage() {
         <section className="account-panel">
           <h3>Desktop updates</h3>
           <p className="form-hint">
-            Installed version <strong>v{desktopVersion}</strong>. Updates download in the
-            background; Windows installer builds restart and install silently (no Next wizard).
-            Portable / macOS builds open the download page instead.
+            Installed version <strong>v{desktopVersion}</strong>. Updates download in the app —
+            Windows Setup builds restart and install silently; portable / macOS download an
+            installer to your Downloads folder and open it (never opens GitHub).
           </p>
           <dl className="settings-dl">
             <div>
@@ -142,13 +142,13 @@ export default function SettingsPage() {
                 ? 'Checking…'
                 : 'Check for updates'}
             </button>
-            {updateStatus?.status === 'available' && !updateStatus.canInstall && (
+            {updateStatus?.status === 'available' && (
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => void window.desktop?.openDownloadPage(updateStatus.downloadPageUrl)}
+                onClick={() => void window.desktop?.downloadUpdate()}
               >
-                Get update
+                Download update
               </button>
             )}
             {updateStatus?.status === 'downloading' && (
@@ -160,7 +160,7 @@ export default function SettingsPage() {
                 className="btn btn-primary"
                 onClick={() => void window.desktop?.installUpdate()}
               >
-                Restart & update
+                {updateStatus.canInstall ? 'Restart & update' : 'Install update'}
               </button>
             )}
           </div>

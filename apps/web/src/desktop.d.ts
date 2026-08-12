@@ -14,7 +14,8 @@ export type DesktopUpdateStatus = {
   version?: string;
   percent?: number;
   message?: string;
-  downloadPageUrl?: string;
+  installerUrl?: string;
+  localInstallerPath?: string;
   canInstall: boolean;
 };
 

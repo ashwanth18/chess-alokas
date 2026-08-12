@@ -47,11 +47,11 @@ function registerIpc() {
   ipcMain.handle('desktop:download-update', async () => {
     await updater.download();
   });
-  ipcMain.handle('desktop:install-update', () => {
-    updater.install();
+  ipcMain.handle('desktop:install-update', async () => {
+    await updater.install();
   });
-  ipcMain.handle('desktop:open-download-page', (_event, url?: string) => {
-    updater.openDownloadPage(typeof url === 'string' ? url : undefined);
+  ipcMain.handle('desktop:open-download-page', async (_event, url?: string) => {
+    await updater.openDownloadPage(typeof url === 'string' ? url : undefined);
   });
   ipcMain.handle('desktop:get-update-status', () => getLastUpdateStatus());
   ipcMain.handle('desktop:dismiss-just-updated', () => dismissJustUpdatedNotice());

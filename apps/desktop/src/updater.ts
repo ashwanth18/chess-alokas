@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { app, shell, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import type { AppUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
@@ -20,12 +22,14 @@ export type UpdateStatusPayload = {
   version?: string;
   percent?: number;
   message?: string;
-  /** When auto-install isn't possible (portable / unsigned mac), open this URL instead. */
-  downloadPageUrl?: string;
+  /** Direct installer asset URL (never a GitHub HTML page). */
+  installerUrl?: string;
+  /** Local path after a manual installer download. */
+  localInstallerPath?: string;
+  /** True when electron-updater can quitAndInstall silently (NSIS). */
   canInstall: boolean;
 };
 
-const RELEASES_PAGE = 'https://github.com/ashwanth18/chess-alokas/releases/latest';
 const RELEASES_API = 'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
 const PENDING_UPDATE_FILE = 'pending-update.json';
 const LAST_SEEN_VERSION_FILE = 'last-seen-version.txt';
@@ -36,6 +40,17 @@ type PendingUpdateMarker = {
   to: string;
 };
 
+type GithubReleaseAsset = {
+  name: string;
+  browser_download_url: string;
+  size?: number;
+};
+
+type GithubRelease = {
+  tag_name?: string;
+  assets?: GithubReleaseAsset[];
+};
+
 /** electron-updater is CommonJS; ESM named imports break in packaged Electron. */
 function loadAutoUpdater(): AppUpdater | null {
   try {
@@ -43,7 +58,7 @@ function loadAutoUpdater(): AppUpdater | null {
     const mod = require('electron-updater') as { autoUpdater: AppUpdater };
     return mod.autoUpdater;
   } catch (err) {
-    log.error('Failed to load electron-updater — using GitHub download page only', err);
+    log.error('Failed to load electron-updater — using direct installer download', err);
     return null;
   }
 }
@@ -56,6 +71,11 @@ let lastStatus: UpdateStatusPayload = {
 
 /** Survives until the renderer dismisses it (not cleared by update checks). */
 let activeJustUpdated: PendingUpdateMarker | null = null;
+
+/** Cached installer URL / local path for portable, mac, or updater fallback. */
+let pendingInstallerUrl: string | null = null;
+let pendingLocalInstaller: string | null = null;
+let downloadInFlight = false;
 
 function userDataFile(name: string): string {
   return path.join(app.getPath('userData'), name);
@@ -202,9 +222,47 @@ function isPortableBuild(): boolean {
 function canAutoInstall(updater: AppUpdater | null): boolean {
   if (!updater) return false;
   if (isPortableBuild()) return false;
-  // Unsigned mac updates via electron-updater are unreliable; send users to the release page.
+  // Unsigned mac updates via electron-updater are unreliable; use direct .dmg download.
   if (process.platform === 'darwin') return false;
   return app.isPackaged;
+}
+
+function preferredInstallerName(): string {
+  if (process.platform === 'win32') {
+    return isPortableBuild()
+      ? 'Chess-Alokas-Portable-win-x64.exe'
+      : 'Chess-Alokas-Setup-win-x64.exe';
+  }
+  if (process.platform === 'darwin') {
+    return process.arch === 'arm64'
+      ? 'Chess-Alokas-mac-arm64.dmg'
+      : 'Chess-Alokas-mac-x64.dmg';
+  }
+  return 'Chess-Alokas-linux-x86_64.AppImage';
+}
+
+function pickInstallerAsset(assets: GithubReleaseAsset[] | undefined): GithubReleaseAsset | null {
+  if (!assets?.length) return null;
+  const preferred = preferredInstallerName();
+  const exact = assets.find((a) => a.name === preferred);
+  if (exact) return exact;
+  // Fallbacks if naming drifts slightly
+  if (process.platform === 'win32') {
+    return (
+      assets.find((a) => /Setup.*\.exe$/i.test(a.name)) ??
+      assets.find((a) => /Portable.*\.exe$/i.test(a.name)) ??
+      null
+    );
+  }
+  if (process.platform === 'darwin') {
+    const archHint = process.arch === 'arm64' ? 'arm64' : 'x64';
+    return (
+      assets.find((a) => a.name.toLowerCase().includes(archHint) && a.name.endsWith('.dmg')) ??
+      assets.find((a) => a.name.endsWith('.dmg')) ??
+      null
+    );
+  }
+  return assets.find((a) => a.name.endsWith('.AppImage')) ?? null;
 }
 
 function send(
@@ -214,9 +272,11 @@ function send(
   updater: AppUpdater | null,
 ) {
   lastStatus = {
+    ...payload,
     currentVersion: app.getVersion(),
     canInstall: payload.canInstall ?? canAutoInstall(updater),
-    ...payload,
+    installerUrl: payload.installerUrl ?? pendingInstallerUrl ?? undefined,
+    localInstallerPath: payload.localInstallerPath ?? pendingLocalInstaller ?? undefined,
   };
   const win = getWindow();
   if (!win || win.isDestroyed()) return;
@@ -243,25 +303,46 @@ function isNewer(remote: string, local: string): boolean {
   return false;
 }
 
-/** Fallback when GitHub feed / latest.yml is missing: compare release tags via API. */
+async function fetchLatestRelease(): Promise<GithubRelease | null> {
+  const res = await fetch(RELEASES_API, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Chess-Alokas-Desktop',
+    },
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as GithubRelease;
+}
+
+/** Fallback when electron-updater feed is missing or unsupported: compare tags + pick installer. */
 async function checkViaGithubApi(
   getWindow: () => BrowserWindow | null,
   updater: AppUpdater | null,
 ): Promise<boolean> {
   try {
-    const res = await fetch(RELEASES_API, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'Chess-Alokas-Desktop',
-      },
-    });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { tag_name?: string; html_url?: string };
+    const body = await fetchLatestRelease();
+    if (!body) return false;
     const remote = body.tag_name ? parseTag(body.tag_name) : '';
     if (!remote || !isNewer(remote, app.getVersion())) {
       send(
         getWindow,
         { status: 'not-available', message: 'You’re on the latest version.' },
+        updater,
+      );
+      return true;
+    }
+    const asset = pickInstallerAsset(body.assets);
+    pendingInstallerUrl = asset?.browser_download_url ?? null;
+    pendingLocalInstaller = null;
+    if (!pendingInstallerUrl) {
+      send(
+        getWindow,
+        {
+          status: 'error',
+          version: remote,
+          message: `v${remote} is available, but no installer was found for this platform.`,
+          canInstall: false,
+        },
         updater,
       );
       return true;
@@ -272,7 +353,7 @@ async function checkViaGithubApi(
         status: 'available',
         version: remote,
         message: `Version ${remote} is available.`,
-        downloadPageUrl: body.html_url ?? RELEASES_PAGE,
+        installerUrl: pendingInstallerUrl,
         canInstall: false,
       },
       updater,
@@ -282,6 +363,134 @@ async function checkViaGithubApi(
     log.warn('GitHub release check failed', err);
     return false;
   }
+}
+
+async function downloadInstallerFile(
+  getWindow: () => BrowserWindow | null,
+  updater: AppUpdater | null,
+  url: string,
+  version: string | undefined,
+): Promise<void> {
+  if (downloadInFlight) return;
+  downloadInFlight = true;
+  try {
+    send(
+      getWindow,
+      {
+        status: 'downloading',
+        version,
+        percent: 0,
+        message: `Downloading v${version ?? 'update'}…`,
+        installerUrl: url,
+        canInstall: false,
+      },
+      updater,
+    );
+
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/octet-stream',
+        'User-Agent': 'Chess-Alokas-Desktop',
+      },
+      redirect: 'follow',
+    });
+    if (!res.ok || !res.body) {
+      throw new Error(`Download failed (${res.status})`);
+    }
+
+    const total = Number(res.headers.get('content-length') || 0);
+    const fileName =
+      preferredInstallerName().replace(/(\.\w+)$/, (_m, ext: string) =>
+        version ? `-${version}${ext}` : ext,
+      ) || path.basename(new URL(url).pathname);
+    const dest = path.join(app.getPath('downloads'), fileName);
+    const tmp = `${dest}.part`;
+
+    let received = 0;
+    let lastPct = -1;
+    const nodeReadable = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream);
+    const fileStream = fs.createWriteStream(tmp);
+
+    nodeReadable.on('data', (chunk: Buffer) => {
+      received += chunk.length;
+      if (total > 0) {
+        const pct = Math.min(99, Math.round((received / total) * 100));
+        if (pct !== lastPct) {
+          lastPct = pct;
+          send(
+            getWindow,
+            {
+              status: 'downloading',
+              version,
+              percent: pct,
+              message: `Downloading update… ${pct}%`,
+              installerUrl: url,
+              canInstall: false,
+            },
+            updater,
+          );
+        }
+      }
+    });
+
+    await pipeline(nodeReadable, fileStream);
+    if (fs.existsSync(dest)) fs.unlinkSync(dest);
+    fs.renameSync(tmp, dest);
+
+    pendingLocalInstaller = dest;
+    if (version) writePendingUpdate(version);
+    send(
+      getWindow,
+      {
+        status: 'downloaded',
+        version,
+        percent: 100,
+        message: `v${version ?? 'Update'} downloaded — click Install to open the installer.`,
+        installerUrl: url,
+        localInstallerPath: dest,
+        canInstall: false,
+      },
+      updater,
+    );
+  } catch (err) {
+    log.error('Installer download failed', err);
+    send(
+      getWindow,
+      {
+        status: 'error',
+        version,
+        message: err instanceof Error ? err.message : 'Download failed',
+        installerUrl: url,
+        canInstall: false,
+      },
+      updater,
+    );
+  } finally {
+    downloadInFlight = false;
+  }
+}
+
+async function ensureInstallerUrl(): Promise<string | null> {
+  if (pendingInstallerUrl) return pendingInstallerUrl;
+  if (lastStatus.installerUrl) {
+    pendingInstallerUrl = lastStatus.installerUrl;
+    return pendingInstallerUrl;
+  }
+  const body = await fetchLatestRelease();
+  const asset = pickInstallerAsset(body?.assets);
+  pendingInstallerUrl = asset?.browser_download_url ?? null;
+  return pendingInstallerUrl;
+}
+
+async function openLocalInstaller(localPath: string): Promise<void> {
+  const err = await shell.openPath(localPath);
+  if (err) {
+    throw new Error(err);
+  }
+  // Give the OS a moment to launch the installer, then quit so files aren't locked.
+  setTimeout(() => {
+    app.quit();
+  }, 1200);
 }
 
 export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
@@ -311,7 +520,6 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
           version: info.version,
           percent: 0,
           message: `Downloading v${info.version}…`,
-          downloadPageUrl: RELEASES_PAGE,
           canInstall: canAutoInstall(autoUpdater),
         },
         autoUpdater,
@@ -362,7 +570,6 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
             {
               status: 'error',
               message: err.message || 'Update check failed',
-              downloadPageUrl: RELEASES_PAGE,
               canInstall: false,
             },
             autoUpdater,
@@ -370,6 +577,79 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
         }
       });
     });
+  }
+
+  async function download() {
+    if (canAutoInstall(autoUpdater)) {
+      try {
+        await autoUpdater!.downloadUpdate();
+      } catch (err) {
+        log.error('downloadUpdate failed', err);
+        const url = await ensureInstallerUrl();
+        if (url) {
+          await downloadInstallerFile(getWindow, autoUpdater, url, lastStatus.version);
+          return;
+        }
+        send(
+          getWindow,
+          {
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Download failed',
+            canInstall: false,
+          },
+          autoUpdater,
+        );
+      }
+      return;
+    }
+
+    const url = await ensureInstallerUrl();
+    if (!url) {
+      send(
+        getWindow,
+        {
+          status: 'error',
+          message: 'No installer available for this platform.',
+          canInstall: false,
+        },
+        autoUpdater,
+      );
+      return;
+    }
+    await downloadInstallerFile(getWindow, autoUpdater, url, lastStatus.version);
+  }
+
+  async function install() {
+    if (canAutoInstall(autoUpdater) && lastStatus.status === 'downloaded' && !pendingLocalInstaller) {
+      if (lastStatus.version) writePendingUpdate(lastStatus.version);
+      // Silent NSIS (/S) — no Next/Next wizard; relaunch after install.
+      autoUpdater!.quitAndInstall(true, true);
+      return;
+    }
+
+    const local = pendingLocalInstaller || lastStatus.localInstallerPath;
+    if (local && fs.existsSync(local)) {
+      try {
+        if (lastStatus.version) writePendingUpdate(lastStatus.version);
+        await openLocalInstaller(local);
+      } catch (err) {
+        send(
+          getWindow,
+          {
+            status: 'error',
+            version: lastStatus.version,
+            message: err instanceof Error ? err.message : 'Could not open installer',
+            localInstallerPath: local,
+            canInstall: false,
+          },
+          autoUpdater,
+        );
+      }
+      return;
+    }
+
+    // Nothing ready yet — download first (never open a browser).
+    await download();
   }
 
   return {
@@ -412,7 +692,7 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
       try {
         await autoUpdater!.checkForUpdates();
       } catch (err) {
-        log.warn('electron-updater check failed, using GitHub API', err);
+        log.warn('electron-updater check failed, using direct installer download', err);
         const ok = await checkViaGithubApi(getWindow, autoUpdater);
         if (!ok) {
           send(
@@ -420,7 +700,6 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
             {
               status: 'error',
               message: err instanceof Error ? err.message : 'Update check failed',
-              downloadPageUrl: RELEASES_PAGE,
               canInstall: false,
             },
             autoUpdater,
@@ -429,40 +708,12 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
       }
     },
 
-    async download() {
-      if (!canAutoInstall(autoUpdater)) {
-        await shell.openExternal(RELEASES_PAGE);
-        return;
-      }
-      try {
-        await autoUpdater!.downloadUpdate();
-      } catch (err) {
-        log.error('downloadUpdate failed', err);
-        send(
-          getWindow,
-          {
-            status: 'error',
-            message: err instanceof Error ? err.message : 'Download failed',
-            downloadPageUrl: RELEASES_PAGE,
-            canInstall: false,
-          },
-          autoUpdater,
-        );
-      }
-    },
+    download,
+    install,
 
-    install() {
-      if (!canAutoInstall(autoUpdater)) {
-        void shell.openExternal(RELEASES_PAGE);
-        return;
-      }
-      if (lastStatus.version) writePendingUpdate(lastStatus.version);
-      // Silent NSIS (/S) — no Next/Next wizard; relaunch after install.
-      autoUpdater!.quitAndInstall(true, true);
-    },
-
-    openDownloadPage(url?: string) {
-      void shell.openExternal(url || RELEASES_PAGE);
+    /** Kept for IPC compat; always downloads in-app — never opens GitHub. */
+    openDownloadPage(_url?: string) {
+      return download();
     },
   };
 }

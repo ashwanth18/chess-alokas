@@ -122,21 +122,17 @@ export default function DesktopUpdateBanner() {
       await window.desktop.installUpdate();
       return;
     }
-    if (status?.canInstall) {
-      await window.desktop.downloadUpdate();
-      return;
-    }
-    await window.desktop.openDownloadPage(status?.downloadPageUrl);
+    await window.desktop.downloadUpdate();
   }
 
   const primaryLabel =
     status.status === 'downloaded'
-      ? 'Restart & update'
+      ? status.canInstall
+        ? 'Restart & update'
+        : 'Install update'
       : status.status === 'downloading'
         ? `Downloading… ${status.percent ?? 0}%`
-        : status.canInstall
-          ? 'Download update'
-          : 'Get update';
+        : 'Download update';
 
   return (
     <div className="desktop-update-banner" role="status">
@@ -168,15 +164,7 @@ export default function DesktopUpdateBanner() {
         )}
       </div>
       <div className="desktop-update-banner-actions">
-        {status.status === 'downloaded' || !status.canInstall ? (
-          <button
-            type="button"
-            className="btn btn-sm btn-primary"
-            onClick={() => void primaryAction()}
-          >
-            {primaryLabel}
-          </button>
-        ) : status.status === 'downloading' ? (
+        {status.status === 'downloading' ? (
           <span className="desktop-update-pct">{status.percent ?? 0}%</span>
         ) : (
           <button

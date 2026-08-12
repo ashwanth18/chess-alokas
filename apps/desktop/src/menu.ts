@@ -1,7 +1,6 @@
 import { app, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 
 const SITE_URL = 'https://chess-manager.alokas.com';
-const RELEASES_URL = 'https://github.com/ashwanth18/chess-alokas/releases/latest';
 
 type MenuActions = {
   checkForUpdates: () => void;
@@ -96,12 +95,6 @@ export function installAppMenu(actions: MenuActions) {
         {
           label: 'Check for updates…',
           click: () => actions.checkForUpdates(),
-        },
-        {
-          label: 'Download page',
-          click: () => {
-            void shell.openExternal(RELEASES_URL);
-          },
         },
         { type: 'separator' },
         {
