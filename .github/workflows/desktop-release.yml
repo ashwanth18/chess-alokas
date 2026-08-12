@@ -70,13 +70,14 @@ jobs:
             if [ "$i" -eq 5 ]; then exit 1; fi
           done
 
-          # esbuild (and a few others) need their platform binary postinstall.
+          # Platform binaries skipped by --ignore-scripts (pnpm does not hoist electron to root).
           pnpm rebuild esbuild 2>/dev/null || true
 
           for i in 1 2 3 4 5; do
             # Drop incomplete downloads that fail checksum on the next attempt.
             find "${ELECTRON_CACHE}" -type f \( -name '*.zip' -o -name '*.zip.part' \) -delete 2>/dev/null || true
-            if node node_modules/electron/install.js; then
+            # Resolve install.js from the desktop package (pnpm virtual store path).
+            if pnpm --filter @chess-alokas/desktop exec node ./node_modules/electron/install.js; then
               exit 0
             fi
             echo "electron install failed (attempt $i/5), retrying..."

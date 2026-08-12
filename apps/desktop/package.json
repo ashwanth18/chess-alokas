@@ -1,6 +1,6 @@
 {
   "name": "@chess-alokas/desktop",
-  "version": "0.1.39",
+  "version": "0.1.40",
   "private": true,
   "description": "Chess Alokas Electron desktop shell",
   "author": "Chess Alokas",
