@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build:
@@ -27,6 +28,9 @@ jobs:
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       SENTRYCLI_SKIP_DOWNLOAD: '1'
+      # Authenticated Electron binary download (avoids GitHub rate limits / hang-ups).
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      electron_config_cache: ${{ github.workspace }}/.cache/electron
 
     steps:
       - uses: actions/checkout@v4
@@ -40,10 +44,24 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
       - name: Install dependencies
-        env:
-          SENTRYCLI_SKIP_DOWNLOAD: '1'
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          set +e
+          for i in 1 2 3; do
+            pnpm install --frozen-lockfile && exit 0
+            echo "pnpm install failed (attempt $i/3), retrying in 15s..."
+            sleep 15
+          done
+          exit 1
 
       - name: Build desktop (web + api + electron)
         env:
