@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getDatabaseSql, requireAuth, requirePlatformAdmin } from '../auth.js';
 import {
+  clearStaleFideImportLock,
   getFideImportStatus,
   isFideImportRunning,
   startFideImport,
@@ -462,6 +463,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
       if (!sql) {
         return reply.code(503).send({ error: 'FIDE refresh requires DATABASE_URL' });
       }
+      await clearStaleFideImportLock(sql);
       if (isFideImportRunning()) {
         return reply.code(202).send({
           started: false,

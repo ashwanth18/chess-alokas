@@ -278,7 +278,9 @@ export function isFideRefreshDue(
   status: Pick<FideImportStatus, 'status' | 'importedAt' | 'playerCount'>,
   now: Date = new Date(),
 ): boolean {
-  if (status.status === 'running' || importRunning) return false;
+  // Only the in-process mutex blocks; DB "running" may be stale after a crash.
+  if (importRunning) return false;
+  if (status.status === 'running') return false;
 
   const importedAt = status.importedAt;
   const empty = !importedAt || (status.playerCount ?? 0) <= 0;
@@ -307,11 +309,28 @@ export function startFideImport(sql: Sql): boolean {
 }
 
 /**
+ * Clear a DB "running" flag left behind when the API process died mid-import.
+ * Without this, auto-refresh and Admin both stay blocked forever.
+ */
+export async function clearStaleFideImportLock(sql: Sql): Promise<boolean> {
+  if (importRunning) return false;
+  const status = await getFideImportStatus(sql);
+  if (status.status !== 'running') return false;
+  await setMeta(sql, {
+    status: 'failed',
+    error: 'Previous import did not finish (API restart). Retry when due.',
+    sourceUrl: FIDE_XML_ZIP_URL,
+  });
+  return true;
+}
+
+/**
  * If a monthly refresh is due, start it in the background.
  * Returns whether an import was started.
  */
 export async function maybeStartFideImport(sql: Sql, now: Date = new Date()): Promise<boolean> {
   if (importRunning) return false;
+  await clearStaleFideImportLock(sql);
   const status = await getFideImportStatus(sql);
   if (!isFideRefreshDue(status, now)) return false;
   return startFideImport(sql);

@@ -51,7 +51,7 @@ describe('isFideRefreshDue', () => {
     ).toBe(false);
   });
 
-  it('is not due while status is running', () => {
+  it('is not due while status is running (until stale lock is cleared)', () => {
     const now = new Date('2026-08-12T12:00:00.000Z');
     expect(
       isFideRefreshDue(
@@ -63,5 +63,15 @@ describe('isFideRefreshDue', () => {
         now,
       ),
     ).toBe(false);
+  });
+
+  it('is due when catalog empty after a failed import', () => {
+    const now = new Date('2026-08-12T12:00:00.000Z');
+    expect(
+      isFideRefreshDue(
+        status({ status: 'failed', playerCount: 0, importedAt: null }),
+        now,
+      ),
+    ).toBe(true);
   });
 });
