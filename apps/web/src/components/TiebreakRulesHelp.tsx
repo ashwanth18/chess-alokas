@@ -1,47 +1,39 @@
 import { useEffect, useId, useState } from 'react';
+import {
+  DEFAULT_TIEBREAK_ORDER,
+  TIEBREAK_LABELS,
+  normalizeTiebreakOrder,
+  type TiebreakKey,
+} from '@chess-alokas/shared';
 
-/** Keep in sync with computeStandings sort order in @chess-alokas/pairing-engine. */
-export const TIEBREAK_RULES = [
-  {
-    name: 'Score',
-    detail: 'Game points: win 1, draw ½, loss 0 (including forfeits). Bye awards 1 point.',
-  },
-  {
-    name: 'Buchholz',
-    detail: 'Sum of opponents’ scores. Bye rounds do not add an opponent.',
-  },
-  {
-    name: 'Buchholz Cut-1',
-    detail:
-      'Buchholz minus the lowest opponent score. With fewer than two opponents, same as Buchholz.',
-  },
-  {
-    name: 'Sonneborn-Berger',
-    detail:
-      'Sum of scores of players beaten, plus half the scores of players drawn with. Byes do not count.',
-  },
-  {
-    name: 'Wins',
-    detail: 'Number of decisive wins (including forfeit wins). Draws and byes do not count.',
-  },
-  {
-    name: 'Rating',
-    detail: 'Higher rating ranks ahead when earlier tiebreaks are equal.',
-  },
-  {
-    name: 'Seed',
-    detail: 'Lower seed number ranks ahead as the final fallback.',
-  },
-] as const;
-
-type Props = {
-  /** Compact label next to section titles */
-  className?: string;
+const RULE_DETAILS: Record<TiebreakKey, string> = {
+  buchholz: 'Sum of opponents’ scores. Bye rounds do not add an opponent.',
+  buchholzCut1:
+    'Buchholz minus the lowest opponent score. With fewer than two opponents, same as Buchholz.',
+  sonnebornBerger:
+    'Sum of scores of players beaten, plus half the scores of players drawn with. Byes do not count.',
+  progressive: 'Sum of the player’s running score after each round (rewards early points).',
+  directEncounter:
+    'If two tied players played each other, the winner ranks higher. A draw or no mutual game leaves them tied for this step.',
+  wins: 'Number of decisive wins (including forfeit wins). Draws and byes do not count.',
+  rating: 'Higher rating ranks ahead when earlier tiebreaks are equal (display order within a shared place).',
+  seed: 'Lower seed number ranks ahead as the final fallback (display order within a shared place).',
 };
 
-export default function TiebreakRulesHelp({ className }: Props) {
+type Props = {
+  className?: string;
+  order?: TiebreakKey[] | null;
+  sharedPlaces?: boolean;
+};
+
+export default function TiebreakRulesHelp({
+  className,
+  order,
+  sharedPlaces = true,
+}: Props) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
+  const keys = normalizeTiebreakOrder(order ?? DEFAULT_TIEBREAK_ORDER);
 
   useEffect(() => {
     if (!open) return;
@@ -68,11 +60,7 @@ export default function TiebreakRulesHelp({ className }: Props) {
       </button>
 
       {open && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onClick={() => setOpen(false)}
-        >
+        <div className="modal-backdrop" role="presentation" onClick={() => setOpen(false)}>
           <div
             className="modal-card tiebreak-help-modal"
             role="dialog"
@@ -82,19 +70,35 @@ export default function TiebreakRulesHelp({ className }: Props) {
           >
             <h2 id={titleId}>How tiebreaks work</h2>
             <p className="form-hint">
-              When players have the same score, ranks are decided in this order (first difference
-              wins):
+              Rank by <strong>Score</strong> first, then this order (first difference wins):
             </p>
             <ol className="tiebreak-help-list">
-              {TIEBREAK_RULES.map((rule, i) => (
-                <li key={rule.name}>
+              <li>
+                <strong>1. Score</strong>
+                <span>
+                  Game points: win 1, draw ½, loss 0 (including forfeits). Bye awards 1 point.
+                </span>
+              </li>
+              {keys.map((key, i) => (
+                <li key={key}>
                   <strong>
-                    {i + 1}. {rule.name}
+                    {i + 2}. {TIEBREAK_LABELS[key]}
                   </strong>
-                  <span>{rule.detail}</span>
+                  <span>{RULE_DETAILS[key]}</span>
                 </li>
               ))}
             </ol>
+            {sharedPlaces ? (
+              <p className="form-hint">
+                <strong>Shared places:</strong> if players remain equal on all performance
+                tiebreaks (before rating/seed), they share a rank (e.g. 1, 2, 2, 4). Rating and
+                seed only decide list order within that tie.
+              </p>
+            ) : (
+              <p className="form-hint">
+                Shared places are off — rating/seed always force a unique rank number.
+              </p>
+            )}
             <div className="modal-actions">
               <button type="button" className="btn btn-primary" onClick={() => setOpen(false)}>
                 Got it

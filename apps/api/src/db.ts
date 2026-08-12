@@ -528,6 +528,10 @@ export class MemoryStore implements Store {
         mixCategories: Boolean(payload['mixCategories'] ?? false),
         prizePlaces: Number(payload['prizePlaces'] ?? 3),
         awardScope: (payload['awardScope'] as Tournament['awardScope']) ?? 'per_category',
+        tiebreakOrder: Array.isArray(payload['tiebreakOrder'])
+          ? (payload['tiebreakOrder'] as Tournament['tiebreakOrder'])
+          : null,
+        sharedPlaces: payload['sharedPlaces'] == null ? true : Boolean(payload['sharedPlaces']),
         ownerId: (payload['ownerId'] as string | null | undefined) ?? null,
         arbiterPinRound:
           payload['arbiterPinRound'] == null ? null : Number(payload['arbiterPinRound']),
@@ -616,6 +620,8 @@ interface TournamentRow {
   mix_categories: boolean | null;
   prize_places: number | null;
   award_scope: string | null;
+  tiebreak_order: unknown | null;
+  shared_places: boolean | null;
   owner_id: string | null;
   arbiter_pin_hash: string | null;
   arbiter_pin_round: number | null;
@@ -716,6 +722,10 @@ function rowToTournament(row: TournamentRow): Tournament {
     mixCategories: row.mix_categories ?? false,
     prizePlaces: row.prize_places ?? 3,
     awardScope: (row.award_scope as Tournament['awardScope']) ?? 'per_category',
+    tiebreakOrder: Array.isArray(row.tiebreak_order)
+      ? (row.tiebreak_order as Tournament['tiebreakOrder'])
+      : null,
+    sharedPlaces: row.shared_places ?? true,
     ownerId: row.owner_id ?? null,
     arbiterPinRound: row.arbiter_pin_round ?? null,
     tableCount: row.table_count ?? 0,
@@ -869,9 +879,10 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, owner_id, public_token, public_enabled, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, public_token, public_enabled, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
               ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
+              ${t.tiebreakOrder ? this.j(t.tiebreakOrder) : null}, ${t.sharedPlaces ?? true},
               ${t.ownerId ?? null}, ${t.publicToken ?? null}, ${t.publicEnabled ?? false}, ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
@@ -894,6 +905,8 @@ export class PostgresStore implements Store {
         mix_categories = ${m.mixCategories ?? false},
         prize_places = ${m.prizePlaces ?? 3},
         award_scope = ${m.awardScope ?? 'per_category'},
+        tiebreak_order = ${m.tiebreakOrder ? this.j(m.tiebreakOrder) : null},
+        shared_places = ${m.sharedPlaces ?? true},
         owner_id = ${m.ownerId ?? null},
         public_token = ${m.publicToken ?? null},
         public_enabled = ${m.publicEnabled ?? false},
@@ -1385,7 +1398,7 @@ export class PostgresStore implements Store {
 
     if (entity === 'tournament') {
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, owner_id, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
@@ -1393,6 +1406,8 @@ export class PostgresStore implements Store {
                 ${Boolean(p['mixCategories'] ?? false)},
                 ${Number(p['prizePlaces'] ?? 3)},
                 ${String(p['awardScope'] ?? 'per_category')},
+                ${p['tiebreakOrder'] ? this.j(p['tiebreakOrder']) : null},
+                ${p['sharedPlaces'] == null ? true : Boolean(p['sharedPlaces'])},
                 ${(p['ownerId'] as string) ?? null},
                 ${(p['clientId'] as string) ?? null}, ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
@@ -1403,6 +1418,8 @@ export class PostgresStore implements Store {
           mix_categories = EXCLUDED.mix_categories,
           prize_places = EXCLUDED.prize_places,
           award_scope = EXCLUDED.award_scope,
+          tiebreak_order = EXCLUDED.tiebreak_order,
+          shared_places = EXCLUDED.shared_places,
           owner_id = COALESCE(EXCLUDED.owner_id, tournaments.owner_id),
           client_id = EXCLUDED.client_id,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at

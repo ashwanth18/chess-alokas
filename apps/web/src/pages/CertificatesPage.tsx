@@ -208,9 +208,14 @@ export default function CertificatesPage() {
           isBye: g.isBye,
         }));
 
+      const standingsOpts = {
+        tiebreakOrder: (tournament.tiebreakOrder as import('@chess-alokas/shared').TiebreakKey[] | null) ?? null,
+        sharedPlaces: tournament.sharedPlaces ?? true,
+      };
+
       if (scope === 'overall' || !(categories?.length)) {
         try {
-          const standings = computeStandings(enginePlayers, allPast);
+          const standings = computeStandings(enginePlayers, allPast, standingsOpts);
           for (const s of winnersFromStandings(standings, topN)) {
             const p = participants.find((x) => x.id === s.id);
             next.push({
@@ -237,6 +242,7 @@ export default function CertificatesPage() {
                   enginePlayers,
                   allPast,
                   new Set(catPlayers.map((p) => p.id)),
+                  standingsOpts,
                 )
               : computeStandings(
                   catPlayers.map((p) => ({
@@ -254,6 +260,7 @@ export default function CertificatesPage() {
                       result: g.result as GameResult,
                       isBye: g.isBye,
                     })),
+                  standingsOpts,
                 );
             for (const s of winnersFromStandings(standings, catTop)) {
               const p = participants.find((x) => x.id === s.id);

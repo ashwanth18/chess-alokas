@@ -11,6 +11,60 @@ export const TournamentStatusSchema = z.enum([
 ]);
 export type TournamentStatus = z.infer<typeof TournamentStatusSchema>;
 
+/** Tiebreaks applied after game score (score is always primary). */
+export const TiebreakKeySchema = z.enum([
+  'buchholz',
+  'buchholzCut1',
+  'sonnebornBerger',
+  'progressive',
+  'directEncounter',
+  'wins',
+  'rating',
+  'seed',
+]);
+export type TiebreakKey = z.infer<typeof TiebreakKeySchema>;
+
+/** Default pro Swiss order after score. */
+export const DEFAULT_TIEBREAK_ORDER: TiebreakKey[] = [
+  'buchholz',
+  'buchholzCut1',
+  'sonnebornBerger',
+  'progressive',
+  'directEncounter',
+  'wins',
+  'rating',
+  'seed',
+];
+
+export const TIEBREAK_LABELS: Record<TiebreakKey, string> = {
+  buchholz: 'Buchholz',
+  buchholzCut1: 'Buchholz Cut-1',
+  sonnebornBerger: 'Sonneborn-Berger',
+  progressive: 'Progressive',
+  directEncounter: 'Direct encounter',
+  wins: 'Wins',
+  rating: 'Rating',
+  seed: 'Seed',
+};
+
+/** Dedupe + fill missing keys so every known tiebreak appears once. */
+export function normalizeTiebreakOrder(
+  order: TiebreakKey[] | null | undefined,
+): TiebreakKey[] {
+  const seen = new Set<TiebreakKey>();
+  const out: TiebreakKey[] = [];
+  for (const key of order?.length ? order : DEFAULT_TIEBREAK_ORDER) {
+    if (!TiebreakKeySchema.safeParse(key).success) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  for (const key of DEFAULT_TIEBREAK_ORDER) {
+    if (!seen.has(key)) out.push(key);
+  }
+  return out;
+}
+
 export const GameResultSchema = z.enum([
   '1-0',
   '0-1',
@@ -116,6 +170,16 @@ export const TournamentSchema = z.object({
   prizePlaces: z.number().int().min(1).max(20).default(3),
   /** Whether winners certificates use overall standings or each category. */
   awardScope: AwardScopeSchema.default('per_category'),
+  /**
+   * Order of tiebreaks after score. Null/omit = DEFAULT_TIEBREAK_ORDER.
+   * See TiebreakKeySchema.
+   */
+  tiebreakOrder: z.array(TiebreakKeySchema).nullable().optional(),
+  /**
+   * When true, players equal on performance tiebreaks share a rank (1224).
+   * Rating/seed only break display order within a shared place.
+   */
+  sharedPlaces: z.boolean().default(true),
   /** Supabase Auth user id that owns this tournament (manager). */
   ownerId: z.string().uuid().nullable().optional(),
   /** Round the current arbiter PIN is valid for (server-side hash only). */

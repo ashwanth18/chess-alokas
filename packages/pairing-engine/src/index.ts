@@ -15,6 +15,7 @@ export {
   type PlayerId,
   type Standing,
   type StandingRowMetrics,
+  type StandingsOptions,
   firstRoundMissingResults,
 } from './swiss.js';
 

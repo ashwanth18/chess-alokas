@@ -17,6 +17,10 @@ export interface LocalTournament {
   prizePlaces?: number;
   /** overall | per_category — winners certificate scope */
   awardScope?: 'overall' | 'per_category';
+  /** Tiebreak keys after score; null = app default */
+  tiebreakOrder?: string[] | null;
+  /** Shared 1224 ranks when performance TBs match (default true) */
+  sharedPlaces?: boolean;
   /** Supabase Auth user id (manager) */
   ownerId?: string | null;
   /** Round the current arbiter PIN applies to (mirrors server). */

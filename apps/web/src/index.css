@@ -3300,6 +3300,46 @@ a.landing-download-option:hover {
 .standings-heading-row .standings-prize-hint {
   margin: 0;
 }
+.settings-row-block {
+  align-items: flex-start;
+}
+.settings-row-block dd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+.settings-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  color: var(--ink-300);
+  cursor: pointer;
+}
+.tiebreak-order-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tiebreak-order-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(196, 165, 116, 0.15);
+  font-size: 0.86rem;
+}
+.tiebreak-order-actions {
+  display: inline-flex;
+  gap: 0.15rem;
+}
 .result-change-modal {
   background: #0c2a20;
 }

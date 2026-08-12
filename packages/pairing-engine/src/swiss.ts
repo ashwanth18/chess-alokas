@@ -394,101 +394,52 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
   };
 }
 
-export type StandingRowMetrics = {
-  buchholz: number;
-  buchholzCut1: number;
-  sonnebornBerger: number;
-  wins: number;
-  rank: number;
-};
+export type {
+  Standing,
+  StandingRowMetrics,
+  StandingsOptions,
+} from './standings.js';
 
-export type Standing = PlayerState & StandingRowMetrics;
+export {
+  computeStandingsFromStates,
+  reRankSection,
+} from './standings.js';
 
-/**
- * Points a player scored in one non-bye game (0 / 0.5 / 1).
- * Forfeits count as decisive wins/losses; 0-0 gives neither side a point.
- */
-function pointsFromGame(
-  playerId: PlayerId,
-  game: PastGame,
-): { opponentId: PlayerId; points: number } | null {
-  if (game.isBye || game.result === 'bye') return null;
-  const { whiteId, blackId, result } = game;
-  if (!whiteId || !blackId) return null;
-  if (playerId !== whiteId && playerId !== blackId) return null;
-
-  const isWhite = playerId === whiteId;
-  const opponentId = isWhite ? blackId : whiteId;
-  let points = 0;
-  if (result === '1-0' || result === '1-0F') points = isWhite ? 1 : 0;
-  else if (result === '0-1' || result === '0-1F') points = isWhite ? 0 : 1;
-  else if (result === '1/2-1/2') points = 0.5;
-  // '0-0' / pending → 0
-  return { opponentId, points };
-}
+import {
+  computeStandingsFromStates,
+  reRankSection,
+  type Standing,
+  type StandingsOptions,
+} from './standings.js';
 
 /**
- * Ranking order (must match TiebreakRulesHelp UI copy):
- * Score → Buchholz → Buchholz Cut-1 → Sonneborn-Berger → Wins → Rating → Seed
+ * Ranking: score first, then configured tiebreaks (see DEFAULT_TIEBREAK_ORDER).
  */
 export function computeStandings(
   players: EnginePlayer[],
   pastGames: PastGame[],
+  options?: StandingsOptions,
 ): Standing[] {
-  const states = buildPlayerStates(players, pastGames);
-  const byId = new Map(states.map((s) => [s.id, s]));
-
-  const withMetrics = states.map((s) => {
-    const opponentScores = s.opponents.map((oid) => byId.get(oid)?.score ?? 0);
-    const buchholz = opponentScores.reduce((sum, sc) => sum + sc, 0);
-    const buchholzCut1 =
-      opponentScores.length >= 2
-        ? buchholz - Math.min(...opponentScores)
-        : buchholz;
-
-    let sonnebornBerger = 0;
-    let wins = 0;
-    for (const game of pastGames) {
-      const scored = pointsFromGame(s.id, game);
-      if (!scored) continue;
-      const oppScore = byId.get(scored.opponentId)?.score ?? 0;
-      sonnebornBerger += scored.points * oppScore;
-      if (scored.points === 1) wins += 1;
-    }
-
-    return { ...s, buchholz, buchholzCut1, sonnebornBerger, wins };
-  });
-
-  withMetrics.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
-    if (b.buchholzCut1 !== a.buchholzCut1) return b.buchholzCut1 - a.buchholzCut1;
-    if (b.sonnebornBerger !== a.sonnebornBerger) {
-      return b.sonnebornBerger - a.sonnebornBerger;
-    }
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    if (b.rating !== a.rating) return b.rating - a.rating;
-    return a.seed - b.seed;
-  });
-
-  return withMetrics.map((s, i) => ({ ...s, rank: i + 1 }));
+  return computeStandingsFromStates(
+    buildPlayerStates(players, pastGames),
+    pastGames,
+    options,
+  );
 }
 
 /**
- * Full-field scores/Buchholz, then re-rank within a section (e.g. age category).
- * Use for mixed pairing with per-category prizes: cross-category opponents still
- * count toward Buchholz, but ranks are 1..n inside the section only.
+ * Full-field metrics, then re-rank within a section (e.g. age category).
  */
 export function computeSectionStandings(
   players: EnginePlayer[],
   pastGames: PastGame[],
   sectionPlayerIds: ReadonlySet<string>,
+  options?: StandingsOptions,
 ): Standing[] {
-  const full = computeStandings(players, pastGames);
+  const full = computeStandings(players, pastGames, options);
   if (sectionPlayerIds.size === 0) return [];
-  return full
-    .filter((s) => sectionPlayerIds.has(s.id))
-    .map((s, i) => ({ ...s, rank: i + 1 }));
+  const section = full.filter((s) => sectionPlayerIds.has(s.id));
+  return reRankSection(section, pastGames, options?.sharedPlaces !== false);
 }
 
 export function diagnosePairings(

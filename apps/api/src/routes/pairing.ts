@@ -436,11 +436,15 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         .filter((p) => !p.deletedAt)
         .map(participantToEnginePlayer);
       const pastGames: PastGame[] = allGames.filter((g) => !g.deletedAt).map(gameToPastGame);
+      const standingsOpts = {
+        tiebreakOrder: tournament.tiebreakOrder ?? null,
+        sharedPlaces: tournament.sharedPlaces ?? true,
+      };
       return [
         {
           categoryId: null,
           categoryName: 'Open (mixed)',
-          standings: computeStandings(players, pastGames),
+          standings: computeStandings(players, pastGames, standingsOpts),
         },
       ];
     }
@@ -448,6 +452,11 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     const categories = filterCategoryId
       ? allCategories.filter((c) => c.id === filterCategoryId && !c.deletedAt)
       : allCategories.filter((c) => !c.deletedAt);
+
+    const standingsOpts = {
+      tiebreakOrder: tournament.tiebreakOrder ?? null,
+      sharedPlaces: tournament.sharedPlaces ?? true,
+    };
 
     return categories.map((category) => {
       const catParticipants = allParticipants.filter(
@@ -461,7 +470,7 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       return {
         categoryId: category.id,
         categoryName: category.name,
-        standings: computeStandings(players, pastGames),
+        standings: computeStandings(players, pastGames, standingsOpts),
       };
     });
   });

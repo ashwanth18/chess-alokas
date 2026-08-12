@@ -111,7 +111,8 @@ describe('pairSwissRound', () => {
     expect(section).toHaveLength(2);
     expect(section.map((s) => s.id)).toEqual(['p2', 'p4']);
     expect(section[0]!.rank).toBe(1);
-    expect(section[1]!.rank).toBe(2);
+    // Equal performance → shared place (1224)
+    expect(section[1]!.rank).toBe(1);
     // Buchholz still reflects the full-field opponent (p1 / p3 scored 1).
     expect(section[0]!.buchholz).toBe(1);
     expect(section[1]!.buchholz).toBe(1);
@@ -181,9 +182,10 @@ describe('pairSwissRound', () => {
     expect(b.sonnebornBerger).toBe(2.5);
     expect(a.wins).toBe(1);
     expect(b.wins).toBe(1);
-    // Same through wins → rating/seed: A (seed 1) ranks above B
+    // Progressive differs (A scored earlier) → unique ranks; A listed first
     expect(standings[0]!.id).toBe('a');
     expect(standings[1]!.id).toBe('b');
+    expect(a.progressive).toBeGreaterThan(b.progressive);
   });
 
   it('does not add opponents or Buchholz from bye rounds', () => {
@@ -206,6 +208,36 @@ describe('pairSwissRound', () => {
     expect(c.wins).toBe(0);
     // Same score as C; A ranks first via higher rating after empty BH chain
     expect(standings[0]!.id).toBe('a');
+  });
+
+  it('ranks mutual-game winner ahead via direct encounter before seed', () => {
+    // A and B equal on score/BH/Cut-1/SB/wins; B beat A → B ranks above A (seed would prefer A).
+    const plist: EnginePlayer[] = [
+      { id: 'a', name: 'A', rating: 1500, seed: 1 },
+      { id: 'b', name: 'B', rating: 1500, seed: 2 },
+      { id: 'c', name: 'C', rating: 1500, seed: 3 },
+      { id: 'd', name: 'D', rating: 1500, seed: 4 },
+    ];
+    const past: PastGame[] = [
+      { round: 1, whiteId: 'a', blackId: 'c', result: '1-0', isBye: false },
+      { round: 1, whiteId: 'b', blackId: 'd', result: '1-0', isBye: false },
+      { round: 2, whiteId: 'b', blackId: 'a', result: '1-0', isBye: false },
+      { round: 2, whiteId: 'c', blackId: 'd', result: '1-0', isBye: false },
+      { round: 3, whiteId: 'a', blackId: 'd', result: '1-0', isBye: false },
+      { round: 3, whiteId: 'c', blackId: 'b', result: '1-0', isBye: false },
+    ];
+    const standings = computeStandings(plist, past);
+    const a = standings.find((s) => s.id === 'a')!;
+    const b = standings.find((s) => s.id === 'b')!;
+    expect(a.score).toBe(2);
+    expect(b.score).toBe(2);
+    expect(a.buchholz).toBe(b.buchholz);
+    expect(a.buchholzCut1).toBe(b.buchholzCut1);
+    expect(a.sonnebornBerger).toBe(b.sonnebornBerger);
+    expect(a.wins).toBe(b.wins);
+    expect(standings.findIndex((s) => s.id === 'b')).toBeLessThan(
+      standings.findIndex((s) => s.id === 'a'),
+    );
   });
 
   it('ranks higher Sonneborn-Berger ahead when score and Buchholz match', () => {

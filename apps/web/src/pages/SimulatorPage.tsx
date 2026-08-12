@@ -569,6 +569,7 @@ export default function SimulatorPage() {
                     <th title="Buchholz">BH</th>
                     <th title="Buchholz Cut-1">BH-C1</th>
                     <th title="Sonneborn-Berger">SB</th>
+                    <th title="Progressive">Prog</th>
                     <th title="Wins">Wins</th>
                     <th>W</th>
                     <th>B</th>
@@ -601,6 +602,7 @@ export default function SimulatorPage() {
                         <td>{s.buchholz.toFixed(1)}</td>
                         <td>{s.buchholzCut1.toFixed(1)}</td>
                         <td>{s.sonnebornBerger.toFixed(1)}</td>
+                        <td>{s.progressive.toFixed(1)}</td>
                         <td>{s.wins}</td>
                         <td>{whites}</td>
                         <td>{blacks}</td>

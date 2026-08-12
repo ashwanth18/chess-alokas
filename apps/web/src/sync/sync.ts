@@ -117,6 +117,8 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
           remote.confirmedRounds ?? Math.max(0, (remote.currentRound ?? 0) - 1),
         prizePlaces: remote.prizePlaces ?? 3,
         awardScope: remote.awardScope ?? 'per_category',
+        tiebreakOrder: remote.tiebreakOrder ?? null,
+        sharedPlaces: remote.sharedPlaces ?? true,
         ownerId: remote.ownerId ?? null,
         arbiterPinRound: remote.arbiterPinRound ?? null,
         tableCount: remote.tableCount ?? 0,

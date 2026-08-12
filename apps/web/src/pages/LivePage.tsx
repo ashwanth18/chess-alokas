@@ -426,6 +426,7 @@ export default function LivePage() {
                   <th title="Buchholz">BH</th>
                   <th title="Buchholz Cut-1">BH-C1</th>
                   <th title="Sonneborn-Berger">SB</th>
+                  <th title="Progressive">Prog</th>
                   <th title="Wins">Wins</th>
                 </tr>
               </thead>
@@ -442,6 +443,7 @@ export default function LivePage() {
                       <td>{resultPointsLabel(s.buchholz)}</td>
                       <td>{resultPointsLabel(s.buchholzCut1)}</td>
                       <td>{resultPointsLabel(s.sonnebornBerger)}</td>
+                      <td>{resultPointsLabel(s.progressive)}</td>
                       <td>{s.wins}</td>
                     </tr>
                   );

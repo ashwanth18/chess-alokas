@@ -2,12 +2,15 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { pairRound, computeStandings, computeSectionStandings } from '@chess-alokas/pairing-engine';
-import type { FilterGroup, FilterOp, GameCardType, GameResult } from '@chess-alokas/shared';
+import type { FilterGroup, FilterOp, GameCardType, GameResult, TiebreakKey } from '@chess-alokas/shared';
 import {
   ILLEGAL_MOVE_LIMIT,
   WARNING_LIMIT,
   countCardsForPlayer,
   emptyCardCounts,
+  DEFAULT_TIEBREAK_ORDER,
+  TIEBREAK_LABELS,
+  normalizeTiebreakOrder,
 } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import ColorSide from '../components/ColorSide';
@@ -1084,13 +1087,22 @@ export default function TournamentPage() {
       }));
 
     try {
+      const standingsOpts = {
+        tiebreakOrder: (tournament?.tiebreakOrder as TiebreakKey[] | null | undefined) ?? null,
+        sharedPlaces: tournament?.sharedPlaces ?? true,
+      };
       // Mixed pairing + categories: one field for scores, re-rank within the section.
       if (mix && activeCatId) {
         const sectionIds = new Set(
           participants.filter((p) => p.categoryIds?.includes(activeCatId)).map((p) => p.id),
         );
         if (sectionIds.size === 0) return [];
-        return computeSectionStandings(toEngine(participants), toPast(games), sectionIds);
+        return computeSectionStandings(
+          toEngine(participants),
+          toPast(games),
+          sectionIds,
+          standingsOpts,
+        );
       }
 
       const catGames = activeCatId
@@ -1100,11 +1112,11 @@ export default function TournamentPage() {
         ? participants.filter((p) => p.categoryIds?.includes(activeCatId))
         : participants;
       if (catPlayers.length === 0) return [];
-      return computeStandings(toEngine(catPlayers), toPast(catGames));
+      return computeStandings(toEngine(catPlayers), toPast(catGames), standingsOpts);
     } catch {
       return [];
     }
-  }, [participants, games, activeCatId, mix]);
+  }, [participants, games, activeCatId, mix, tournament?.tiebreakOrder, tournament?.sharedPlaces]);
 
   const standingsEmptyReason = useMemo(() => {
     if (!participants || participants.length === 0) return 'no-players' as const;
@@ -1247,6 +1259,89 @@ export default function TournamentPage() {
                     {' '}
                     (default for all rankings)
                   </span>
+                </dd>
+              </div>
+              <div className="settings-row settings-row-block">
+                <dt>Tiebreaks</dt>
+                <dd>
+                  <label className="settings-check">
+                    <input
+                      type="checkbox"
+                      checked={tournament.sharedPlaces ?? true}
+                      onChange={(e) => {
+                        void db.tournaments.update(tournament.id, {
+                          sharedPlaces: e.target.checked,
+                          updatedAt: nowIso(),
+                          dirty: 1,
+                        });
+                      }}
+                    />
+                    Shared places when performance tiebreaks match (e.g. 1, 2, 2, 4)
+                  </label>
+                  <ol className="tiebreak-order-list">
+                    {normalizeTiebreakOrder(
+                      (tournament.tiebreakOrder as TiebreakKey[] | null) ?? null,
+                    ).map((key, index, arr) => (
+                      <li key={key} className="tiebreak-order-item">
+                        <span>
+                          {index + 1}. {TIEBREAK_LABELS[key]}
+                        </span>
+                        <span className="tiebreak-order-actions">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            disabled={index === 0}
+                            aria-label={`Move ${TIEBREAK_LABELS[key]} up`}
+                            onClick={() => {
+                              const next = [...arr];
+                              const tmp = next[index - 1]!;
+                              next[index - 1] = next[index]!;
+                              next[index] = tmp;
+                              void db.tournaments.update(tournament.id, {
+                                tiebreakOrder: next,
+                                updatedAt: nowIso(),
+                                dirty: 1,
+                              });
+                            }}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            disabled={index === arr.length - 1}
+                            aria-label={`Move ${TIEBREAK_LABELS[key]} down`}
+                            onClick={() => {
+                              const next = [...arr];
+                              const tmp = next[index + 1]!;
+                              next[index + 1] = next[index]!;
+                              next[index] = tmp;
+                              void db.tournaments.update(tournament.id, {
+                                tiebreakOrder: next,
+                                updatedAt: nowIso(),
+                                dirty: 1,
+                              });
+                            }}
+                          >
+                            ↓
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => {
+                      void db.tournaments.update(tournament.id, {
+                        tiebreakOrder: [...DEFAULT_TIEBREAK_ORDER],
+                        updatedAt: nowIso(),
+                        dirty: 1,
+                      });
+                    }}
+                  >
+                    Reset tiebreak order
+                  </button>
                 </dd>
               </div>
               <div className="settings-row">
@@ -2095,7 +2190,10 @@ export default function TournamentPage() {
                     ? ` · ${categoryNames[activeCatId]}`
                     : ''}
                 </p>
-                <TiebreakRulesHelp />
+                <TiebreakRulesHelp
+                  order={(tournament?.tiebreakOrder as TiebreakKey[] | null) ?? null}
+                  sharedPlaces={tournament?.sharedPlaces ?? true}
+                />
               </div>
               <table className="data-table standings-table">
                 <thead>
@@ -2106,6 +2204,7 @@ export default function TournamentPage() {
                     <th title="Buchholz">BH</th>
                     <th title="Buchholz Cut-1">BH-C1</th>
                     <th title="Sonneborn-Berger">SB</th>
+                    <th title="Progressive">Prog</th>
                     <th title="Wins">Wins</th>
                     <th>Rating</th>
                   </tr>
@@ -2140,6 +2239,7 @@ export default function TournamentPage() {
                         <td>{s.buchholz.toFixed(1)}</td>
                         <td>{s.buchholzCut1.toFixed(1)}</td>
                         <td>{s.sonnebornBerger.toFixed(1)}</td>
+                        <td>{s.progressive.toFixed(1)}</td>
                         <td>{s.wins}</td>
                         <td>{s.rating || '—'}</td>
                       </tr>
