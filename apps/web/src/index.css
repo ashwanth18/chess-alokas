@@ -3628,9 +3628,16 @@ a.landing-download-option:hover {
 }
 
 .fide-lookup-modal {
-  width: min(56rem, 100%);
+  width: min(64rem, 100%);
   max-height: min(90vh, 48rem);
   overflow: hidden;
+}
+.fide-id-input {
+  width: 6.5rem;
+  max-width: 100%;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 .fide-lookup-controls {
   display: flex;

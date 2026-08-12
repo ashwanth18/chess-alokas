@@ -7,7 +7,7 @@ import {
 import type { Store } from '../db.js';
 import { getDatabaseSql, requireAuth } from '../auth.js';
 import { generatePublicLiveToken } from '../floor/pin.js';
-import { countFidePlayers, matchPlayers } from '../fide/match.js';
+import { matchPlayers } from '../fide/match.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -319,52 +319,32 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     '/tournaments/:id/fide-lookup',
     { preHandler: requireAuth },
     async (request, reply) => {
-      // Auth only — no assertOwner. FIDE catalog is shared (not tournament data).
+      // Auth only — no assertOwner. Lookups use Lichess FIDE API (not tournament data).
       // Desktop often looks up before sync, or against a local tournament whose
       // cloud row is missing/soft-deleted; ownership would 403 incorrectly.
-      // Writes stay client-side (Dexie + sync). Tournament id remains in the URL
-      // for API consistency with other tournament routes.
+      // Writes stay client-side (Dexie + sync).
 
       const parsed = FideLookupBodySchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
       }
 
-      const sql = getDatabaseSql();
-      if (!sql) {
-        return reply.code(503).send({
-          error: 'FIDE lookup requires DATABASE_URL',
-          message: 'FIDE list not loaded — ask an admin to refresh.',
-        });
-      }
-
       try {
-        const catalogCount = await countFidePlayers(sql);
-        if (catalogCount === 0) {
-          const { getFideImportStatus } = await import('../fide/importList.js');
-          const fideStatus = await getFideImportStatus(sql);
-          const staging = await sql<{ n: number }[]>`
-            SELECT count(*)::int AS n FROM fide_players_staging
-          `;
-          const stagingCount = staging[0]?.n ?? 0;
-          const importing = fideStatus.status === 'running' || stagingCount > 0;
-          return reply.code(503).send({
-            error: 'FIDE list empty',
-            message: importing
-              ? `FIDE list is still importing (${stagingCount.toLocaleString()} staged) — wait a few minutes, then try again.`
-              : 'FIDE list not loaded yet — it will auto-refresh, or ask an admin to refresh.',
-          });
-        }
-
-        const results = await matchPlayers(sql, parsed.data.players);
+        const results = await matchPlayers(parsed.data.players);
         return {
           ratingType: parsed.data.ratingType,
-          catalogCount,
+          provider: 'lichess',
           results,
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'FIDE lookup failed';
-        return reply.code(500).send({ error: message });
+        const unavailable = /lichess|fetch|timeout|aborted|network/i.test(message);
+        return reply.code(unavailable ? 503 : 500).send({
+          error: message,
+          message: unavailable
+            ? 'FIDE lookup service unavailable — try again in a moment.'
+            : message,
+        });
       }
     },
   );

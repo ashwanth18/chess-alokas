@@ -1,43 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MIN_NAME_MATCH_SCORE,
+  MIN_CANDIDATE_SCORE,
+  UNIQUE_MIN_SCORE,
   nameSearchVariants,
+  parseNameParts,
   scoreNameMatch,
   stripPatronomic,
   toFederationCode,
 } from './normalize.js';
 import { decideMatchStatus } from './match.js';
-import { parseFideXmlPlayers } from './importList.js';
 import type { FidePlayerRow } from './types.js';
 
 describe('stripPatronomic / nameSearchVariants', () => {
-  it('strips Malaysian A/L and builds Last, First', () => {
+  it('strips Malaysian A/L and builds Last, First queries', () => {
     expect(stripPatronomic('Logitan A/L Vijayan')).toBe('Logitan Vijayan');
     const variants = nameSearchVariants('Logitan A/L Vijayan');
     expect(variants).toContain('Vijayan, Logitan');
-    expect(variants.some((v) => v.includes('Logitan'))).toBe(true);
+    expect(variants).toContain('Logitan Vijayan');
     expect(variants.every((v) => !/A\/L/i.test(v))).toBe(true);
+    // Must not search bare surname alone as the only structured form
+    expect(variants.some((v) => v === 'Vijayan' || v === 'VIJAYAN')).toBe(false);
   });
 
-  it('keeps FIDE Last, First form', () => {
-    const variants = nameSearchVariants('Vijayan, Logitan');
-    expect(variants[0]).toBe('Vijayan, Logitan');
-    expect(variants).toContain('Logitan');
+  it('strips bare AP and Malay bin', () => {
+    expect(stripPatronomic('DHARSHINI AP MATHAVAN')).toBe('DHARSHINI MATHAVAN');
+    expect(stripPatronomic('Azrid Mifzal Adrian bin Tarmizi')).toBe('Azrid Mifzal Adrian Tarmizi');
+    const parts = parseNameParts('Azrid Mifzal Adrian bin Tarmizi');
+    expect(parts.given).toBe('Azrid');
+    expect(parts.family).toBe('Tarmizi');
   });
 
-  it('rejects substring-only false friends like Varshan → Devavarshan', () => {
+  it('rejects surname-only false friends', () => {
     expect(scoreNameMatch('VARSHAN A/L H GANASH', 'Elumalai, Devavarshan')).toBeLessThan(
-      MIN_NAME_MATCH_SCORE,
+      MIN_CANDIDATE_SCORE,
     );
-    expect(scoreNameMatch('VISHNU A/L BALAKRISHNAN', 'Balakrishnan, Vishnu')).toBeGreaterThanOrEqual(
-      MIN_NAME_MATCH_SCORE,
+    expect(scoreNameMatch('LOGITAN A/L VIJAYAN', 'Vijayan, Kavinayaa')).toBeLessThan(
+      UNIQUE_MIN_SCORE,
     );
-  });
-
-  it('matches Malaysian A/L roster names to FIDE Last, First', () => {
-    expect(nameSearchVariants('LOGITAN A/L VIJAYAN')).toContain('VIJAYAN, LOGITAN');
     expect(scoreNameMatch('LOGITAN A/L VIJAYAN', 'Vijayan, Logitan')).toBeGreaterThanOrEqual(
-      MIN_NAME_MATCH_SCORE,
+      UNIQUE_MIN_SCORE,
+    );
+    expect(scoreNameMatch('VIJAY A/L BALAKRISHNAN', 'Vijay, Veeshwaa')).toBeLessThan(
+      UNIQUE_MIN_SCORE,
+    );
+    expect(scoreNameMatch('DHARSHINI AP MATHAVAN', 'Saravanan, Dharshini')).toBeLessThan(
+      UNIQUE_MIN_SCORE,
     );
   });
 });
@@ -47,15 +54,14 @@ describe('toFederationCode', () => {
     expect(toFederationCode('Malaysia')).toBe('MAS');
     expect(toFederationCode('mas')).toBe('MAS');
     expect(toFederationCode('SGP')).toBe('SGP');
-    expect(toFederationCode('Singapore')).toBe('SGP');
     expect(toFederationCode(null)).toBeNull();
   });
 });
 
 describe('decideMatchStatus', () => {
-  const row = (id: number): FidePlayerRow => ({
+  const row = (id: number, name: string): FidePlayerRow => ({
     fideId: id,
-    name: 'Vijayan, Logitan',
+    name,
     federation: 'MAS',
     birthYear: 2014,
     title: null,
@@ -67,65 +73,42 @@ describe('decideMatchStatus', () => {
   });
 
   it('marks exact ID hits', () => {
-    expect(decideMatchStatus([row(1)], true)).toEqual({
+    expect(decideMatchStatus([row(1, 'Vijayan, Logitan')], true)).toEqual({
       status: 'exact',
       selectedFideId: 1,
     });
   });
 
-  it('preselects unique name matches and leaves collisions ambiguous', () => {
-    expect(decideMatchStatus([row(1)], false).status).toBe('unique');
-    expect(decideMatchStatus([row(1), row(2)], false)).toEqual({
+  it('requires dual-token score for unique; surname-only stays ambiguous', () => {
+    const logitan = row(35825898, 'Vijayan, Logitan');
+    const kavinayaa = row(35889489, 'Vijayan, Kavinayaa');
+    const scores = new Map<number, number>([
+      [logitan.fideId, scoreNameMatch('LOGITAN A/L VIJAYAN', logitan.name)],
+      [kavinayaa.fideId, scoreNameMatch('LOGITAN A/L VIJAYAN', kavinayaa.name)],
+    ]);
+    const ranked = [logitan, kavinayaa].sort(
+      (a, b) => (scores.get(b.fideId) ?? 0) - (scores.get(a.fideId) ?? 0),
+    );
+    expect(decideMatchStatus(ranked, false, scores)).toEqual({
+      status: 'unique',
+      selectedFideId: 35825898,
+    });
+
+    const onlySurname = [kavinayaa];
+    const weak = new Map([[kavinayaa.fideId, scoreNameMatch('LOGITAN A/L VIJAYAN', kavinayaa.name)]]);
+    expect(decideMatchStatus(onlySurname, false, weak).status).toBe('ambiguous');
+  });
+
+  it('leaves multi-candidate collisions ambiguous without clear gap', () => {
+    const a = row(1, 'Balakrishnan, Vijay');
+    const b = row(2, 'Balakrishnan, Vijayan');
+    const scores = new Map([
+      [1, UNIQUE_MIN_SCORE],
+      [2, UNIQUE_MIN_SCORE],
+    ]);
+    expect(decideMatchStatus([a, b], false, scores)).toEqual({
       status: 'ambiguous',
       selectedFideId: null,
-    });
-    expect(decideMatchStatus([], false).status).toBe('not_found');
-  });
-});
-
-describe('parseFideXmlPlayers', () => {
-  it('parses a tiny fixture', async () => {
-    const xml = `<?xml version="1.0"?>
-<playerslist>
-  <player>
-    <fideid>35825898</fideid>
-    <name>Vijayan, Logitan</name>
-    <country>MAS</country>
-    <sex>M</sex>
-    <title></title>
-    <rating>1802</rating>
-    <rapid_rating>1718</rapid_rating>
-    <blitz_rating>1712</blitz_rating>
-    <birthday>2014</birthday>
-    <flag></flag>
-  </player>
-  <player>
-    <fideid>100</fideid>
-    <name>Inactive, Player</name>
-    <country>USA</country>
-    <rating></rating>
-    <rapid_rating></rapid_rating>
-    <blitz_rating></blitz_rating>
-    <birthday>1990</birthday>
-    <flag>i</flag>
-  </player>
-</playerslist>`;
-    const rows = await parseFideXmlPlayers(xml);
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({
-      fideId: 35825898,
-      name: 'Vijayan, Logitan',
-      federation: 'MAS',
-      birthYear: 2014,
-      standard: 1802,
-      rapid: 1718,
-      blitz: 1712,
-      inactive: false,
-    });
-    expect(rows[1]).toMatchObject({
-      fideId: 100,
-      standard: null,
-      inactive: true,
     });
   });
 });

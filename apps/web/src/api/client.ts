@@ -530,29 +530,6 @@ export async function apiAdminOverview() {
   return req<AdminOverview>('/admin/overview', { timeoutMs: 20_000 });
 }
 
-export type FideImportStatus = {
-  status: 'idle' | 'running' | 'failed' | 'ok';
-  importedAt: string | null;
-  playerCount: number;
-  sourceUrl: string | null;
-  error: string | null;
-  updatedAt: string | null;
-  started?: boolean;
-  message?: string;
-};
-
-export async function apiAdminFideStatus() {
-  return req<FideImportStatus>('/admin/fide/status', { timeoutMs: 15_000 });
-}
-
-export async function apiAdminFideRefresh() {
-  return req<FideImportStatus>('/admin/fide/refresh', {
-    method: 'POST',
-    body: JSON.stringify({}),
-    timeoutMs: 15_000,
-  });
-}
-
 export type FidePlayerCandidate = {
   fideId: number;
   name: string;
@@ -588,7 +565,7 @@ export async function apiFideLookup(
 ) {
   return req<{
     ratingType: 'standard' | 'rapid' | 'blitz';
-    catalogCount: number;
+    provider?: string;
     results: FideLookupResultRow[];
   }>(`/tournaments/${tournamentId}/fide-lookup`, {
     method: 'POST',

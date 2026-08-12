@@ -1,6 +1,8 @@
-import type { Sql } from 'postgres';
+import { lichessGetById, lichessSearch, mapPool } from './lichess.js';
 import {
-  MIN_NAME_MATCH_SCORE,
+  MIN_CANDIDATE_SCORE,
+  UNIQUE_MIN_SCORE,
+  UNIQUE_SCORE_GAP,
   nameSearchVariants,
   scoreNameMatch,
   toFederationCode,
@@ -12,35 +14,8 @@ import type {
   FidePlayerRow,
 } from './types.js';
 
-const CANDIDATE_LIMIT = 8;
-
-type DbRow = {
-  fide_id: number;
-  name: string;
-  federation: string | null;
-  birth_year: number | null;
-  title: string | null;
-  sex: string | null;
-  standard: number | null;
-  rapid: number | null;
-  blitz: number | null;
-  inactive: boolean;
-};
-
-function toPlayer(row: DbRow): FidePlayerRow {
-  return {
-    fideId: row.fide_id,
-    name: row.name,
-    federation: row.federation,
-    birthYear: row.birth_year,
-    title: row.title,
-    sex: row.sex,
-    standard: row.standard,
-    rapid: row.rapid,
-    blitz: row.blitz,
-    inactive: Boolean(row.inactive),
-  };
-}
+const CANDIDATE_LIMIT = 15;
+const LOOKUP_CONCURRENCY = 4;
 
 function dedupe(rows: FidePlayerRow[]): FidePlayerRow[] {
   const seen = new Set<number>();
@@ -53,85 +28,61 @@ function dedupe(rows: FidePlayerRow[]): FidePlayerRow[] {
   return out;
 }
 
-export async function countFidePlayers(sql: Sql): Promise<number> {
-  const rows = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM fide_players`;
-  return rows[0]?.n ?? 0;
-}
-
-async function getById(sql: Sql, fideId: number): Promise<FidePlayerRow | null> {
-  const rows = await sql<DbRow[]>`
-    SELECT fide_id, name, federation, birth_year, title, sex, standard, rapid, blitz, inactive
-    FROM fide_players WHERE fide_id = ${fideId} LIMIT 1
-  `;
-  return rows[0] ? toPlayer(rows[0]) : null;
-}
-
-async function searchByName(
-  sql: Sql,
-  pattern: string,
-  federation: string | null,
-  birthYear: number | null,
-  limit: number,
-): Promise<FidePlayerRow[]> {
-  const like = `%${pattern}%`;
-  if (federation && birthYear != null) {
-    const rows = await sql<DbRow[]>`
-      SELECT fide_id, name, federation, birth_year, title, sex, standard, rapid, blitz, inactive
-      FROM fide_players
-      WHERE lower(name) LIKE lower(${like})
-        AND federation = ${federation}
-        AND birth_year = ${birthYear}
-      ORDER BY inactive ASC, name ASC
-      LIMIT ${limit}
-    `;
-    return rows.map(toPlayer);
-  }
-  if (federation) {
-    const rows = await sql<DbRow[]>`
-      SELECT fide_id, name, federation, birth_year, title, sex, standard, rapid, blitz, inactive
-      FROM fide_players
-      WHERE lower(name) LIKE lower(${like})
-        AND federation = ${federation}
-      ORDER BY inactive ASC, name ASC
-      LIMIT ${limit}
-    `;
-    return rows.map(toPlayer);
-  }
-  const rows = await sql<DbRow[]>`
-    SELECT fide_id, name, federation, birth_year, title, sex, standard, rapid, blitz, inactive
-    FROM fide_players
-    WHERE lower(name) LIKE lower(${like})
-    ORDER BY inactive ASC, name ASC
-    LIMIT ${limit}
-  `;
-  return rows.map(toPlayer);
-}
-
 /**
- * Pure helper for tests: decide match status from candidates + whether ID was used.
+ * Pure helper for tests: decide match status from scored candidates + whether ID was used.
+ * Candidates should already be sorted by score descending.
  */
 export function decideMatchStatus(
   candidates: FidePlayerRow[],
   fromExactId: boolean,
+  scores?: Map<number, number>,
 ): { status: FideMatchStatus; selectedFideId: number | null } {
   if (fromExactId && candidates.length === 1) {
     return { status: 'exact', selectedFideId: candidates[0]!.fideId };
   }
-  if (candidates.length === 1) {
-    return { status: 'unique', selectedFideId: candidates[0]!.fideId };
+  if (candidates.length === 0) {
+    return { status: 'not_found', selectedFideId: null };
   }
-  if (candidates.length > 1) {
+
+  const scoreOf = (c: FidePlayerRow) => scores?.get(c.fideId) ?? scoreNameMatch('', c.name);
+  // When scores map omitted (legacy tests), treat single candidate as unique only if caller
+  // already filtered — prefer explicit scores from matchOnePlayer.
+  if (!scores) {
+    if (candidates.length === 1) {
+      return { status: 'unique', selectedFideId: candidates[0]!.fideId };
+    }
+    return { status: 'ambiguous', selectedFideId: null };
+  }
+
+  const top = candidates[0]!;
+  const topScore = scoreOf(top);
+  const secondScore = candidates.length > 1 ? scoreOf(candidates[1]!) : 0;
+
+  if (
+    topScore >= UNIQUE_MIN_SCORE &&
+    (candidates.length === 1 || topScore >= secondScore + UNIQUE_SCORE_GAP)
+  ) {
+    return { status: 'unique', selectedFideId: top.fideId };
+  }
+
+  if (candidates.length >= 1) {
     return { status: 'ambiguous', selectedFideId: null };
   }
   return { status: 'not_found', selectedFideId: null };
 }
 
-export async function matchOnePlayer(
-  sql: Sql,
-  player: FideLookupPlayerIn,
-): Promise<FideLookupResult> {
+async function searchVariants(queries: string[]): Promise<FidePlayerRow[]> {
+  const collected: FidePlayerRow[] = [];
+  for (const q of queries) {
+    const hits = await lichessSearch(q);
+    collected.push(...hits);
+  }
+  return dedupe(collected);
+}
+
+export async function matchOnePlayer(player: FideLookupPlayerIn): Promise<FideLookupResult> {
   if (player.fideId != null && player.fideId > 0) {
-    const row = await getById(sql, player.fideId);
+    const row = await lichessGetById(player.fideId);
     if (row) {
       return {
         participantId: player.id,
@@ -143,43 +94,28 @@ export async function matchOnePlayer(
   }
 
   const federation = toFederationCode(player.country);
-  const birthYear =
-    player.yearOfBirth != null && player.yearOfBirth > 1900 ? player.yearOfBirth : null;
   const variants = nameSearchVariants(player.name);
+  let candidates = await searchVariants(variants);
 
-  let candidates: FidePlayerRow[] = [];
-
-  // 1) name + fed + yob
-  if (federation && birthYear != null) {
-    for (const v of variants) {
-      candidates = await searchByName(sql, v, federation, birthYear, CANDIDATE_LIMIT);
-      if (candidates.length > 0) break;
-    }
+  if (federation) {
+    const fedHits = candidates.filter(
+      (c) => !c.federation || c.federation.toUpperCase() === federation,
+    );
+    // Prefer federation-scoped when we have any; fall back to all if empty
+    if (fedHits.length > 0) candidates = fedHits;
   }
 
-  // 2) name + fed
-  if (candidates.length === 0 && federation) {
-    for (const v of variants) {
-      candidates = await searchByName(sql, v, federation, null, CANDIDATE_LIMIT);
-      if (candidates.length === 1) break;
-      if (candidates.length > 1) break;
-    }
+  const scores = new Map<number, number>();
+  for (const c of candidates) {
+    scores.set(c.fideId, scoreNameMatch(player.name, c.name));
   }
 
-  // 3) distinctive token + fed (already covered by variants), or broader name-only as last resort
-  if (candidates.length === 0) {
-    for (const v of variants) {
-      // Prefer federation-scoped when available already tried; try remaining without yob constraint
-      candidates = await searchByName(sql, v, federation, null, CANDIDATE_LIMIT);
-      if (candidates.length > 0) break;
-    }
-  }
-
-  candidates = dedupe(candidates)
-    .filter((c) => scoreNameMatch(player.name, c.name) >= MIN_NAME_MATCH_SCORE)
-    .sort((a, b) => scoreNameMatch(player.name, b.name) - scoreNameMatch(player.name, a.name))
+  candidates = candidates
+    .filter((c) => (scores.get(c.fideId) ?? 0) >= MIN_CANDIDATE_SCORE)
+    .sort((a, b) => (scores.get(b.fideId) ?? 0) - (scores.get(a.fideId) ?? 0))
     .slice(0, CANDIDATE_LIMIT);
-  const { status, selectedFideId } = decideMatchStatus(candidates, false);
+
+  const { status, selectedFideId } = decideMatchStatus(candidates, false, scores);
   return {
     participantId: player.id,
     status,
@@ -188,13 +124,6 @@ export async function matchOnePlayer(
   };
 }
 
-export async function matchPlayers(
-  sql: Sql,
-  players: FideLookupPlayerIn[],
-): Promise<FideLookupResult[]> {
-  const results: FideLookupResult[] = [];
-  for (const p of players) {
-    results.push(await matchOnePlayer(sql, p));
-  }
-  return results;
+export async function matchPlayers(players: FideLookupPlayerIn[]): Promise<FideLookupResult[]> {
+  return mapPool(players, LOOKUP_CONCURRENCY, (p) => matchOnePlayer(p));
 }

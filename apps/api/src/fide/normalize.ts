@@ -1,9 +1,21 @@
-/** Strip Malaysian patronymic markers and normalize for FIDE name search. */
+/** Strip Malaysian / Malay patronymic markers and normalize for FIDE name search. */
 export function stripPatronomic(name: string): string {
   return name
+    .replace(/\bA\s*\/\s*L\b/gi, ' ')
+    .replace(/\bA\s*\/\s*P\b/gi, ' ')
+    .replace(/\bA\s*\/\s*K\b/gi, ' ')
     .replace(/\bA\/L\b/gi, ' ')
     .replace(/\bA\/P\b/gi, ' ')
     .replace(/\bA\/K\b/gi, ' ')
+    // Bare AL / AP / AK between name parts (e.g. DHARSHINI AP MATHAVAN)
+    .replace(/\bAL\b/gi, ' ')
+    .replace(/\bAP\b/gi, ' ')
+    .replace(/\bAK\b/gi, ' ')
+    .replace(/\bbinti\b/gi, ' ')
+    .replace(/\bbinte\b/gi, ' ')
+    .replace(/\bbte\b/gi, ' ')
+    .replace(/\bbt\b/gi, ' ')
+    .replace(/\bbin\b/gi, ' ')
     .replace(/[.'"`]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -18,9 +30,43 @@ export function nameTokens(name: string): string[] {
     .filter((t) => t.length >= 3);
 }
 
+export type NameParts = {
+  given: string | null;
+  family: string | null;
+  cleaned: string;
+};
+
+/** Parse roster / FIDE-style name into given + family. */
+export function parseNameParts(rawName: string): NameParts {
+  const cleaned = stripPatronomic(rawName);
+  if (!cleaned) return { given: null, family: null, cleaned: '' };
+
+  if (cleaned.includes(',')) {
+    const [last, ...rest] = cleaned.split(',').map((p) => p.trim());
+    const first = rest.join(' ').trim();
+    const givenToken = first.split(/\s+/).filter(Boolean)[0] ?? null;
+    return {
+      cleaned,
+      family: last || null,
+      given: givenToken,
+    };
+  }
+
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { given: null, family: null, cleaned };
+  if (parts.length === 1) {
+    return { cleaned, given: parts[0]!, family: null };
+  }
+  return {
+    cleaned,
+    given: parts[0]!,
+    family: parts[parts.length - 1]!,
+  };
+}
+
 /**
  * Score how well a FIDE catalog name fits a roster name.
- * Exact token hits count more than substrings (avoids Varshan → Devavarshan).
+ * Exact token hits count more than prefix matches.
  */
 export function scoreNameMatch(rosterName: string, fideName: string): number {
   const roster = nameTokens(rosterName);
@@ -33,8 +79,6 @@ export function scoreNameMatch(rosterName: string, fideName: string): number {
       score += 3;
       continue;
     }
-    // Substring only for longer tokens, and never if it is only a partial of a longer FIDE token
-    // without being that token (e.g. "varshan" inside "devavarshan").
     if (t.length >= 6 && fide.some((f) => f.startsWith(t) || t.startsWith(f))) {
       score += 1;
     }
@@ -42,16 +86,21 @@ export function scoreNameMatch(rosterName: string, fideName: string): number {
   return score;
 }
 
-/** Minimum score to keep a LIKE hit as a candidate. */
-export const MIN_NAME_MATCH_SCORE = 3;
+/** Keep as candidate for the pick list (at least one solid token). */
+export const MIN_CANDIDATE_SCORE = 3;
+
+/** Auto-unique requires both given + family style hits (2×3). */
+export const UNIQUE_MIN_SCORE = 6;
+
+/** Clear winner must beat runner-up by this margin. */
+export const UNIQUE_SCORE_GAP = 3;
 
 /**
- * Build search variants for a roster name.
- * Prefer FIDE `Last, First`; also try distinctive tokens.
+ * Structured search queries for Lichess — never bare surname alone as the only query.
  */
 export function nameSearchVariants(rawName: string): string[] {
-  const cleaned = stripPatronomic(rawName);
-  if (!cleaned) return [];
+  const parts = parseNameParts(rawName);
+  if (!parts.cleaned) return [];
 
   const variants: string[] = [];
   const push = (s: string) => {
@@ -59,36 +108,16 @@ export function nameSearchVariants(rawName: string): string[] {
     if (t && !variants.includes(t)) variants.push(t);
   };
 
-  push(cleaned);
-
-  if (cleaned.includes(',')) {
-    const [last, ...rest] = cleaned.split(',').map((p) => p.trim());
-    const first = rest.join(' ').trim();
-    if (last && first) {
-      push(`${last}, ${first}`);
-      push(first);
-      push(last);
-    }
+  if (parts.family && parts.given) {
+    push(`${parts.family}, ${parts.given}`);
+    push(`${parts.given} ${parts.family}`);
+    push(`${parts.family} ${parts.given}`);
   } else {
-    const parts = cleaned.split(/\s+/).filter(Boolean);
-    if (parts.length >= 2) {
-      const last = parts[parts.length - 1]!;
-      const first = parts.slice(0, -1).join(' ');
-      push(`${last}, ${first}`);
-      // Given-name-first Malaysian style: First … Last → also try Last, FirstToken
-      const given = parts[0]!;
-      if (given.length >= 3 && last.length >= 3) {
-        push(`${last}, ${given}`);
-      }
-      // Distinctive tokens only when long enough to avoid common false LIKE hits
-      const sorted = [...parts].sort((a, b) => b.length - a.length);
-      for (const p of sorted) {
-        if (p.length >= 5) push(p);
-      }
-    } else if (parts.length === 1 && parts[0]!.length >= 5) {
-      push(parts[0]!);
-    }
+    push(parts.cleaned);
   }
+
+  // Full cleaned string if multi-token and not already covered
+  if (parts.cleaned.includes(' ')) push(parts.cleaned);
 
   return variants;
 }

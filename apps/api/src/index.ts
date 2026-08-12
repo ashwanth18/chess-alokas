@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { createStore } from './db.js';
-import { authPlugin, getDatabaseSql } from './auth.js';
+import { authPlugin } from './auth.js';
 import { tournamentsPlugin } from './routes/tournaments.js';
 import { importPlugin } from './routes/import.js';
 import { pairingPlugin } from './routes/pairing.js';
@@ -16,7 +16,6 @@ import { floorPlugin } from './routes/floor.js';
 import { adminPlugin } from './routes/admin.js';
 import { publicAnalyticsPlugin } from './routes/publicAnalytics.js';
 import { Sentry, sentryEnabled } from './sentry.js';
-import { maybeStartFideImport } from './fide/importList.js';
 
 const PORT = Number(process.env['PORT'] ?? 3001);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
@@ -109,27 +108,6 @@ app.get('/health', async () => {
   return { ok: true, mode, storage, auth, sentry: sentryEnabled };
 });
 
-const FIDE_CHECK_MS = 24 * 60 * 60 * 1000;
-
-function scheduleFideMonthlyRefresh(): void {
-  const sql = getDatabaseSql();
-  if (!sql) return;
-
-  const tick = () => {
-    void maybeStartFideImport(sql)
-      .then((started) => {
-        if (started) app.log.info('FIDE monthly import started (auto)');
-      })
-      .catch((err) => {
-        app.log.warn({ err }, 'FIDE auto-refresh check failed');
-      });
-  };
-
-  tick();
-  const handle = setInterval(tick, FIDE_CHECK_MS);
-  handle.unref?.();
-}
-
 app.listen({ port: PORT, host: HOST }, (err, address) => {
   if (err) {
     if (sentryEnabled) Sentry.captureException(err);
@@ -137,5 +115,4 @@ app.listen({ port: PORT, host: HOST }, (err, address) => {
     process.exit(1);
   }
   app.log.info(`chess-alokas api listening at ${address}`);
-  scheduleFideMonthlyRefresh();
 });

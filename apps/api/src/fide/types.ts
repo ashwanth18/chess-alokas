@@ -29,12 +29,3 @@ export type FideLookupResult = {
   selectedFideId: number | null;
   candidates: FidePlayerRow[];
 };
-
-export type FideImportStatus = {
-  status: 'idle' | 'running' | 'failed' | 'ok';
-  importedAt: string | null;
-  playerCount: number;
-  sourceUrl: string | null;
-  error: string | null;
-  updatedAt: string | null;
-};

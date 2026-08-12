@@ -15,6 +15,8 @@ type RowState = {
   currentRating: number | null;
   status: FideLookupResultRow['status'] | 'pending';
   selectedFideId: number | null;
+  /** Manual FIDE ID override typed by the director. */
+  manualFideId: string;
   candidates: FidePlayerCandidate[];
   ratingType: RatingType;
   include: boolean;
@@ -26,7 +28,6 @@ function ratingFromCandidate(
 ): number | null {
   if (!c) return null;
   const raw = type === 'rapid' ? c.rapid : type === 'blitz' ? c.blitz : c.standard;
-  // FIDE list uses 0 for unrated
   if (raw == null || raw <= 0) return null;
   return raw;
 }
@@ -40,7 +41,7 @@ function statusLabel(status: RowState['status']): string {
     case 'exact':
       return 'FIDE ID';
     case 'unique':
-      return 'Unique match';
+      return 'High confidence';
     case 'ambiguous':
       return 'Pick one';
     case 'not_found':
@@ -85,37 +86,48 @@ export default function FideLookupModal({
     try {
       const res = await apiFideLookup(tournamentId, {
         ratingType,
-        players: activePlayers.map((p) => ({
-          id: p.id,
-          name: p.name,
-          country: p.country ?? null,
-          yearOfBirth: p.yearOfBirth ?? null,
-          fideId: p.fideId ?? null,
-        })),
+        players: activePlayers.map((p) => {
+          const row = rows.find((r) => r.participantId === p.id);
+          const manual = row?.manualFideId?.trim();
+          const manualId = manual && /^\d+$/.test(manual) ? Number(manual) : null;
+          return {
+            id: p.id,
+            name: p.name,
+            country: p.country ?? null,
+            yearOfBirth: p.yearOfBirth ?? null,
+            fideId: manualId ?? p.fideId ?? null,
+          };
+        }),
       });
       if (!res.ok || !res.data) {
         const msg = res.error ?? 'FIDE lookup failed';
         setError(
           /forbidden/i.test(msg)
-            ? 'Lookup was blocked (sign in again, or Sync this tournament). If it persists after update, the API may still be deploying.'
-            : msg,
+            ? 'Lookup was blocked (sign in again, or Sync this tournament).'
+            : /unavailable|lichess|503/i.test(msg)
+              ? 'FIDE lookup service unavailable — try again in a moment.'
+              : msg,
         );
         return;
       }
       const byId = new Map(res.data.results.map((r) => [r.participantId, r]));
       setRows(
         activePlayers.map((p) => {
+          const prev = rows.find((r) => r.participantId === p.id);
           const r = byId.get(p.id);
           const status = r?.status ?? 'not_found';
           const selected =
             r?.selectedFideId ??
-            (r?.candidates.length === 1 ? r.candidates[0]!.fideId : null);
+            (status === 'unique' && r?.candidates.length === 1
+              ? r.candidates[0]!.fideId
+              : null);
           return {
             participantId: p.id,
             name: p.name,
             currentRating: p.rating ?? null,
             status,
             selectedFideId: selected,
+            manualFideId: prev?.manualFideId ?? (p.fideId != null ? String(p.fideId) : ''),
             candidates: r?.candidates ?? [],
             ratingType,
             include: status === 'exact' || status === 'unique',
@@ -161,18 +173,17 @@ export default function FideLookupModal({
         }
       });
 
-      // Close first so the live player list can refresh from Dexie immediately.
       onClose();
       if (withRating === 0 && idOnly > 0) {
         window.setTimeout(() => {
           window.alert(
-            `Linked ${idOnly} FIDE ID${idOnly === 1 ? '' : 's'}, but none have a ${ratingType} rating in the monthly list (shown as Unr. on the player list).`,
+            `Linked ${idOnly} FIDE ID${idOnly === 1 ? '' : 's'}, but none have a ${ratingType} rating (shown as Unr. on the player list).`,
           );
         }, 0);
       }
 
       void syncOnline().catch(() => {
-        /* local write already applied; sync can retry later */
+        /* local write already applied */
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply ratings');
@@ -209,8 +220,8 @@ export default function FideLookupModal({
         </div>
 
         <p className="form-hint">
-          Matches against the shared monthly FIDE list. Check Std / Rap / Blz before applying —
-          many juniors are listed with no rating yet (Unr.).
+          Looks up players via Lichess FIDE data. Only high-confidence matches are pre-selected —
+          confirm names or enter a FIDE ID when unsure.
         </p>
 
         <div className="fide-lookup-controls">
@@ -257,6 +268,7 @@ export default function FideLookupModal({
                 <tr>
                   <th>Apply</th>
                   <th>Name</th>
+                  <th>FIDE ID</th>
                   <th>Match</th>
                   <th>FIDE player</th>
                   <th>Std / Rap / Blz</th>
@@ -292,11 +304,32 @@ export default function FideLookupModal({
                           <span className="form-hint"> (now {row.currentRating})</span>
                         ) : null}
                       </td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          className="fide-id-input"
+                          placeholder="ID"
+                          value={row.manualFideId}
+                          disabled={busy || applying}
+                          onChange={(e) => {
+                            const v = e.target.value.replace(/\D/g, '');
+                            setRows((prev) =>
+                              prev.map((r) =>
+                                r.participantId === row.participantId
+                                  ? { ...r, manualFideId: v }
+                                  : r,
+                              ),
+                            );
+                          }}
+                          aria-label={`FIDE ID for ${row.name}`}
+                        />
+                      </td>
                       <td>{statusLabel(row.status)}</td>
                       <td>
                         {row.candidates.length === 0 ? (
                           '—'
-                        ) : row.candidates.length === 1 ? (
+                        ) : row.candidates.length === 1 && row.status !== 'ambiguous' ? (
                           <>
                             {row.candidates[0]!.name}
                             {row.candidates[0]!.federation

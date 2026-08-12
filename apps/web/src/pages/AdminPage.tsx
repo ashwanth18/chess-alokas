@@ -2,13 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as Sentry from '@sentry/react';
 import { useAuth } from '../auth/AuthContext';
-import {
-  apiAdminFideRefresh,
-  apiAdminFideStatus,
-  apiAdminOverview,
-  type AdminOverview,
-  type FideImportStatus,
-} from '../api/client';
+import { apiAdminOverview, type AdminOverview } from '../api/client';
 import { sentryEnabled } from '../instrument';
 
 /** Format UTC ISO for display in the viewer's local timezone, with TZ abbreviation. */
@@ -140,29 +134,6 @@ export default function AdminPage() {
   const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [fideStatus, setFideStatus] = useState<FideImportStatus | null>(null);
-  const [fideBusy, setFideBusy] = useState(false);
-  const [fideMsg, setFideMsg] = useState<string | null>(null);
-
-  const loadFide = useCallback(async (opts?: { silent?: boolean }) => {
-    const res = await apiAdminFideStatus();
-    if (res.ok && res.data) {
-      setFideStatus(res.data);
-      if (!opts?.silent) {
-        setFideMsg(
-          res.data.status === 'running'
-            ? `Status refreshed — import still running (${res.data.playerCount.toLocaleString()} processed).`
-            : `Status refreshed — ${res.data.status}${
-                res.data.playerCount ? ` · ${res.data.playerCount.toLocaleString()} players` : ''
-              }.`,
-        );
-      }
-      return;
-    }
-    if (!opts?.silent) {
-      setFideMsg(res.ok ? 'No FIDE status returned.' : res.error);
-    }
-  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,20 +147,11 @@ export default function AdminPage() {
     }
     setData(res.data);
     setLoading(false);
-    void loadFide({ silent: true });
-  }, [loadFide]);
+  }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    if (fideStatus?.status !== 'running') return;
-    const t = window.setInterval(() => {
-      void loadFide({ silent: true });
-    }, 4000);
-    return () => window.clearInterval(t);
-  }, [fideStatus?.status, loadFide]);
 
   const statusParts = useMemo(() => {
     const s = data?.totals.tournamentsByStatus ?? {};
@@ -257,61 +219,12 @@ export default function AdminPage() {
         </p>
       )}
 
-      <section className="admin-panel" aria-label="FIDE rating list">
-        <h3>FIDE rating list</h3>
+      <section className="admin-panel" aria-label="FIDE lookups">
+        <h3>FIDE lookups</h3>
         <p className="admin-metric-detail">
-          Official monthly XML from ratings.fide.com. Opening this page only checks status — it does
-          not start an import. The API auto-refreshes once a month (on/after the 8th, or immediately
-          if the catalog is empty). Use Refresh only if an import failed. Directors look up players
-          from this table — nothing is scraped per request.
+          Directors look up ratings via the Lichess FIDE API (synced from FIDE public lists). There
+          is no local zip import to refresh.
         </p>
-        <p className="admin-metric-detail">
-          Status:{' '}
-          <strong>{fideStatus?.status ?? '…'}</strong>
-          {fideStatus?.playerCount != null
-            ? ` · ${fideStatus.playerCount.toLocaleString()} players`
-            : ''}
-          {fideStatus?.importedAt ? ` · last import ${fmtDate(fideStatus.importedAt)}` : ''}
-        </p>
-        {fideStatus?.error && (
-          <p className="form-hint stage-banner-warn" role="alert">
-            {fideStatus.error}
-          </p>
-        )}
-        {fideMsg && <p className="form-hint">{fideMsg}</p>}
-        <div className="admin-actions-row">
-          <button
-            type="button"
-            className="btn btn-outline"
-            disabled={fideBusy || fideStatus?.status === 'running'}
-            onClick={() => {
-              setFideBusy(true);
-              setFideMsg(null);
-              void apiAdminFideRefresh().then((res) => {
-                setFideBusy(false);
-                if (!res.ok) {
-                  setFideMsg(res.error);
-                  return;
-                }
-                if (res.data) setFideStatus(res.data);
-                setFideMsg(res.data?.message ?? 'Import started — this can take several minutes.');
-              });
-            }}
-          >
-            {fideStatus?.status === 'running' ? 'Import running…' : 'Refresh FIDE list'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={fideBusy}
-            onClick={() => {
-              setFideBusy(true);
-              void loadFide().finally(() => setFideBusy(false));
-            }}
-          >
-            Check status
-          </button>
-        </div>
       </section>
 
       <section className="admin-panel" aria-label="Error monitoring">
