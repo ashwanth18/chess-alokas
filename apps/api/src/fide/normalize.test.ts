@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { nameSearchVariants, stripPatronomic, toFederationCode } from './normalize.js';
+import {
+  MIN_NAME_MATCH_SCORE,
+  nameSearchVariants,
+  scoreNameMatch,
+  stripPatronomic,
+  toFederationCode,
+} from './normalize.js';
 import { decideMatchStatus } from './match.js';
 import { parseFideXmlPlayers } from './importList.js';
 import type { FidePlayerRow } from './types.js';
@@ -17,6 +23,22 @@ describe('stripPatronomic / nameSearchVariants', () => {
     const variants = nameSearchVariants('Vijayan, Logitan');
     expect(variants[0]).toBe('Vijayan, Logitan');
     expect(variants).toContain('Logitan');
+  });
+
+  it('rejects substring-only false friends like Varshan → Devavarshan', () => {
+    expect(scoreNameMatch('VARSHAN A/L H GANASH', 'Elumalai, Devavarshan')).toBeLessThan(
+      MIN_NAME_MATCH_SCORE,
+    );
+    expect(scoreNameMatch('VISHNU A/L BALAKRISHNAN', 'Balakrishnan, Vishnu')).toBeGreaterThanOrEqual(
+      MIN_NAME_MATCH_SCORE,
+    );
+  });
+
+  it('matches Malaysian A/L roster names to FIDE Last, First', () => {
+    expect(nameSearchVariants('LOGITAN A/L VIJAYAN')).toContain('VIJAYAN, LOGITAN');
+    expect(scoreNameMatch('LOGITAN A/L VIJAYAN', 'Vijayan, Logitan')).toBeGreaterThanOrEqual(
+      MIN_NAME_MATCH_SCORE,
+    );
   });
 });
 

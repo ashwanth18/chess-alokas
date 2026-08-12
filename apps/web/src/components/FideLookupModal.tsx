@@ -25,9 +25,14 @@ function ratingFromCandidate(
   type: RatingType,
 ): number | null {
   if (!c) return null;
-  if (type === 'rapid') return c.rapid;
-  if (type === 'blitz') return c.blitz;
-  return c.standard;
+  const raw = type === 'rapid' ? c.rapid : type === 'blitz' ? c.blitz : c.standard;
+  // FIDE list uses 0 for unrated
+  if (raw == null || raw <= 0) return null;
+  return raw;
+}
+
+function formatRatingCell(n: number | null | undefined): string {
+  return n != null && n > 0 ? String(n) : '—';
 }
 
 function statusLabel(status: RowState['status']): string {
@@ -133,24 +138,44 @@ export default function FideLookupModal({
     setError(null);
     try {
       const now = nowIso();
-      for (const row of toApply) {
-        const cand = row.candidates.find((c) => c.fideId === row.selectedFideId);
-        const rating = ratingFromCandidate(cand, row.ratingType);
-        const existing = await db.participants.get(row.participantId);
-        if (!existing) continue;
-        await db.participants.put({
-          ...existing,
-          fideId: row.selectedFideId,
-          rating: rating ?? null,
-          updatedAt: now,
-          dirty: 1,
-        });
-      }
-      void syncOnline();
+      let withRating = 0;
+      let idOnly = 0;
+
+      await db.transaction('rw', db.participants, async () => {
+        for (const row of toApply) {
+          const cand = row.candidates.find((c) => c.fideId === row.selectedFideId);
+          const rating = ratingFromCandidate(cand, row.ratingType);
+          const existing = await db.participants.get(row.participantId);
+          if (!existing) continue;
+          const nextRating =
+            rating ?? (existing.rating != null && existing.rating > 0 ? existing.rating : null);
+          if (nextRating != null && nextRating > 0) withRating += 1;
+          else idOnly += 1;
+          await db.participants.put({
+            ...existing,
+            fideId: row.selectedFideId,
+            rating: nextRating,
+            updatedAt: now,
+            dirty: 1,
+          });
+        }
+      });
+
+      // Close first so the live player list can refresh from Dexie immediately.
       onClose();
+      if (withRating === 0 && idOnly > 0) {
+        window.setTimeout(() => {
+          window.alert(
+            `Linked ${idOnly} FIDE ID${idOnly === 1 ? '' : 's'}, but none have a ${ratingType} rating in the monthly list (shown as Unr. on the player list).`,
+          );
+        }, 0);
+      }
+
+      void syncOnline().catch(() => {
+        /* local write already applied; sync can retry later */
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply ratings');
-    } finally {
       setApplying(false);
     }
   }
@@ -175,17 +200,17 @@ export default function FideLookupModal({
           <button
             type="button"
             className="btn btn-ghost btn-sm"
-            onClick={onClose}
             disabled={busy || applying}
+            onClick={onClose}
+            aria-label="Close"
           >
             Close
           </button>
         </div>
 
         <p className="form-hint">
-          Uses the monthly FIDE list (not live scrape). Confirm matches, choose standard / rapid /
-          blitz, then apply. FIDE IDs are saved for next time. Not found / new players stay blank
-          (—) — that&apos;s fine.
+          Matches against the shared monthly FIDE list. Check Std / Rap / Blz before applying —
+          many juniors are listed with no rating yet (Unr.).
         </p>
 
         <div className="fide-lookup-controls">
@@ -311,10 +336,16 @@ export default function FideLookupModal({
                       </td>
                       <td>
                         {selected
-                          ? `${selected.standard ?? '—'} / ${selected.rapid ?? '—'} / ${selected.blitz ?? '—'}`
+                          ? `${formatRatingCell(selected.standard)} / ${formatRatingCell(selected.rapid)} / ${formatRatingCell(selected.blitz)}`
                           : '—'}
                       </td>
-                      <td>{nextRating != null ? nextRating : '—'}</td>
+                      <td>
+                        {nextRating != null
+                          ? nextRating
+                          : selected
+                            ? 'Unr. (ID only)'
+                            : '—'}
+                      </td>
                     </tr>
                   );
                 })}

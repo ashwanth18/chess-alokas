@@ -1,5 +1,10 @@
 import type { Sql } from 'postgres';
-import { nameSearchVariants, toFederationCode } from './normalize.js';
+import {
+  MIN_NAME_MATCH_SCORE,
+  nameSearchVariants,
+  scoreNameMatch,
+  toFederationCode,
+} from './normalize.js';
 import type {
   FideLookupPlayerIn,
   FideLookupResult,
@@ -170,7 +175,10 @@ export async function matchOnePlayer(
     }
   }
 
-  candidates = dedupe(candidates).slice(0, CANDIDATE_LIMIT);
+  candidates = dedupe(candidates)
+    .filter((c) => scoreNameMatch(player.name, c.name) >= MIN_NAME_MATCH_SCORE)
+    .sort((a, b) => scoreNameMatch(player.name, b.name) - scoreNameMatch(player.name, a.name))
+    .slice(0, CANDIDATE_LIMIT);
   const { status, selectedFideId } = decideMatchStatus(candidates, false);
   return {
     participantId: player.id,

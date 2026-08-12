@@ -12,6 +12,7 @@ import {
   clampPrizePlaces,
 } from '../lib/prizePlaces';
 import NumberField from '../components/NumberField';
+import DatePicker from '../components/DatePicker';
 import TiebreakOrderEditor from '../components/TiebreakOrderEditor';
 import { DEFAULT_TIEBREAK_ORDER, type TiebreakKey } from '@chess-alokas/shared';
 
@@ -249,13 +250,7 @@ export default function CreateTournamentPage() {
         <div className="form-row">
           <div className="form-group">
             <label htmlFor="date">Date</label>
-            <input
-              id="date"
-              type="date"
-              className="input"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
+            <DatePicker id="date" value={date} onChange={setDate} />
           </div>
 
           <NumberField

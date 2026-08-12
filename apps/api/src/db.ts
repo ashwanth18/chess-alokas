@@ -774,14 +774,17 @@ function rowToCategory(row: CategoryRow): Category {
 }
 
 function rowToParticipant(row: ParticipantRow): Participant {
+  const ratingNum = row.rating != null ? Number(row.rating) : null;
   return {
     id: row.id,
     tournamentId: row.tournament_id,
     name: row.name,
     age: row.age,
     gender: row.gender ?? undefined,
-    rating: row.rating ?? undefined,
-    fideId: row.fide_id ?? undefined,
+    // Keep null (not undefined) so sync pull JSON always carries the field.
+    // FIDE unrated is stored as 0 in some rows — treat as unrated/null for the app.
+    rating: ratingNum != null && ratingNum > 0 ? ratingNum : null,
+    fideId: row.fide_id != null ? Number(row.fide_id) : null,
     club: row.club ?? undefined,
     school: row.school ?? undefined,
     city: row.city ?? undefined,

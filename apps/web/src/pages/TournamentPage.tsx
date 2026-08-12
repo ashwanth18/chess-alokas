@@ -64,6 +64,7 @@ import {
 import { livePublicUrl } from '../lib/liveViewer';
 import { useAuth } from '../auth/AuthContext';
 import FideLookupModal from '../components/FideLookupModal';
+import DatePicker from '../components/DatePicker';
 
 type Tab = 'players' | 'pairings' | 'standings';
 
@@ -1360,12 +1361,19 @@ export default function TournamentPage() {
                 <dt>Name</dt>
                 <dd>{tournament.name}</dd>
               </div>
-              <div className="settings-row">
+              <div className="settings-row settings-row-block">
                 <dt>Date</dt>
                 <dd>
-                  {tournament.date
-                    ? new Date(tournament.date).toLocaleDateString()
-                    : '—'}
+                  <DatePicker
+                    value={tournament.date ?? ''}
+                    onChange={(next) => {
+                      void db.tournaments.update(tournament.id, {
+                        date: next || null,
+                        updatedAt: nowIso(),
+                        dirty: 1,
+                      });
+                    }}
+                  />
                 </dd>
               </div>
               <div className="settings-row">
@@ -1652,7 +1660,13 @@ export default function TournamentPage() {
                   <tr key={p.id}>
                     <td>{startRank}</td>
                     <td>{p.name}</td>
-                    <td>{p.rating && p.rating > 0 ? p.rating : '—'}</td>
+                    <td>
+                      {p.rating != null && p.rating > 0
+                        ? p.rating
+                        : p.fideId != null && p.fideId > 0
+                          ? 'Unr.'
+                          : '—'}
+                    </td>
                     <td>{ageCategory}</td>
                     <td>{displaySchool(p) ?? '—'}</td>
                   </tr>

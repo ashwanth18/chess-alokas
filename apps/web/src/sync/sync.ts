@@ -148,8 +148,15 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   for (const remote of participants) {
     const local = await db.participants.get(remote.id);
     if (!local || remote.updatedAt > local.updatedAt) {
+      const remoteRating =
+        remote.rating != null && Number(remote.rating) > 0 ? Number(remote.rating) : null;
+      const remoteFideId =
+        remote.fideId != null && Number(remote.fideId) > 0 ? Number(remote.fideId) : null;
       await db.participants.put({
         ...remote,
+        // Explicit fields — omitted JSON keys must not wipe local fide/rating.
+        rating: remoteRating,
+        fideId: remoteFideId,
         customFields: (remote.customFields ?? {}) as Record<string, unknown>,
         categoryIds: remote.categoryIds ?? [],
         email: remote.email ?? null,

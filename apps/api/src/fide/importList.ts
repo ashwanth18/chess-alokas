@@ -1,4 +1,5 @@
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { mkdtemp, unlink, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -147,7 +148,58 @@ async function parseXmlToCsv(xmlStream: Readable, csvPath: string): Promise<numb
   });
 }
 
-/** Bulk-load CSV into staging. Prefer COPY; fall back to unnest batches. */
+function parseCsvLine(line: string): {
+  fide_id: number;
+  name: string;
+  federation: string | null;
+  birth_year: number | null;
+  title: string | null;
+  sex: string | null;
+  standard: number | null;
+  rapid: number | null;
+  blitz: number | null;
+  inactive: boolean;
+} {
+  const cols: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let c = 0; c < line.length; c++) {
+    const ch = line[c]!;
+    if (inQ) {
+      if (ch === '"' && line[c + 1] === '"') {
+        cur += '"';
+        c++;
+      } else if (ch === '"') {
+        inQ = false;
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ',') {
+      cols.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cols.push(cur);
+  const toInt = (s: string) => (s === '' ? null : Number(s));
+  return {
+    fide_id: Number(cols[0]),
+    name: cols[1] ?? '',
+    federation: cols[2] || null,
+    birth_year: toInt(cols[3] ?? ''),
+    title: cols[4] || null,
+    sex: cols[5] || null,
+    standard: toInt(cols[6] ?? ''),
+    rapid: toInt(cols[7] ?? ''),
+    blitz: toInt(cols[8] ?? ''),
+    inactive: cols[9] === 'true',
+  };
+}
+
+/** Bulk-load CSV into staging. Prefer COPY; fall back to streamed INSERT batches. */
 async function loadCsvIntoStaging(sql: Sql, csvPath: string, rowCount: number): Promise<void> {
   await sql`TRUNCATE fide_players_staging`;
 
@@ -167,53 +219,18 @@ async function loadCsvIntoStaging(sql: Sql, csvPath: string, rowCount: number): 
       '[fide] COPY unavailable, using batched INSERT:',
       err instanceof Error ? err.message : err,
     );
+    // COPY may have left a partial load.
+    await sql`TRUNCATE fide_players_staging`;
   }
 
-  const text = await readFile(csvPath, 'utf8');
-  const lines = text.split('\n').filter((l) => l.length > 0);
-  const BATCH = 8000;
-  for (let i = 0; i < lines.length; i += BATCH) {
-    const chunk = lines.slice(i, i + BATCH);
-    const objects = chunk.map((line) => {
-      // Simple CSV parse for our known shape (name may be quoted)
-      const cols: string[] = [];
-      let cur = '';
-      let inQ = false;
-      for (let c = 0; c < line.length; c++) {
-        const ch = line[c]!;
-        if (inQ) {
-          if (ch === '"' && line[c + 1] === '"') {
-            cur += '"';
-            c++;
-          } else if (ch === '"') {
-            inQ = false;
-          } else {
-            cur += ch;
-          }
-        } else if (ch === '"') {
-          inQ = true;
-        } else if (ch === ',') {
-          cols.push(cur);
-          cur = '';
-        } else {
-          cur += ch;
-        }
-      }
-      cols.push(cur);
-      const toInt = (s: string) => (s === '' ? null : Number(s));
-      return {
-        fide_id: Number(cols[0]),
-        name: cols[1] ?? '',
-        federation: cols[2] || null,
-        birth_year: toInt(cols[3] ?? ''),
-        title: cols[4] || null,
-        sex: cols[5] || null,
-        standard: toInt(cols[6] ?? ''),
-        rapid: toInt(cols[7] ?? ''),
-        blitz: toInt(cols[8] ?? ''),
-        inactive: cols[9] === 'true',
-      };
-    });
+  // Stream lines — full FIDE list is ~1.9M rows; avoid loading the whole CSV as one string.
+  const BATCH = 5000;
+  let batch: ReturnType<typeof parseCsvLine>[] = [];
+  let loaded = 0;
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const objects = batch;
+    batch = [];
     await sql`
       INSERT INTO fide_players_staging ${sql(
         objects,
@@ -229,15 +246,24 @@ async function loadCsvIntoStaging(sql: Sql, csvPath: string, rowCount: number): 
         'inactive',
       )}
     `;
-    if (i % (BATCH * 5) === 0) {
+    loaded += objects.length;
+    if (loaded % (BATCH * 2) === 0 || loaded >= rowCount) {
       await setMeta(sql, {
         status: 'running',
-        playerCount: Math.min(i + chunk.length, rowCount),
+        playerCount: loaded,
         sourceUrl: FIDE_XML_ZIP_URL,
-        error: null,
+        error: `Loading into database… ${loaded.toLocaleString()} / ${rowCount.toLocaleString()}`,
       }).catch(() => undefined);
     }
+  };
+
+  const rl = createInterface({ input: createReadStream(csvPath, { encoding: 'utf8' }), crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line) continue;
+    batch.push(parseCsvLine(line));
+    if (batch.length >= BATCH) await flush();
   }
+  await flush();
 }
 
 async function swapStagingToLive(sql: Sql): Promise<void> {
@@ -301,7 +327,7 @@ async function setMeta(
       imported_at = COALESCE(EXCLUDED.imported_at, fide_import_meta.imported_at),
       player_count = CASE
         WHEN EXCLUDED.status = 'ok' THEN EXCLUDED.player_count
-        WHEN EXCLUDED.status = 'running' AND EXCLUDED.player_count > 0 THEN EXCLUDED.player_count
+        WHEN EXCLUDED.status = 'running' THEN EXCLUDED.player_count
         WHEN EXCLUDED.status = 'failed' THEN fide_import_meta.player_count
         ELSE fide_import_meta.player_count
       END,

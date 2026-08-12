@@ -144,9 +144,24 @@ export default function AdminPage() {
   const [fideBusy, setFideBusy] = useState(false);
   const [fideMsg, setFideMsg] = useState<string | null>(null);
 
-  const loadFide = useCallback(async () => {
+  const loadFide = useCallback(async (opts?: { silent?: boolean }) => {
     const res = await apiAdminFideStatus();
-    if (res.ok && res.data) setFideStatus(res.data);
+    if (res.ok && res.data) {
+      setFideStatus(res.data);
+      if (!opts?.silent) {
+        setFideMsg(
+          res.data.status === 'running'
+            ? `Status refreshed — import still running (${res.data.playerCount.toLocaleString()} processed).`
+            : `Status refreshed — ${res.data.status}${
+                res.data.playerCount ? ` · ${res.data.playerCount.toLocaleString()} players` : ''
+              }.`,
+        );
+      }
+      return;
+    }
+    if (!opts?.silent) {
+      setFideMsg(res.ok ? 'No FIDE status returned.' : res.error);
+    }
   }, []);
 
   const load = useCallback(async () => {
@@ -161,7 +176,7 @@ export default function AdminPage() {
     }
     setData(res.data);
     setLoading(false);
-    void loadFide();
+    void loadFide({ silent: true });
   }, [loadFide]);
 
   useEffect(() => {
@@ -171,7 +186,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (fideStatus?.status !== 'running') return;
     const t = window.setInterval(() => {
-      void loadFide();
+      void loadFide({ silent: true });
     }, 4000);
     return () => window.clearInterval(t);
   }, [fideStatus?.status, loadFide]);
@@ -245,9 +260,10 @@ export default function AdminPage() {
       <section className="admin-panel" aria-label="FIDE rating list">
         <h3>FIDE rating list</h3>
         <p className="admin-metric-detail">
-          Official monthly XML from ratings.fide.com. The API auto-refreshes once a month (on/after
-          the 8th, or immediately if the catalog is empty). Manual refresh is optional if an import
-          failed. Directors look up players from this table — nothing is scraped per request.
+          Official monthly XML from ratings.fide.com. Opening this page only checks status — it does
+          not start an import. The API auto-refreshes once a month (on/after the 8th, or immediately
+          if the catalog is empty). Use Refresh only if an import failed. Directors look up players
+          from this table — nothing is scraped per request.
         </p>
         <p className="admin-metric-detail">
           Status:{' '}
@@ -288,7 +304,10 @@ export default function AdminPage() {
             type="button"
             className="btn btn-ghost"
             disabled={fideBusy}
-            onClick={() => void loadFide()}
+            onClick={() => {
+              setFideBusy(true);
+              void loadFide().finally(() => setFideBusy(false));
+            }}
           >
             Check status
           </button>
