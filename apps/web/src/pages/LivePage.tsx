@@ -274,8 +274,6 @@ export default function LivePage() {
     return computeLiveStandings(data, hasCats ? standingsCatId || null : null);
   }, [data, standingsCatId]);
 
-  const endRankById = useMemo(() => (data ? liveEndRankMap(data) : new Map()), [data]);
-
   const startRankById = useMemo(() => (data ? liveStartRankMap(data) : new Map()), [data]);
 
   const prizePlacesN = useMemo(() => {
@@ -630,8 +628,12 @@ export default function LivePage() {
                 ),
               ),
             ).map((p) => {
-              const end = endRankById.get(p.id) ?? null;
               const pinned = bookmarkedIds.has(p.id);
+              const ageCategory =
+                p.categoryIds
+                  .map((id) => data.categories.find((c) => c.id === id)?.name)
+                  .filter(Boolean)
+                  .join(', ') || null;
               return (
                 <li key={p.id}>
                   <div className={`live-player-card ${pinned ? 'is-pinned' : ''}`}>
@@ -644,20 +646,13 @@ export default function LivePage() {
                         <span>
                           Start <strong>{startRankById.get(p.id) ?? '—'}</strong>
                         </span>
-                        <span>
-                          End <strong>{end ?? '—'}</strong>
-                        </span>
                       </div>
                       <strong className="live-player-card-name">{p.name}</strong>
                       <span className="live-player-card-meta">
                         {p.rating && p.rating > 0 ? `FIDE ${p.rating}` : 'Unrated'}
+                        {ageCategory ? ` · ${ageCategory}` : ''}
                         {displaySchool(p) ? ` · ${displaySchool(p)}` : ''}
                       </span>
-                      {(p.city || p.state) && (
-                        <span className="live-player-card-place">
-                          {[p.city, p.state, p.country ?? 'Malaysia'].filter(Boolean).join(', ')}
-                        </span>
-                      )}
                     </button>
                     <BookmarkButton active={pinned} onToggle={() => pinPlayer(p)} />
                   </div>

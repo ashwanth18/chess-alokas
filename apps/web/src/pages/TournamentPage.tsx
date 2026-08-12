@@ -5,7 +5,6 @@ import {
   pairRound,
   computeStandings,
   computeSectionStandings,
-  computeEndRankMap,
   assignStartRanks,
   computeStartRankMap,
   sortRoster,
@@ -1250,16 +1249,6 @@ export default function TournamentPage() {
     }
   }, [participants, games, activeCatId, mix, tournament?.tiebreakOrder, tournament?.sharedPlaces]);
 
-  const endRankById = useMemo(
-    () =>
-      computeEndRankMap(participants ?? [], games ?? [], {
-        mixCategories: mix || !hasCategories,
-        tiebreakOrder: (tournament?.tiebreakOrder as TiebreakKey[] | null | undefined) ?? null,
-        sharedPlaces: tournament?.sharedPlaces ?? true,
-      }),
-    [participants, games, mix, hasCategories, tournament?.tiebreakOrder, tournament?.sharedPlaces],
-  );
-
   const standingsEmptyReason = useMemo(() => {
     if (!participants || participants.length === 0) return 'no-players' as const;
     if (activeCatId) {
@@ -1625,32 +1614,27 @@ export default function TournamentPage() {
               <thead>
                 <tr>
                   <th title="Start rank">Start</th>
-                  <th title="Current / end rank">End</th>
                   <th>Name</th>
                   <th>FIDE</th>
-                  <th>YOB</th>
+                  <th>Age category</th>
                   <th>School</th>
-                  <th>City</th>
-                  <th>State</th>
-                  <th>Country</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredParticipants.map((p) => {
                   const startRank = startRankById.get(p.id) ?? p.seed ?? '—';
-                  const endRank = endRankById.get(p.id) ?? '—';
-                  const yob = displayYearOfBirth(p);
+                  const ageCategory =
+                    (p.categoryIds ?? [])
+                      .map((id) => categoryNames[id])
+                      .filter(Boolean)
+                      .join(', ') || '—';
                   return (
                   <tr key={p.id}>
                     <td>{startRank}</td>
-                    <td>{endRank}</td>
                     <td>{p.name}</td>
                     <td>{p.rating && p.rating > 0 ? p.rating : '—'}</td>
-                    <td>{yob ?? '—'}</td>
+                    <td>{ageCategory}</td>
                     <td>{displaySchool(p) ?? '—'}</td>
-                    <td>{p.city ?? '—'}</td>
-                    <td>{p.state ?? '—'}</td>
-                    <td>{p.country ?? 'Malaysia'}</td>
                   </tr>
                   );
                 })}
