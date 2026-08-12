@@ -89,7 +89,12 @@ export default function FideLookupModal({
         })),
       });
       if (!res.ok || !res.data) {
-        setError(res.error ?? 'FIDE lookup failed');
+        const msg = res.error ?? 'FIDE lookup failed';
+        setError(
+          /forbidden/i.test(msg)
+            ? 'Lookup was blocked (sign in again, or Sync this tournament). If it persists after update, the API may still be deploying.'
+            : msg,
+        );
         return;
       }
       const byId = new Map(res.data.results.map((r) => [r.participantId, r]));

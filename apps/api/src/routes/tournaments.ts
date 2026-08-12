@@ -319,12 +319,11 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
     '/tournaments/:id/fide-lookup',
     { preHandler: requireAuth },
     async (request, reply) => {
-      const { id } = request.params;
-      if (!(await assertOwner(store, id, request.userId, reply))) return;
-      const tournament = await store.getTournament(id);
-      if (!tournament || tournament.deletedAt) {
-        return reply.code(404).send({ error: 'Tournament not found' });
-      }
+      // Auth only — no assertOwner. FIDE catalog is shared (not tournament data).
+      // Desktop often looks up before sync, or against a local tournament whose
+      // cloud row is missing/soft-deleted; ownership would 403 incorrectly.
+      // Writes stay client-side (Dexie + sync). Tournament id remains in the URL
+      // for API consistency with other tournament routes.
 
       const parsed = FideLookupBodySchema.safeParse(request.body);
       if (!parsed.success) {
