@@ -34,6 +34,19 @@ export interface DesktopBridge {
   openDownloadPage: (url?: string) => Promise<void>;
   getUpdateStatus: () => Promise<DesktopUpdateStatus>;
   dismissJustUpdated: () => Promise<DesktopUpdateStatus>;
+  getLastError: () => {
+    code: string;
+    message: string;
+    at: string;
+    details?: string;
+  } | null;
+  reportBootIssue: (issue: {
+    code: string;
+    message: string;
+    at?: string;
+    details?: string;
+  }) => void;
+  openLogsFolder: () => Promise<void>;
   onUpdateStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void;
 }
 
@@ -57,6 +70,13 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke('desktop:get-update-status') as Promise<DesktopUpdateStatus>,
   dismissJustUpdated: () =>
     ipcRenderer.invoke('desktop:dismiss-just-updated') as Promise<DesktopUpdateStatus>,
+  getLastError: () =>
+    (ipcRenderer.sendSync('desktop:get-last-error') as ReturnType<DesktopBridge['getLastError']>) ??
+    null,
+  reportBootIssue: (issue) => {
+    ipcRenderer.send('desktop:report-boot-issue', issue);
+  },
+  openLogsFolder: () => ipcRenderer.invoke('desktop:open-logs-folder') as Promise<void>,
   onUpdateStatus: (listener) => {
     const handler = (_event: IpcRendererEvent, status: DesktopUpdateStatus) => listener(status);
     ipcRenderer.on('desktop:update-status', handler);

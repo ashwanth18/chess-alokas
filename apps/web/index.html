@@ -7,14 +7,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Non-blocking: a hung fonts.googleapis.com must not freeze first paint. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap"
       rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap"
+      media="print"
+      onload="this.media='all'"
     />
     <title>Chess Alokas</title>
+    <style>
+      html, body { margin: 0; background: #0f3d2e; }
+      #boot-splash {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: Georgia, 'Times New Roman', serif;
+        color: #d4b98a;
+        text-align: center;
+        padding: 2rem;
+      }
+      #boot-splash p { margin: 0.35rem 0 0; font-size: 0.95rem; opacity: 0.85; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-splash">
+        <div>
+          ♕ Chess Alokas
+          <p id="boot-splash-msg">Starting…</p>
+        </div>
+      </div>
+    </div>
+    <script>
+      setTimeout(function () {
+        var el = document.getElementById('boot-splash-msg');
+        if (el) {
+          el.textContent =
+            'Still starting (BOOT_UI_STUCK). Use chess-manager.alokas.com in a browser, or send this code to support.';
+        }
+      }, 12000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

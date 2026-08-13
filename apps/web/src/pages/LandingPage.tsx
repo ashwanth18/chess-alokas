@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { trackPageView } from '../lib/pageAnalytics';
+import { trackProductEvent } from '../lib/productTelemetry';
 
 type PlatformKey = 'windows' | 'linux' | 'macos';
 
@@ -204,6 +206,10 @@ export default function LandingPage() {
   const [loadingDownloads, setLoadingDownloads] = useState(true);
 
   useEffect(() => {
+    trackPageView({ routeKey: 'landing', path: '/' });
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -398,7 +404,18 @@ export default function LandingPage() {
                             {inner}
                           </div>
                         ) : (
-                          <a className={rowClass} href={opt.url!} download>
+                          <a
+                            className={rowClass}
+                            href={opt.url!}
+                            download
+                            onClick={() =>
+                              trackProductEvent({
+                                name: 'download_click',
+                                assetId: opt.id,
+                                os: opt.platform,
+                              })
+                            }
+                          >
                             {inner}
                           </a>
                         )}

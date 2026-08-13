@@ -1,5 +1,4 @@
-/* ─── Google Fonts ──────────────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Source+Sans+3:wght@400;500;600&display=swap');
+/* Fonts load from index.html (non-blocking). Fallbacks keep first paint unblocked. */
 
 /* ─── Design tokens ─────────────────────────────────────────────────────────── */
 :root {
@@ -1010,6 +1009,17 @@ html.is-desktop-linux .desktop-update-banner {
   padding: 0.6rem 0.85rem;
   font-size: 0.85rem;
   margin-bottom: 1rem;
+}
+.boot-issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+.boot-issue .form-hint-sm {
+  margin-top: 0.35rem;
+  color: inherit;
+  opacity: 0.85;
 }
 
 .form-actions {

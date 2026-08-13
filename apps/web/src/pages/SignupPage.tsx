@@ -1,7 +1,8 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import AuthShell from '../components/AuthShell';
+import { trackPageView } from '../lib/pageAnalytics';
 
 export default function SignupPage() {
   const auth = useAuth();
@@ -12,6 +13,10 @@ export default function SignupPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    trackPageView({ routeKey: 'signup', path: '/signup' });
+  }, []);
 
   if (!auth.loading && auth.user) return <Navigate to="/app" replace />;
 

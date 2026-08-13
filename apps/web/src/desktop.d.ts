@@ -33,6 +33,19 @@ export interface DesktopBridge {
   openDownloadPage: (url?: string) => Promise<void>;
   getUpdateStatus: () => Promise<DesktopUpdateStatus>;
   dismissJustUpdated: () => Promise<DesktopUpdateStatus>;
+  getLastError: () => {
+    code: string;
+    message: string;
+    at: string;
+    details?: string;
+  } | null;
+  reportBootIssue: (issue: {
+    code: string;
+    message: string;
+    at?: string;
+    details?: string;
+  }) => void;
+  openLogsFolder: () => Promise<void>;
   onUpdateStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void;
 }
 

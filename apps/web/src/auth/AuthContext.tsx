@@ -12,6 +12,7 @@ import * as Sentry from '@sentry/react';
 import { authRedirectTo, supabase, supabaseConfigured } from '../lib/supabase';
 import { db } from '../db/local';
 import { sentryEnabled } from '../instrument';
+import { clearBootIssue, reportBootIssue } from '../lib/bootDiagnostics';
 
 interface AuthContextValue {
   configured: boolean;
@@ -79,22 +80,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!supabase) {
+      reportBootIssue(
+        'AUTH_NOT_CONFIGURED',
+        'Sign-in is not configured in this build (missing Supabase keys).',
+      );
       setLoading(false);
       return;
     }
     let mounted = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      void persistOwnerId(data.session?.user.id ?? null);
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (!mounted || settled) return;
+      reportBootIssue(
+        'AUTH_SESSION_TIMEOUT',
+        'Cached sign-in did not load within 10 seconds. You can still sign in.',
+      );
       setLoading(false);
-    });
+    }, 10_000);
+    void supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!mounted) return;
+        settled = true;
+        if (error) {
+          reportBootIssue('AUTH_SESSION_FAILED', error.message);
+        } else {
+          clearBootIssue();
+        }
+        setSession(data.session);
+        void persistOwnerId(data.session?.user.id ?? null);
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        settled = true;
+        const message = err instanceof Error ? err.message : String(err);
+        reportBootIssue('AUTH_SESSION_FAILED', message);
+      })
+      .finally(() => {
+        window.clearTimeout(timer);
+        if (mounted) setLoading(false);
+      });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next);
       void persistOwnerId(next?.user.id ?? null);
     });
     return () => {
       mounted = false;
+      window.clearTimeout(timer);
       sub.subscription.unsubscribe();
     };
   }, []);

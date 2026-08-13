@@ -1,6 +1,6 @@
 import './instrument';
 
-import { StrictMode } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { reactErrorHandler } from '@sentry/react';
@@ -9,6 +9,8 @@ import './index.css';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import Layout from './components/Layout';
 import DesktopUpdateBanner from './components/DesktopUpdateBanner';
+import BootIssueCard from './components/BootIssueCard';
+import { trackDesktopPresence } from './lib/productTelemetry';
 import HomePage from './pages/HomePage';
 import CreateTournamentPage from './pages/CreateTournamentPage';
 import TournamentPage from './pages/TournamentPage';
@@ -40,6 +42,32 @@ if (typeof document !== 'undefined' && isDesktop) {
 
 const Router = isDesktop ? HashRouter : BrowserRouter;
 
+function ProductTelemetry() {
+  useEffect(() => {
+    trackDesktopPresence();
+  }, []);
+  return null;
+}
+
+function SessionLoading({ title }: { title: string }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setSlow(true), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
+  return (
+    <div className="auth-page">
+      <div className="auth-card">
+        <h1>{title}</h1>
+        <p className="form-hint">
+          {slow ? 'This is taking longer than usual. If it stays here, copy the error below.' : 'Please wait…'}
+        </p>
+        <BootIssueCard />
+      </div>
+    </div>
+  );
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   if (!auth.configured) {
@@ -53,6 +81,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
               This desktop build is missing auth configuration. Please download the latest installer
               from chess-manager.alokas.com.
             </p>
+            <BootIssueCard />
           </div>
         </div>
       );
@@ -60,11 +89,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
   if (auth.loading) {
-    return (
-      <div className="auth-page">
-        <p className="form-hint">Loading session…</p>
-      </div>
-    );
+    return <SessionLoading title="Loading session" />;
   }
   if (!auth.user) return <Navigate to="/login" replace />;
   return <>{children}</>;
@@ -76,11 +101,7 @@ function RootEntry() {
   if (isDesktop) return <Navigate to="/app" replace />;
   if (!auth.configured) return <Navigate to="/app" replace />;
   if (auth.loading) {
-    return (
-      <div className="auth-page">
-        <p className="form-hint">Loading…</p>
-      </div>
-    );
+    return <SessionLoading title="Loading" />;
   }
   if (auth.user) return <Navigate to="/app" replace />;
   return <LandingPage />;
@@ -96,6 +117,7 @@ createRoot(document.getElementById('root')!, {
       <Router>
         <>
           <DesktopUpdateBanner />
+          <ProductTelemetry />
           <Routes>
           <Route path="/" element={<RootEntry />} />
           <Route path="/login" element={<LoginPage />} />

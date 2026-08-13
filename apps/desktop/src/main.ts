@@ -5,6 +5,7 @@ import log from 'electron-log/main';
 import { startApiSidecar, type SidecarHandle } from './sidecar.js';
 import { getLastUpdateStatus, setupAutoUpdater, dismissJustUpdatedNotice } from './updater.js';
 import { installAppMenu } from './menu.js';
+import { openLogsFolder, readLastError, writeLastError } from './errors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,14 @@ const isDev = !app.isPackaged && process.env['ELECTRON_DEV'] !== '0';
 const useLocalSidecar = isDev || process.env['DESKTOP_LOCAL_API'] === '1';
 
 const updater = setupAutoUpdater(() => mainWindow);
+
+function loadFailMessage(errorCode: number, errorDescription: string): string {
+  if (errorCode === -106) return 'No internet connection.';
+  if (errorCode === -105 || errorCode === -109) return 'Could not look up the server name.';
+  if (errorCode === -118) return 'Connection timed out.';
+  if (errorCode === -6 || errorCode === -2) return 'The app page could not be loaded.';
+  return errorDescription || `Page load failed (${errorCode}).`;
+}
 
 function registerIpc() {
   ipcMain.on('desktop:get-api-base-url', (event) => {
@@ -55,6 +64,23 @@ function registerIpc() {
   });
   ipcMain.handle('desktop:get-update-status', () => getLastUpdateStatus());
   ipcMain.handle('desktop:dismiss-just-updated', () => dismissJustUpdatedNotice());
+  ipcMain.on('desktop:get-last-error', (event) => {
+    event.returnValue = readLastError();
+  });
+  ipcMain.on('desktop:report-boot-issue', (_event, issue) => {
+    if (!issue || typeof issue !== 'object') return;
+    const rec = issue as { code?: string; message?: string; details?: string; at?: string };
+    if (!rec.code || !rec.message) return;
+    writeLastError({
+      code: String(rec.code),
+      message: String(rec.message),
+      details: rec.details ? String(rec.details) : undefined,
+      at: rec.at ? String(rec.at) : undefined,
+    });
+  });
+  ipcMain.handle('desktop:open-logs-folder', async () => {
+    await openLogsFolder();
+  });
 }
 
 async function createWindow() {
@@ -87,19 +113,57 @@ async function createWindow() {
     },
   });
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
-    // Tell the renderer if this launch followed a silent install.
+  const showWindow = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return;
+    mainWindow.show();
     updater.announceJustUpdated();
-    // Quiet startup check shortly after UI is ready.
     setTimeout(() => {
       void updater.check();
     }, 2500);
+  };
+
+  const showTimer = setTimeout(() => {
+    log.warn('Window show timed out waiting for ready-to-show');
+    writeLastError({
+      code: 'WINDOW_SHOW_TIMEOUT',
+      message: 'Window did not become ready to show within 4 seconds.',
+    });
+    showWindow();
+  }, 4000);
+
+  mainWindow.once('ready-to-show', () => {
+    clearTimeout(showTimer);
+    showWindow();
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL) => {
+      if (errorCode === -3) return; // ERR_ABORTED (normal on navigation)
+      writeLastError({
+        code: 'PAGE_LOAD_FAILED',
+        message: loadFailMessage(errorCode, errorDescription),
+        details: `${errorCode} ${errorDescription} ${validatedURL}`,
+      });
+    },
+  );
+  mainWindow.webContents.on('unresponsive', () => {
+    writeLastError({
+      code: 'WINDOW_UNRESPONSIVE',
+      message: 'The window stopped responding.',
+    });
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    writeLastError({
+      code: 'RENDERER_CRASH',
+      message: `Display process ended (${details.reason}).`,
+      details: JSON.stringify(details),
+    });
   });
 
   if (isDev) {
@@ -160,4 +224,12 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   void sidecar?.stop();
+});
+
+process.on('uncaughtException', (err) => {
+  writeLastError({
+    code: 'MAIN_UNCAUGHT',
+    message: err.message,
+    details: err.stack,
+  });
 });

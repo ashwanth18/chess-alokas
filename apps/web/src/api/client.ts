@@ -524,6 +524,21 @@ export type AdminOverview = {
     updatedAt: string;
   }>;
   timestampsAreUtc: true;
+  distribution: {
+    githubLatestTag: string | null;
+    githubDownloadsLatest: number;
+    githubDownloadsRecent: number;
+    githubAssets: Array<{ name: string; downloads: number }>;
+    siteDownloadClicks7d: number;
+    siteDownloadClicks30d: number;
+    desktopLaunches7d: number;
+    uniqueInstalls30d: number;
+    byOs7d: Record<string, number>;
+    byArch7d: Record<string, number>;
+    byCountry7d: Record<string, number>;
+    byAsset7d: Record<string, number>;
+    byTimezone7d: Record<string, number>;
+  };
 };
 
 export async function apiAdminOverview() {

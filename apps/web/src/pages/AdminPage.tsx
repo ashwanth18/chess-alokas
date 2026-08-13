@@ -194,6 +194,7 @@ export default function AdminPage() {
   const totals = data?.totals;
   const pv = data?.pageViews;
   const adoption = data?.adoption;
+  const dist = data?.distribution;
   const sentryOrgUrl = (import.meta.env.VITE_SENTRY_ORG_URL as string | undefined)?.trim();
 
   return (
@@ -232,6 +233,13 @@ export default function AdminPage() {
         <p className="admin-metric-detail">
           Free Developer plan: errors + light tracing only. Session Replay and paid features are
           disabled. Full triage is in the Sentry Issues dashboard.
+        </p>
+        <p className="admin-metric-detail">
+          The Windows Setup wizard cannot report to Sentry (it is not our app yet). If someone is
+          stuck on a green installer bar, that is almost always SmartScreen/Defender — ask them for
+          a screenshot. App / sign-in failures show an error code on screen (
+          <code>AUTH_SESSION_TIMEOUT</code>, <code>PAGE_LOAD_FAILED</code>, …) and are sent here
+          when the client SDK is enabled.
         </p>
         <p className="admin-metric-detail">
           Client SDK: {sentryEnabled ? 'enabled' : 'not configured (set VITE_SENTRY_DSN)'}
@@ -296,7 +304,96 @@ export default function AdminPage() {
               <strong>{pv.last7d}</strong>
               <span className="admin-metric-detail">{pv.last30d} in 30 days</span>
             </div>
+            {dist && (
+              <div className="admin-hero-card">
+                <span className="admin-metric-label">GitHub downloads</span>
+                <strong>{dist.githubDownloadsLatest}</strong>
+                <span className="admin-metric-detail">
+                  {dist.githubLatestTag ?? 'latest'} · {dist.githubDownloadsRecent} across recent
+                  releases
+                </span>
+              </div>
+            )}
           </section>
+
+          {dist && (
+            <section className="admin-panel" aria-label="Downloads and devices">
+              <h3>Downloads &amp; devices</h3>
+              <p className="admin-metric-detail">
+                GitHub counts every completed file download. Site clicks are counted when someone
+                hits Download on chess-manager.alokas.com. Desktop launches are anonymous (OS,
+                architecture, country/timezone) — not laptop model, IP, or hostname.
+              </p>
+              <div className="admin-hero" style={{ margin: '0.85rem 0 1rem' }}>
+                <div className="admin-hero-card">
+                  <span className="admin-metric-label">Site download clicks (7d)</span>
+                  <strong>{dist.siteDownloadClicks7d}</strong>
+                  <span className="admin-metric-detail">{dist.siteDownloadClicks30d} in 30 days</span>
+                </div>
+                <div className="admin-hero-card">
+                  <span className="admin-metric-label">Desktop pings (7d)</span>
+                  <strong>{dist.desktopLaunches7d}</strong>
+                  <span className="admin-metric-detail">
+                    {dist.uniqueInstalls30d} anonymous installs in 30 days
+                  </span>
+                </div>
+              </div>
+              <div className="admin-grid-2">
+                <div>
+                  <h4>By file (GitHub, latest)</h4>
+                  {dist.githubAssets.length === 0 ? (
+                    <p className="admin-metric-detail">No GitHub asset counts yet.</p>
+                  ) : (
+                    <HBars
+                      entries={dist.githubAssets.map((a) => [a.name.replace(/^Chess-Alokas-/, ''), a.downloads])}
+                    />
+                  )}
+                  <h4 className="admin-subhead">Site clicks by installer (7d)</h4>
+                  {Object.keys(dist.byAsset7d).length === 0 ? (
+                    <p className="admin-metric-detail">No site download clicks yet.</p>
+                  ) : (
+                    <HBars
+                      entries={Object.entries(dist.byAsset7d).sort((a, b) => b[1] - a[1])}
+                    />
+                  )}
+                </div>
+                <div>
+                  <h4>OS (7d)</h4>
+                  {Object.keys(dist.byOs7d).length === 0 ? (
+                    <p className="admin-metric-detail">No device events yet.</p>
+                  ) : (
+                    <HBars entries={Object.entries(dist.byOs7d).sort((a, b) => b[1] - a[1])} />
+                  )}
+                  <h4 className="admin-subhead">Architecture (7d)</h4>
+                  {Object.keys(dist.byArch7d).length === 0 ? (
+                    <p className="admin-metric-detail">No architecture data yet.</p>
+                  ) : (
+                    <HBars entries={Object.entries(dist.byArch7d).sort((a, b) => b[1] - a[1])} />
+                  )}
+                  <h4 className="admin-subhead">Country (7d)</h4>
+                  {Object.keys(dist.byCountry7d).length === 0 ||
+                  (Object.keys(dist.byCountry7d).length === 1 && dist.byCountry7d.unknown) ? (
+                    <p className="admin-metric-detail">
+                      Country needs a CDN country header (e.g. Cloudflare). Timezones below are the
+                      fallback.
+                    </p>
+                  ) : (
+                    <HBars
+                      entries={Object.entries(dist.byCountry7d).sort((a, b) => b[1] - a[1])}
+                    />
+                  )}
+                  <h4 className="admin-subhead">Timezone (7d)</h4>
+                  {Object.keys(dist.byTimezone7d).length === 0 ? (
+                    <p className="admin-metric-detail">No timezone data yet.</p>
+                  ) : (
+                    <HBars
+                      entries={Object.entries(dist.byTimezone7d).sort((a, b) => b[1] - a[1])}
+                    />
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
 
           <div className="admin-grid-2">
             <section className="admin-panel">

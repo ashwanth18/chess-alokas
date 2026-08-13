@@ -64,11 +64,104 @@ export type AdminOverview = {
   }>;
   /** IANA timezone hint for clients; timestamps are always UTC ISO. */
   timestampsAreUtc: true;
+  distribution: {
+    githubLatestTag: string | null;
+    githubDownloadsLatest: number;
+    githubDownloadsRecent: number;
+    githubAssets: Array<{ name: string; downloads: number }>;
+    siteDownloadClicks7d: number;
+    siteDownloadClicks30d: number;
+    desktopLaunches7d: number;
+    uniqueInstalls30d: number;
+    byOs7d: Record<string, number>;
+    byArch7d: Record<string, number>;
+    byCountry7d: Record<string, number>;
+    byAsset7d: Record<string, number>;
+    byTimezone7d: Record<string, number>;
+  };
 };
 
 function pct(part: number, whole: number): number {
   if (whole <= 0) return 0;
   return Math.round((part / whole) * 1000) / 10;
+}
+
+type GithubReleaseCache = {
+  at: number;
+  latestTag: string | null;
+  latestDownloads: number;
+  recentDownloads: number;
+  assets: Array<{ name: string; downloads: number }>;
+};
+
+let githubCache: GithubReleaseCache | null = null;
+const GITHUB_CACHE_MS = 10 * 60 * 1000;
+
+async function fetchGithubDownloads(): Promise<GithubReleaseCache> {
+  if (githubCache && Date.now() - githubCache.at < GITHUB_CACHE_MS) return githubCache;
+  const empty: GithubReleaseCache = {
+    at: Date.now(),
+    latestTag: null,
+    latestDownloads: 0,
+    recentDownloads: 0,
+    assets: [],
+  };
+  try {
+    const res = await fetch(
+      'https://api.github.com/repos/ashwanth18/chess-alokas/releases?per_page=12',
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'chess-alokas-admin',
+        },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    if (!res.ok) {
+      githubCache = empty;
+      return empty;
+    }
+    const releases = (await res.json()) as Array<{
+      tag_name?: string;
+      draft?: boolean;
+      assets?: Array<{ name: string; download_count?: number }>;
+    }>;
+    const published = releases.filter((r) => !r.draft);
+    const latest = published[0];
+    const latestAssets = (latest?.assets ?? [])
+      .filter((a) => !a.name.toLowerCase().includes('blockmap') && !a.name.endsWith('.yml'))
+      .map((a) => ({ name: a.name, downloads: Number(a.download_count ?? 0) }))
+      .sort((a, b) => b.downloads - a.downloads);
+    const latestDownloads = latestAssets.reduce((n, a) => n + a.downloads, 0);
+    let recentDownloads = 0;
+    for (const rel of published) {
+      for (const a of rel.assets ?? []) {
+        const name = a.name.toLowerCase();
+        if (name.includes('blockmap') || name.endsWith('.yml')) continue;
+        recentDownloads += Number(a.download_count ?? 0);
+      }
+    }
+    githubCache = {
+      at: Date.now(),
+      latestTag: latest?.tag_name ?? null,
+      latestDownloads,
+      recentDownloads,
+      assets: latestAssets,
+    };
+    return githubCache;
+  } catch {
+    githubCache = empty;
+    return empty;
+  }
+}
+
+function countMap(rows: Array<{ key: string | null; count: string }>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const row of rows) {
+    const key = (row.key || 'unknown').slice(0, 64);
+    out[key] = Number(row.count);
+  }
+  return out;
 }
 
 export const adminPlugin: FastifyPluginAsync = async (app) => {
@@ -353,6 +446,79 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           byRouteKeyLast7d[row.route_key] = Number(row.count);
         }
 
+        const github = await fetchGithubDownloads();
+
+        const [distTotals] = await sql<
+          {
+            clicks7d: string;
+            clicks30d: string;
+            launches7d: string;
+            unique30d: string;
+          }[]
+        >`
+          SELECT
+            (
+              SELECT COUNT(*)::text FROM product_events
+              WHERE event_name = 'download_click'
+                AND created_at >= now() - interval '7 days'
+            ) AS clicks7d,
+            (
+              SELECT COUNT(*)::text FROM product_events
+              WHERE event_name = 'download_click'
+                AND created_at >= now() - interval '30 days'
+            ) AS clicks30d,
+            (
+              SELECT COUNT(*)::text FROM product_events
+              WHERE event_name IN ('desktop_launch', 'desktop_heartbeat')
+                AND created_at >= now() - interval '7 days'
+            ) AS launches7d,
+            (
+              SELECT COUNT(DISTINCT install_id_hash)::text FROM product_events
+              WHERE install_id_hash IS NOT NULL
+                AND created_at >= now() - interval '30 days'
+            ) AS unique30d
+        `;
+
+        const byOs = await sql<{ key: string | null; count: string }[]>`
+          SELECT os AS key, COUNT(*)::text AS count
+          FROM product_events
+          WHERE created_at >= now() - interval '7 days'
+          GROUP BY os
+          ORDER BY COUNT(*) DESC
+        `;
+        const byArch = await sql<{ key: string | null; count: string }[]>`
+          SELECT arch AS key, COUNT(*)::text AS count
+          FROM product_events
+          WHERE created_at >= now() - interval '7 days'
+            AND event_name IN ('desktop_launch', 'desktop_heartbeat', 'download_click')
+          GROUP BY arch
+          ORDER BY COUNT(*) DESC
+        `;
+        const byCountry = await sql<{ key: string | null; count: string }[]>`
+          SELECT country AS key, COUNT(*)::text AS count
+          FROM product_events
+          WHERE created_at >= now() - interval '7 days'
+          GROUP BY country
+          ORDER BY COUNT(*) DESC
+          LIMIT 20
+        `;
+        const byAsset = await sql<{ key: string | null; count: string }[]>`
+          SELECT asset_id AS key, COUNT(*)::text AS count
+          FROM product_events
+          WHERE event_name = 'download_click'
+            AND created_at >= now() - interval '7 days'
+          GROUP BY asset_id
+          ORDER BY COUNT(*) DESC
+        `;
+        const byTimezone = await sql<{ key: string | null; count: string }[]>`
+          SELECT timezone AS key, COUNT(*)::text AS count
+          FROM product_events
+          WHERE created_at >= now() - interval '7 days'
+            AND timezone IS NOT NULL
+          GROUP BY timezone
+          ORDER BY COUNT(*) DESC
+          LIMIT 15
+        `;
         const tournamentCount = Number(totalsRow?.tournaments ?? 0);
         const publicLive = Number(totalsRow?.public_live ?? 0);
         const floorTournaments = Number(totalsRow?.floor_tournaments ?? 0);
@@ -422,6 +588,21 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
             updatedAt: t.updated_at,
           })),
           timestampsAreUtc: true,
+          distribution: {
+            githubLatestTag: github.latestTag,
+            githubDownloadsLatest: github.latestDownloads,
+            githubDownloadsRecent: github.recentDownloads,
+            githubAssets: github.assets,
+            siteDownloadClicks7d: Number(distTotals?.clicks7d ?? 0),
+            siteDownloadClicks30d: Number(distTotals?.clicks30d ?? 0),
+            desktopLaunches7d: Number(distTotals?.launches7d ?? 0),
+            uniqueInstalls30d: Number(distTotals?.unique30d ?? 0),
+            byOs7d: countMap(byOs),
+            byArch7d: countMap(byArch),
+            byCountry7d: countMap(byCountry),
+            byAsset7d: countMap(byAsset),
+            byTimezone7d: countMap(byTimezone),
+          },
         };
 
         return overview;

@@ -1,7 +1,9 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import AuthShell from '../components/AuthShell';
+import BootIssueCard from '../components/BootIssueCard';
+import { trackPageView } from '../lib/pageAnalytics';
 
 type Tab = 'password' | 'otp';
 
@@ -16,6 +18,10 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    trackPageView({ routeKey: 'login', path: '/login' });
+  }, []);
 
   if (!auth.loading && auth.user) return <Navigate to="/app" replace />;
 
@@ -54,6 +60,7 @@ export default function LoginPage() {
 
   return (
     <AuthShell title="Sign in" subtitle="Manage your tournaments on any device">
+      <BootIssueCard />
       {!auth.configured && (
         <div className="form-error">
           Auth is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
