@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./bbp": {
+      "types": "./src/dutch/bbp.ts",
+      "default": "./src/dutch/bbp.ts"
     }
   },
   "scripts": {

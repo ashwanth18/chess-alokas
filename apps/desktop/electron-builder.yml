@@ -25,6 +25,9 @@ publish:
   repo: chess-alokas
   releaseType: release
 win:
+  extraResources:
+    - from: ../../vendor/bbp-pairings/win-x64/bbpPairings.exe
+      to: bbp-pairings/bbpPairings.exe
   # Unsigned CI builds: keep rcedit metadata, skip Authenticode (no cert on runners).
   signExecutable: false
   target:
@@ -47,6 +50,9 @@ nsis:
 portable:
   artifactName: Chess-Alokas-Portable-${os}-${arch}.${ext}
 linux:
+  extraResources:
+    - from: ../../vendor/bbp-pairings/linux-x64/bbpPairings.exe
+      to: bbp-pairings/bbpPairings.exe
   target:
     - target: AppImage
       arch:

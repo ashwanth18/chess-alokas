@@ -396,6 +396,15 @@ describe('pairRound registry', () => {
     expect(out.boards.length).toBeGreaterThan(0);
   });
 
+  it('supports dutch', () => {
+    const out = pairRound('dutch', {
+      players: players(4),
+      pastGames: [],
+      round: 1,
+    });
+    expect(out.boards.length).toBeGreaterThan(0);
+  });
+
   it('rejects round_robin', () => {
     expect(() =>
       pairRound('round_robin', {

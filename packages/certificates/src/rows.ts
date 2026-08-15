@@ -36,6 +36,7 @@ export function participantToRow(
     rating: p.rating ?? '',
     club: p.club ?? '',
     email: p.email ?? '',
+    serial: extras.serial ?? '',
     ...extras,
   };
 }
@@ -57,6 +58,7 @@ export function winnerToRow(
     score: s.score,
     rating: s.rating ?? '',
     place: ordinal(s.rank),
+    serial: extras.serial ?? '',
     ...extras,
   };
 }
@@ -79,6 +81,7 @@ export function ordinal(n: number): string {
 /** Collect unique column keys from rows for the designer palette. */
 export function collectColumns(rows: CertificateRow[]): string[] {
   const keys = new Set<string>();
+  if (rows.length > 0) keys.add('serial');
   for (const row of rows) {
     for (const k of Object.keys(row)) keys.add(k);
   }

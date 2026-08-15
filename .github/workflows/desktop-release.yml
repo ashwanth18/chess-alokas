@@ -85,6 +85,10 @@ jobs:
           done
           exit 1
 
+      - name: Fetch bbpPairings v6
+        if: matrix.platform != 'mac'
+        run: node scripts/fetch-bbp-pairings.mjs
+
       - name: Build desktop (web + api + electron)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

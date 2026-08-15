@@ -48,6 +48,10 @@ export interface DesktopBridge {
   }) => void;
   openLogsFolder: () => Promise<void>;
   onUpdateStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void;
+  pairDutch: (input: unknown) => Promise<{
+    boards: Array<{ board: number; whiteId: string | null; blackId: string | null; isBye: boolean }>;
+    byePlayerId: string | null;
+  }>;
 }
 
 const apiBaseUrl = ipcRenderer.sendSync('desktop:get-api-base-url') as string;
@@ -77,6 +81,7 @@ const bridge: DesktopBridge = {
     ipcRenderer.send('desktop:report-boot-issue', issue);
   },
   openLogsFolder: () => ipcRenderer.invoke('desktop:open-logs-folder') as Promise<void>,
+  pairDutch: (input) => ipcRenderer.invoke('desktop:pair-dutch', input),
   onUpdateStatus: (listener) => {
     const handler = (_event: IpcRendererEvent, status: DesktopUpdateStatus) => listener(status);
     ipcRenderer.on('desktop:update-status', handler);

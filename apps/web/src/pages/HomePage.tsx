@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { softDeleteTournament } from '../lib/deleteTournament';
 import TableSearch from '../components/TableSearch';
 import { matchesTextSearch } from '../lib/textSearch';
+import { styleLabel } from '@chess-alokas/pairing-engine';
 
 const PAGE_SIZE = 10;
 
@@ -47,7 +48,7 @@ export default function HomePage() {
         search,
         t.name,
         t.style,
-        t.style === 'swiss' ? 'FIDE Swiss' : t.style,
+        styleLabel(t.style),
         t.status,
         deriveListStatus(t),
         t.date,
@@ -163,7 +164,7 @@ export default function HomePage() {
                         <div className="tournament-card-main">
                           <span className="tournament-name">{t.name}</span>
                           <div className="tournament-meta">
-                            <span>{t.style === 'swiss' ? 'FIDE Swiss' : t.style}</span>
+                            <span>{styleLabel(t.style)}</span>
                             <span>{t.rounds} rounds</span>
                             {t.date && <span>{new Date(t.date).toLocaleDateString()}</span>}
                           </div>

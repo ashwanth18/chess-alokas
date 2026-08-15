@@ -1,5 +1,5 @@
 import postgres, { type Sql } from 'postgres';
-import type {
+import {
   Tournament,
   TournamentTable,
   Category,
@@ -12,6 +12,10 @@ import type {
   TournamentStyle,
   TournamentStatus,
   GameResult,
+  certificateYear,
+  DEFAULT_CERT_SERIAL_PAD,
+  DEFAULT_CERT_SERIAL_PREFIX,
+  formatCertificateSerial,
 } from '@chess-alokas/shared';
 import { generateTableSlug } from './floor/pin.js';
 
@@ -87,6 +91,9 @@ export interface Store {
     tableNumber: number,
     round: number,
   ): Promise<Game | null>;
+
+  /** Atomically reserve the next N certificate serials for this tournament. */
+  allocateCertificateSerials(tournamentId: string, count: number): Promise<string[]>;
 
   // Discipline cards (yellow/red)
   listGameCards(gameId: string, includeDeleted?: boolean): Promise<GameCard[]>;
@@ -404,6 +411,22 @@ export class MemoryStore implements Store {
     return matches[0]!;
   }
 
+  async allocateCertificateSerials(tournamentId: string, count: number): Promise<string[]> {
+    const n = Math.max(0, Math.floor(count));
+    if (n === 0) return [];
+    const t = this.tournaments.get(tournamentId);
+    if (!t) return [];
+    const start = t.certSerialNext ?? 1;
+    const prefix = t.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX;
+    const pad = t.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD;
+    const year = certificateYear(t.date);
+    const serials = Array.from({ length: n }, (_, i) =>
+      formatCertificateSerial(prefix, start + i, pad, year),
+    );
+    this.tournaments.set(tournamentId, { ...t, certSerialNext: start + n });
+    return serials;
+  }
+
   async listGameCards(gameId: string, includeDeleted = false): Promise<GameCard[]> {
     return [...this.gameCards.values()]
       .filter((c) => c.gameId === gameId && (includeDeleted || !c.deletedAt))
@@ -538,6 +561,17 @@ export class MemoryStore implements Store {
         tableCount: Number(payload['tableCount'] ?? 0),
         publicToken: null,
         publicEnabled: false,
+        certEmailSubject: (payload['certEmailSubject'] as string | null | undefined) ?? null,
+        certEmailBody: (payload['certEmailBody'] as string | null | undefined) ?? null,
+        certSerialPrefix:
+          (payload['certSerialPrefix'] as string | null | undefined) ||
+          DEFAULT_CERT_SERIAL_PREFIX,
+        certSerialPad:
+          payload['certSerialPad'] == null
+            ? DEFAULT_CERT_SERIAL_PAD
+            : Number(payload['certSerialPad']),
+        certSerialNext:
+          payload['certSerialNext'] == null ? 1 : Number(payload['certSerialNext']),
         clientId: (payload['clientId'] as string | undefined) ?? undefined,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
@@ -547,6 +581,7 @@ export class MemoryStore implements Store {
       if (prev) {
         t.publicToken = prev.publicToken ?? null;
         t.publicEnabled = prev.publicEnabled ?? false;
+        t.certSerialNext = Math.max(prev.certSerialNext ?? 1, t.certSerialNext ?? 1);
       }
       applyIfNewer(this.tournaments, t);
     } else if (entity === 'category') {
@@ -582,6 +617,13 @@ export class MemoryStore implements Store {
         customFields: (payload['customFields'] as Record<string, unknown>) ?? {},
         categoryIds: (payload['categoryIds'] as string[]) ?? [],
         seed: payload['seed'] != null ? Number(payload['seed']) : undefined,
+        excludedRounds: Array.isArray(payload['excludedRounds'])
+          ? (payload['excludedRounds'] as number[])
+          : [],
+        withdrawnFromRound:
+          payload['withdrawnFromRound'] != null
+            ? Number(payload['withdrawnFromRound'])
+            : null,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
       };
@@ -635,6 +677,11 @@ interface TournamentRow {
   table_count: number | null;
   public_token: string | null;
   public_enabled: boolean | null;
+  cert_email_subject: string | null;
+  cert_email_body: string | null;
+  cert_serial_prefix: string | null;
+  cert_serial_pad: number | null;
+  cert_serial_next: number | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
@@ -677,6 +724,8 @@ interface ParticipantRow {
   custom_fields: Record<string, unknown>;
   category_ids: string[];
   seed: number | null;
+  excluded_rounds: number[] | null;
+  withdrawn_from_round: number | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
 }
@@ -744,6 +793,11 @@ function rowToTournament(row: TournamentRow): Tournament {
     tableCount: row.table_count ?? 0,
     publicToken: row.public_token ?? null,
     publicEnabled: row.public_enabled ?? false,
+    certEmailSubject: row.cert_email_subject ?? null,
+    certEmailBody: row.cert_email_body ?? null,
+    certSerialPrefix: row.cert_serial_prefix ?? DEFAULT_CERT_SERIAL_PREFIX,
+    certSerialPad: row.cert_serial_pad ?? DEFAULT_CERT_SERIAL_PAD,
+    certSerialNext: row.cert_serial_next ?? 1,
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
@@ -795,9 +849,25 @@ function rowToParticipant(row: ParticipantRow): Participant {
     customFields: row.custom_fields ?? {},
     categoryIds: row.category_ids ?? [],
     seed: row.seed ?? undefined,
+    excludedRounds: row.excluded_rounds ?? [],
+    withdrawnFromRound: row.withdrawn_from_round ?? null,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
   };
+}
+
+function exclusionFields(p: {
+  excludedRounds?: number[] | null;
+  withdrawnFromRound?: number | null;
+}): { excluded: number[]; withdrawn: number | null } {
+  const excluded = Array.isArray(p.excludedRounds)
+    ? p.excludedRounds.filter((n) => Number.isInteger(n) && n > 0)
+    : [];
+  const withdrawn =
+    p.withdrawnFromRound != null && Number(p.withdrawnFromRound) > 0
+      ? Number(p.withdrawnFromRound)
+      : null;
+  return { excluded, withdrawn };
 }
 
 function rowToGame(row: GameRow): Game {
@@ -901,11 +971,16 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, public_token, public_enabled, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, public_token, public_enabled, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
               ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
               ${t.tiebreakOrder ? this.j(t.tiebreakOrder) : null}, ${t.sharedPlaces ?? true},
-              ${t.ownerId ?? null}, ${t.publicToken ?? null}, ${t.publicEnabled ?? false}, ${t.clientId ?? null},
+              ${t.ownerId ?? null}, ${t.publicToken ?? null}, ${t.publicEnabled ?? false},
+              ${t.certEmailSubject ?? null}, ${t.certEmailBody ?? null},
+              ${t.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX},
+              ${t.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD},
+              ${t.certSerialNext ?? 1},
+              ${t.clientId ?? null},
               ${t.updatedAt}, ${t.deletedAt ?? null})
       RETURNING *
     `;
@@ -932,6 +1007,11 @@ export class PostgresStore implements Store {
         owner_id = ${m.ownerId ?? null},
         public_token = ${m.publicToken ?? null},
         public_enabled = ${m.publicEnabled ?? false},
+        cert_email_subject = ${m.certEmailSubject ?? null},
+        cert_email_body = ${m.certEmailBody ?? null},
+        cert_serial_prefix = ${m.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX},
+        cert_serial_pad = ${m.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD},
+        cert_serial_next = GREATEST(cert_serial_next, ${m.certSerialNext ?? 1}),
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
         deleted_at = ${m.deletedAt ?? null},
         completed_at = CASE
@@ -1009,16 +1089,19 @@ export class PostgresStore implements Store {
   }
 
   async createParticipant(p: Participant): Promise<Participant> {
+    const { excluded, withdrawn } = exclusionFields(p);
     const rows = await this.sql<ParticipantRow[]>`
       INSERT INTO participants
         (id, tournament_id, name, age, gender, rating, fide_id, club, school, city, state, country,
-         year_of_birth, email, custom_fields, category_ids, seed, updated_at, deleted_at)
+         year_of_birth, email, custom_fields, category_ids, seed, excluded_rounds, withdrawn_from_round,
+         updated_at, deleted_at)
       VALUES
         (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
          ${p.rating ?? null}, ${p.fideId ?? null}, ${p.club ?? null}, ${p.school ?? null}, ${p.city ?? null},
          ${p.state ?? null}, ${p.country ?? null}, ${p.yearOfBirth ?? null},
          ${p.email ?? null}, ${this.j(p.customFields)},
-           ${p.categoryIds}, ${p.seed ?? null}, ${p.updatedAt}, ${p.deletedAt ?? null})
+           ${p.categoryIds}, ${p.seed ?? null}, ${excluded}, ${withdrawn},
+           ${p.updatedAt}, ${p.deletedAt ?? null})
       RETURNING *
     `;
     return rowToParticipant(rows[0]!);
@@ -1028,23 +1111,28 @@ export class PostgresStore implements Store {
     if (participants.length === 0) return [];
     const results: Participant[] = [];
     for (const p of participants) {
+      const { excluded, withdrawn } = exclusionFields(p);
       const rows = await this.sql<ParticipantRow[]>`
         INSERT INTO participants
           (id, tournament_id, name, age, gender, rating, fide_id, club, school, city, state, country,
-           year_of_birth, email, custom_fields, category_ids, seed, updated_at, deleted_at)
+           year_of_birth, email, custom_fields, category_ids, seed, excluded_rounds, withdrawn_from_round,
+           updated_at, deleted_at)
         VALUES
           (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
            ${p.rating ?? null}, ${p.fideId ?? null}, ${p.club ?? null}, ${p.school ?? null}, ${p.city ?? null},
            ${p.state ?? null}, ${p.country ?? null}, ${p.yearOfBirth ?? null},
            ${p.email ?? null}, ${this.j(p.customFields)},
-           ${p.categoryIds}, ${p.seed ?? null}, ${p.updatedAt}, ${p.deletedAt ?? null})
+           ${p.categoryIds}, ${p.seed ?? null}, ${excluded}, ${withdrawn},
+           ${p.updatedAt}, ${p.deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, age = EXCLUDED.age, gender = EXCLUDED.gender,
           rating = EXCLUDED.rating, fide_id = EXCLUDED.fide_id, club = EXCLUDED.club, school = EXCLUDED.school,
           city = EXCLUDED.city, state = EXCLUDED.state, country = EXCLUDED.country,
           year_of_birth = EXCLUDED.year_of_birth, email = EXCLUDED.email,
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
-          seed = EXCLUDED.seed, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
+          seed = EXCLUDED.seed, excluded_rounds = EXCLUDED.excluded_rounds,
+          withdrawn_from_round = EXCLUDED.withdrawn_from_round,
+          updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
         RETURNING *
       `;
@@ -1262,6 +1350,37 @@ export class PostgresStore implements Store {
     return rowToGame(rows[0]!);
   }
 
+  async allocateCertificateSerials(tournamentId: string, count: number): Promise<string[]> {
+    const n = Math.max(0, Math.floor(count));
+    if (n === 0) return [];
+    const rows = await this.sql<
+      {
+        start_seq: number;
+        cert_serial_prefix: string | null;
+        cert_serial_pad: number | null;
+        date: string | null;
+      }[]
+    >`
+      UPDATE tournaments
+      SET cert_serial_next = cert_serial_next + ${n}
+      WHERE id = ${tournamentId} AND deleted_at IS NULL
+      RETURNING
+        (cert_serial_next - ${n}) AS start_seq,
+        cert_serial_prefix,
+        cert_serial_pad,
+        date
+    `;
+    const row = rows[0];
+    if (!row) return [];
+    const prefix = row.cert_serial_prefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX;
+    const pad = row.cert_serial_pad ?? DEFAULT_CERT_SERIAL_PAD;
+    const year = certificateYear(row.date);
+    const start = Number(row.start_seq) || 1;
+    return Array.from({ length: n }, (_, i) =>
+      formatCertificateSerial(prefix, start + i, pad, year),
+    );
+  }
+
   async listGameCards(gameId: string, includeDeleted = false): Promise<GameCard[]> {
     const rows = includeDeleted
       ? await this.sql<GameCardRow[]>`
@@ -1431,8 +1550,15 @@ export class PostgresStore implements Store {
     }
 
     if (entity === 'tournament') {
+      const certPrefix =
+        String(p['certSerialPrefix'] ?? '').trim() || DEFAULT_CERT_SERIAL_PREFIX;
+      const certPad = Math.min(
+        8,
+        Math.max(1, Number(p['certSerialPad'] ?? DEFAULT_CERT_SERIAL_PAD) || DEFAULT_CERT_SERIAL_PAD),
+      );
+      const certNext = Math.max(1, Number(p['certSerialNext'] ?? 1) || 1);
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
@@ -1443,6 +1569,9 @@ export class PostgresStore implements Store {
                 ${p['tiebreakOrder'] ? this.j(p['tiebreakOrder']) : null},
                 ${p['sharedPlaces'] == null ? true : Boolean(p['sharedPlaces'])},
                 ${(p['ownerId'] as string) ?? null},
+                ${(p['certEmailSubject'] as string) ?? null},
+                ${(p['certEmailBody'] as string) ?? null},
+                ${certPrefix}, ${certPad}, ${certNext},
                 ${(p['clientId'] as string) ?? null}, ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, date = EXCLUDED.date, style = EXCLUDED.style,
@@ -1455,6 +1584,11 @@ export class PostgresStore implements Store {
           tiebreak_order = EXCLUDED.tiebreak_order,
           shared_places = EXCLUDED.shared_places,
           owner_id = COALESCE(EXCLUDED.owner_id, tournaments.owner_id),
+          cert_email_subject = EXCLUDED.cert_email_subject,
+          cert_email_body = EXCLUDED.cert_email_body,
+          cert_serial_prefix = EXCLUDED.cert_serial_prefix,
+          cert_serial_pad = EXCLUDED.cert_serial_pad,
+          cert_serial_next = GREATEST(tournaments.cert_serial_next, EXCLUDED.cert_serial_next),
           client_id = EXCLUDED.client_id,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at,
           completed_at = CASE
@@ -1483,10 +1617,15 @@ export class PostgresStore implements Store {
     } else if (entity === 'participant') {
       const customFields = (p['customFields'] as Record<string, unknown>) ?? {};
       const categoryIds = (p['categoryIds'] as string[]) ?? [];
+      const { excluded, withdrawn } = exclusionFields({
+        excludedRounds: p['excludedRounds'] as number[] | null | undefined,
+        withdrawnFromRound: p['withdrawnFromRound'] as number | null | undefined,
+      });
       await this.sql`
         INSERT INTO participants
           (id, tournament_id, name, age, gender, rating, fide_id, club, school, city, state, country,
-           year_of_birth, email, custom_fields, category_ids, seed, updated_at, deleted_at)
+           year_of_birth, email, custom_fields, category_ids, seed, excluded_rounds, withdrawn_from_round,
+           updated_at, deleted_at)
         VALUES
           (${id}, ${String(p['tournamentId'] ?? '')}, ${String(p['name'] ?? '')},
            ${Number(p['age'] ?? 0)}, ${(p['gender'] as string) ?? null},
@@ -1498,6 +1637,7 @@ export class PostgresStore implements Store {
            ${p['yearOfBirth'] != null ? Number(p['yearOfBirth']) : null},
            ${(p['email'] as string) ?? null}, ${this.j(customFields)},
            ${categoryIds}, ${p['seed'] != null ? Number(p['seed']) : null},
+           ${excluded}, ${withdrawn},
            ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           tournament_id = EXCLUDED.tournament_id, name = EXCLUDED.name, age = EXCLUDED.age,
@@ -1507,7 +1647,9 @@ export class PostgresStore implements Store {
           country = EXCLUDED.country, year_of_birth = EXCLUDED.year_of_birth,
           email = EXCLUDED.email,
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
-          seed = EXCLUDED.seed, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
+          seed = EXCLUDED.seed, excluded_rounds = EXCLUDED.excluded_rounds,
+          withdrawn_from_round = EXCLUDED.withdrawn_from_round,
+          updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
       `;
     } else if (entity === 'game') {

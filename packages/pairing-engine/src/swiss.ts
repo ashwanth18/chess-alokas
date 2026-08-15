@@ -29,6 +29,10 @@ export interface PairingInput {
   players: EnginePlayer[];
   pastGames: PastGame[];
   round: number;
+  /** Known tournament length; required for Dutch topscorer (A.7 / 1.8). */
+  totalRounds?: number;
+  /** Colour drawn for odd pairing numbers in round 1 (Dutch E.5). Default White. */
+  initialColor?: 'W' | 'B';
 }
 
 export interface PairingOutput {

@@ -1,4 +1,5 @@
 import type { LocalGame, LocalParticipant } from '../db/local';
+import { isExcludedFromRound } from '@chess-alokas/shared';
 
 export interface CategoryLike {
   id: string;
@@ -117,10 +118,15 @@ export function estimateFloorTables(
   tournament: TournamentLike,
   categories: CategoryLike[] | null | undefined,
   participants: LocalParticipant[] | null | undefined,
+  forRound?: number,
 ): FloorTableEstimate {
   const mix = isMixedTournament(tournament);
   const cats = asList(categories).filter((c) => !c.deletedAt);
-  const players = asList(participants).filter((p) => !p.deletedAt);
+  const players = asList(participants).filter((p) => {
+    if (p.deletedAt) return false;
+    if (forRound != null && isExcludedFromRound(p, forRound)) return false;
+    return true;
+  });
   const totalPlayers = players.length;
 
   if (mix || cats.length === 0) {
@@ -150,8 +156,9 @@ export function estimateFloorTableCount(
   tournament: TournamentLike,
   categories: CategoryLike[] | null | undefined,
   participants: LocalParticipant[] | null | undefined,
+  forRound?: number,
 ): number {
-  return estimateFloorTables(tournament, categories, participants).tableCount;
+  return estimateFloorTables(tournament, categories, participants, forRound).tableCount;
 }
 
 /** Friendly step-by-step guide for what to do next (replaces raw completion blocker dumps). */
@@ -179,13 +186,18 @@ export function getTournamentInstructions(
     caps.stage === 'in_progress' ||
     caps.stage === 'completed';
   const qrReady = floorTableCount > 0;
-  const estimatedTables = estimateFloorTableCount(tournament, cats, players);
   const nextRound = getNextPairingRound(
     tournament.rounds,
     cats,
     players,
     activeGames,
     mix,
+  );
+  const estimatedTables = estimateFloorTableCount(
+    tournament,
+    cats,
+    players,
+    nextRound ?? 1,
   );
   const instructions: TournamentInstruction[] = [];
 

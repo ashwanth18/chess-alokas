@@ -2,23 +2,30 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
-  pairRound,
+  styleLabel,
   computeStandings,
   computeSectionStandings,
   assignStartRanks,
   computeStartRankMap,
   sortRoster,
+  planAbsentAfterPairing,
 } from '@chess-alokas/pairing-engine';
+import { pairRoundForUi } from '../lib/officialPairing';
 import { displaySchool, displayYearOfBirth } from '../lib/importParse';
-import type { FilterGroup, FilterOp, GameCardType, GameResult, TiebreakKey } from '@chess-alokas/shared';
+import type { FilterGroup, FilterOp, GameCardType, GameResult, TiebreakKey, TournamentStyle } from '@chess-alokas/shared';
 import {
   ILLEGAL_MOVE_LIMIT,
   WARNING_LIMIT,
   countCardsForPlayer,
   emptyCardCounts,
+  exclusionStatus,
+  isExcludedFromRound,
   normalizeTiebreakOrder,
+  withAbsentThisRound,
+  withReactivatedFrom,
+  withWithdrawFrom,
 } from '@chess-alokas/shared';
-import { db, nowIso } from '../db/local';
+import { db, nowIso, type LocalParticipant } from '../db/local';
 import ColorSide from '../components/ColorSide';
 import {
   effectiveTournamentStatus,
@@ -142,9 +149,9 @@ function ResultSelector({
     { value: '1-0', label: '1-0' },
     { value: '0-1', label: '0-1' },
     { value: '1/2-1/2', label: '½' },
-    { value: '1-0F', label: '1-0F' },
-    { value: '0-1F', label: '0-1F' },
-    { value: '0-0', label: '0-0' },
+    { value: '1-0F', label: 'Black abs.' },
+    { value: '0-1F', label: 'White abs.' },
+    { value: '0-0', label: 'Both abs.' },
   ];
   return (
     <div className="result-selector">
@@ -154,7 +161,15 @@ function ResultSelector({
           type="button"
           className={`result-btn ${value === opt.value ? 'active' : ''}`}
           onClick={() => onChange(opt.value)}
-          title={opt.value}
+          title={
+            opt.value === '1-0F'
+              ? 'Black absent — White wins'
+              : opt.value === '0-1F'
+                ? 'White absent — Black wins'
+                : opt.value === '0-0'
+                  ? 'Both absent'
+                  : opt.value
+          }
         >
           {opt.label}
         </button>
@@ -290,6 +305,7 @@ export default function TournamentPage() {
     tournament && categories && participants && games
       ? getNextPairingRound(maxRounds, categories, participants, games, mix)
       : null;
+  const absenceRound = nextPairingRound ?? Math.max(tournament?.currentRound ?? 1, 1);
 
   const caps =
     tournament && categories && participants && games
@@ -298,7 +314,12 @@ export default function TournamentPage() {
   const categoryNames = Object.fromEntries((categories ?? []).map((c) => [c.id, c.name]));
   const floorEstimate =
     tournament && categories && participants
-      ? estimateFloorTables(tournament, categories, participants)
+      ? estimateFloorTables(
+          tournament,
+          categories,
+          participants,
+          nextPairingRound ?? 1,
+        )
       : null;
   const estimatedTables =
     floorEstimate?.tableCount ??
@@ -774,7 +795,7 @@ export default function TournamentPage() {
   }
 
   async function generatePairings() {
-    if (!id || !participants || !caps?.canPair) {
+    if (!id || !tournament || !participants || !caps?.canPair) {
       if (caps?.pendingResultsRound != null) {
         setPairError(
           `Enter all results for Round ${caps.pendingResultsRound} before generating Round ${nextPairingRound ?? '—'}.`,
@@ -855,7 +876,14 @@ export default function TournamentPage() {
           return;
         }
 
-        const enginePlayers = participants.map((p) => ({
+        const available = participants.filter((p) => !isExcludedFromRound(p, round));
+        if (available.length === 0) {
+          setPairError(`No players available for Round ${round}. Clear absences first.`);
+          setPairing(false);
+          return;
+        }
+
+        const enginePlayers = available.map((p) => ({
           id: p.id,
           name: p.name,
           rating: p.rating ?? undefined,
@@ -868,7 +896,12 @@ export default function TournamentPage() {
           result: g.result as GameResult,
           isBye: g.isBye,
         }));
-        const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
+        const { boards } = await pairRoundForUi(tournament.style as TournamentStyle, {
+          players: enginePlayers,
+          pastGames,
+          round,
+          totalRounds: tournament.rounds,
+        });
         const poolId = await ensurePoolCategoryId(id, categories);
 
         for (const board of boards) {
@@ -890,8 +923,10 @@ export default function TournamentPage() {
       } else {
         const catsToPair = (categories ?? []).filter((cat) => {
           if (cat.deletedAt) return false;
-          const count = participants.filter((p) => p.categoryIds?.includes(cat.id)).length;
-          if (count < 2) return false;
+          const count = participants.filter(
+            (p) => p.categoryIds?.includes(cat.id) && !isExcludedFromRound(p, round),
+          ).length;
+          if (count < 1) return false;
           return !(games ?? []).some(
             (g) => !g.deletedAt && g.categoryId === cat.id && g.round === round,
           );
@@ -910,9 +945,10 @@ export default function TournamentPage() {
 
         for (const cat of catsToPair) {
           const catId = cat.id;
-          const relevantParticipants = participants.filter((p) =>
-            p.categoryIds?.includes(catId),
+          const relevantParticipants = participants.filter(
+            (p) => p.categoryIds?.includes(catId) && !isExcludedFromRound(p, round),
           );
+          if (relevantParticipants.length === 0) continue;
           const pastGamesForCat = (games ?? []).filter((g) => g.categoryId === catId);
           const enginePlayers = relevantParticipants.map((p) => ({
             id: p.id,
@@ -927,7 +963,12 @@ export default function TournamentPage() {
             result: g.result as GameResult,
             isBye: g.isBye,
           }));
-          const { boards } = pairRound('swiss', { players: enginePlayers, pastGames, round });
+          const { boards } = await pairRoundForUi(tournament.style as TournamentStyle, {
+            players: enginePlayers,
+            pastGames,
+            round,
+            totalRounds: tournament.rounds,
+          });
 
           let catMax = 0;
           for (const board of boards) {
@@ -1065,6 +1106,105 @@ export default function TournamentPage() {
       void applyDirectorResult(gameId, result, false);
     },
     [id, tournament, games, applyDirectorResult],
+  );
+
+  const persistAvailability = useCallback(
+    async (player: LocalParticipant, patch: Pick<LocalParticipant, 'excludedRounds' | 'withdrawnFromRound'>) => {
+      await db.participants.update(player.id, {
+        excludedRounds: patch.excludedRounds ?? [],
+        withdrawnFromRound: patch.withdrawnFromRound ?? null,
+        updatedAt: nowIso(),
+        dirty: 1,
+      });
+      void syncOnline().catch(() => {
+        /* local write already applied */
+      });
+    },
+    [],
+  );
+
+  const applyUnpairPlan = useCallback(
+    async (player: LocalParticipant, round: number) => {
+      const plan = planAbsentAfterPairing(games ?? [], round, player.id);
+      const now = nowIso();
+      if (plan.kind === 'blocked') {
+        setPairError(plan.reason);
+        return false;
+      }
+      if (plan.kind === 'already_unpaired') return true;
+      if (plan.kind === 'forfeit') {
+        requestGameResult(plan.gameId, plan.result);
+        return true;
+      }
+      if (plan.kind === 'remove_bye') {
+        await db.games.update(plan.gameId, { deletedAt: now, updatedAt: now, dirty: 1 });
+        void syncOnline().catch(() => undefined);
+        return true;
+      }
+      if (plan.kind === 'unpair_to_bye') {
+        const opponent = (participants ?? []).find((p) => p.id === plan.opponentId);
+        const ok = window.confirm(
+          `${player.name} will be unpaired for Round ${round}. ${opponent?.name ?? 'Opponent'} gets a pairing bye (1 pt). Other tables stay the same.`,
+        );
+        if (!ok) return false;
+        await db.games.update(plan.gameId, {
+          whiteId: plan.opponentId,
+          blackId: null,
+          isBye: true,
+          result: 'bye',
+          updatedAt: now,
+          dirty: 1,
+        });
+        void syncOnline().catch(() => undefined);
+        return true;
+      }
+      return true;
+    },
+    [games, participants, requestGameResult],
+  );
+
+  const markAbsentThisRound = useCallback(
+    async (player: LocalParticipant, round: number) => {
+      const roundPaired = (games ?? []).some((g) => !g.deletedAt && g.round === round);
+      if (roundPaired) {
+        if (!tournament || !canEditRoundResults(tournament, round)) {
+          setPairError(`Round ${round} is locked. Undo confirm to change absences.`);
+          return;
+        }
+        const applied = await applyUnpairPlan(player, round);
+        if (!applied) return;
+      }
+      await persistAvailability(player, withAbsentThisRound(player, round));
+    },
+    [tournament, games, applyUnpairPlan, persistAvailability],
+  );
+
+  const withdrawPlayer = useCallback(
+    async (player: LocalParticipant, fromRound: number) => {
+      const ok = window.confirm(
+        `Withdraw ${player.name} from Round ${fromRound} onward? They will not be paired again unless you reactivate them.`,
+      );
+      if (!ok) return;
+      const roundPaired = (games ?? []).some((g) => !g.deletedAt && g.round === fromRound);
+      if (roundPaired) {
+        if (!tournament || !canEditRoundResults(tournament, fromRound)) {
+          setPairError(`Round ${fromRound} is locked. Undo confirm to change absences.`);
+          return;
+        }
+        const applied = await applyUnpairPlan(player, fromRound);
+        if (!applied) return;
+      }
+      await persistAvailability(player, withWithdrawFrom(player, fromRound));
+    },
+    [tournament, games, applyUnpairPlan, persistAvailability],
+  );
+
+  const reactivatePlayer = useCallback(
+    async (player: LocalParticipant, fromRound: number) => {
+      const next = withReactivatedFrom(player, fromRound);
+      await persistAvailability(player, next);
+    },
+    [persistAvailability],
   );
 
   const issueDirectorCard = useCallback(
@@ -1289,7 +1429,7 @@ export default function TournamentPage() {
         <div>
           <h1>{tournament.name}</h1>
           <div className="tournament-meta">
-            <span>{tournament.style === 'swiss' ? 'FIDE Swiss' : tournament.style}</span>
+            <span>{styleLabel(tournament.style)}</span>
             <span>{tournament.rounds} rounds</span>
             <span>{mix ? 'Mixed pairing' : 'Separate categories'}</span>
             {tournament.date && <span>{new Date(tournament.date).toLocaleDateString()}</span>}
@@ -1356,6 +1496,7 @@ export default function TournamentPage() {
                 Close
               </button>
             </div>
+            <div className="settings-modal-body">
             <dl className="settings-list">
               <div className="settings-row">
                 <dt>Name</dt>
@@ -1378,7 +1519,7 @@ export default function TournamentPage() {
               </div>
               <div className="settings-row">
                 <dt>Pairing style</dt>
-                <dd>{tournament.style === 'swiss' ? 'FIDE Swiss' : tournament.style}</dd>
+                <dd>{styleLabel(tournament.style)}</dd>
               </div>
               <div className="settings-row">
                 <dt>Rounds</dt>
@@ -1515,6 +1656,7 @@ export default function TournamentPage() {
               )}
               {liveMsg && <p className="form-hint">{liveMsg}</p>}
             </div>
+            </div>
           </div>
         </div>
       )}
@@ -1528,8 +1670,10 @@ export default function TournamentPage() {
       )}
       {caps?.importRequiresLateWarning && caps.canImport && (
         <p className="stage-banner stage-banner-warn">
-          Event is live. New players can still be added as late entries, but they won’t appear
-          in past rounds.
+          Event is live. Late entries are appended only — they start at 0 points and join the
+          next unpaired round, not finished rounds. Mark a player absent before pairing to leave
+          them out of that round (0 points). After pairings exist, absent is a forfeit on that
+          board unless no results have been entered yet, in which case the opponent gets a bye.
         </p>
       )}
       {instructionSteps.length > 0 && (
@@ -1623,6 +1767,13 @@ export default function TournamentPage() {
               totalCount={participants?.length}
             />
           )}
+          {caps?.stage !== 'completed' && (participants?.length ?? 0) > 0 && (
+            <p className="form-hint">
+              Absent Round {absenceRound}: not paired, 0 points, returns next round. Withdraw:
+              skip this round and every later round. After pairings exist with no results, the
+              opponent gets a bye; if any result is in, the board is scored as a forfeit.
+            </p>
+          )}
           {(!participants || participants.length === 0) ? (
             <div className="empty-state">
               <span className="empty-icon">♟</span>
@@ -1646,6 +1797,8 @@ export default function TournamentPage() {
                   <th>FIDE</th>
                   <th>Age category</th>
                   <th>School</th>
+                  <th>Round {absenceRound}</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -1653,9 +1806,17 @@ export default function TournamentPage() {
                   const startRank = startRankById.get(p.id) ?? p.seed ?? '—';
                   const ageCategory =
                     (p.categoryIds ?? [])
-                      .map((id) => categoryNames[id])
+                      .map((cid) => categoryNames[cid])
                       .filter(Boolean)
                       .join(', ') || '—';
+                  const status = exclusionStatus(p, absenceRound);
+                  const roundPaired = (games ?? []).some(
+                    (g) => !g.deletedAt && g.round === absenceRound,
+                  );
+                  const canChangeAbsence =
+                    caps?.stage !== 'completed' &&
+                    (!roundPaired ||
+                      Boolean(tournament && canEditRoundResults(tournament, absenceRound)));
                   return (
                   <tr key={p.id}>
                     <td>{startRank}</td>
@@ -1669,6 +1830,47 @@ export default function TournamentPage() {
                     </td>
                     <td>{ageCategory}</td>
                     <td>{displaySchool(p) ?? '—'}</td>
+                    <td>
+                      {status === 'withdrawn' ? (
+                        <span className="status-pill status-pill-out">Withdrawn</span>
+                      ) : status === 'absent' ? (
+                        <span className="status-pill status-pill-absent">Absent</span>
+                      ) : (
+                        <span className="status-pill">Playing</span>
+                      )}
+                    </td>
+                    <td>
+                      {canChangeAbsence && (
+                        <div className="player-row-actions">
+                          {status === 'playing' ? (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-ghost"
+                                onClick={() => void markAbsentThisRound(p, absenceRound)}
+                              >
+                                Absent R{absenceRound}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-ghost"
+                                onClick={() => void withdrawPlayer(p, absenceRound)}
+                              >
+                                Withdraw
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline"
+                              onClick={() => void reactivatePlayer(p, absenceRound)}
+                            >
+                              Reactivate
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                   );
                 })}
@@ -2026,6 +2228,22 @@ export default function TournamentPage() {
 
           {pairError && <div className="form-error">{pairError}</div>}
 
+          {(participants ?? []).some(
+            (p) => !p.deletedAt && isExcludedFromRound(p, displayRound),
+          ) && (
+            <p className="form-hint">
+              Not paired Round {displayRound}:{' '}
+              {(participants ?? [])
+                .filter((p) => !p.deletedAt && isExcludedFromRound(p, displayRound))
+                .map((p) => {
+                  const st = exclusionStatus(p, displayRound);
+                  return `${p.name} (${st === 'withdrawn' ? 'withdrawn' : 'absent'})`;
+                })
+                .join(', ')}
+              .
+            </p>
+          )}
+
           {boardsForRound.length > 0 && (
             <TableSearch
               id="board-search"
@@ -2111,6 +2329,18 @@ export default function TournamentPage() {
                         {white?.rating != null && (
                           <span className="rating-tag">{white.rating}</span>
                         )}
+                        {white &&
+                          tournament &&
+                          caps?.stage !== 'completed' &&
+                          canEditRoundResults(tournament, game.round) && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ghost"
+                              onClick={() => void markAbsentThisRound(white, game.round)}
+                            >
+                              Absent
+                            </button>
+                          )}
                         {!game.isBye && (
                           <div className="desk-card-row">
                             <span className="floor-card-chip floor-card-yellow">
@@ -2167,6 +2397,18 @@ export default function TournamentPage() {
                           {black?.rating != null && (
                             <span className="rating-tag">{black.rating}</span>
                           )}
+                          {black &&
+                            tournament &&
+                            caps?.stage !== 'completed' &&
+                            canEditRoundResults(tournament, game.round) && (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-ghost"
+                                onClick={() => void markAbsentThisRound(black, game.round)}
+                              >
+                                Absent
+                              </button>
+                            )}
                           <div className="desk-card-row">
                             <span className="floor-card-chip floor-card-yellow">
                               🟡 {blackCounts.warning}/{WARNING_LIMIT}

@@ -40,6 +40,9 @@ if (dsn) {
       'Network request failed',
       /AbortError/i,
       /ResizeObserver loop/i,
+      // Classified as INDEXEDDB_OPEN_FAILED via reportBootIssue — avoid duplicate crash noise.
+      /DatabaseClosedError/i,
+      /Internal error opening backing store/i,
     ],
     beforeSend(event) {
       if (event.request?.headers) {

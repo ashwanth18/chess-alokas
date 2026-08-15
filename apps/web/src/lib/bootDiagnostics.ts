@@ -11,7 +11,8 @@ export type BootIssueCode =
   | 'WINDOW_UNRESPONSIVE'
   | 'WINDOW_SHOW_TIMEOUT'
   | 'MAIN_UNCAUGHT'
-  | 'BOOT_UI_STUCK';
+  | 'BOOT_UI_STUCK'
+  | 'INDEXEDDB_OPEN_FAILED';
 
 export interface BootIssue {
   code: BootIssueCode | string;

@@ -1,14 +1,14 @@
 {
   "name": "@chess-alokas/desktop",
-  "version": "0.1.46",
+  "version": "0.1.47",
   "private": true,
-  "description": "Chess Alokas Electron desktop shell",
+  "description": "Chess Alokas",
   "author": "Chess Alokas",
   "main": "out/main.js",
   "type": "module",
   "desktopName": "Chess-Alokas",
   "scripts": {
-    "build:main": "tsc -p tsconfig.json",
+    "build:main": "tsc -p tsconfig.json && node ./scripts/bundle-bbp.mjs",
     "dev": "cross-env ELECTRON_DEV=1 pnpm run build:main && electron .",
     "build": "pnpm run build:main",
     "dist": "pnpm run build:main && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --publish never",

@@ -402,6 +402,8 @@ export default function ImportPage() {
           email: p.email ?? null,
           customFields: p.customFields,
           categoryIds: catIds,
+          excludedRounds: [],
+          withdrawnFromRound: null,
           updatedAt: now,
           dirty: 1,
         });
@@ -446,11 +448,12 @@ export default function ImportPage() {
         <div className="stage-banner stage-banner-warn late-entry-panel">
           <strong>Round 1 has started.</strong>
           <p>
-            New players will be appended only. They will not be paired into past rounds
+            New players will be appended only. They start at 0 points and are not paired into
+            past rounds
             {tournament && isMixedTournament(tournament)
               ? ''
               : ' for their category'}
-            . Use this only for genuine late registrations.
+            . They join the next unpaired round. Use this only for genuine late registrations.
           </p>
           <label className="late-confirm">
             <input
@@ -458,7 +461,7 @@ export default function ImportPage() {
               checked={lateConfirmed}
               onChange={(e) => setLateConfirmed(e.target.checked)}
             />
-            I understand these are late entries and won’t appear in finished rounds.
+            I understand these are late entries: 0 points so far, and they won’t appear in finished rounds.
           </label>
         </div>
       )}

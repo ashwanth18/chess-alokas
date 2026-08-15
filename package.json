@@ -10,6 +10,7 @@
     "dev:desktop": "pnpm --filter @chess-alokas/desktop run build:main && pnpm --filter @chess-alokas/desktop run dev",
     "build": "pnpm -r --filter=!@chess-alokas/desktop build",
     "build:desktop": "pnpm --filter @chess-alokas/web run build:desktop && pnpm --filter @chess-alokas/api run build:desktop && pnpm --filter @chess-alokas/desktop run dist",
+    "fetch:bbp": "node scripts/fetch-bbp-pairings.mjs",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   }

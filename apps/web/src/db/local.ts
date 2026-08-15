@@ -31,6 +31,11 @@ export interface LocalTournament {
   /** Public live page token (from cloud; set via enable API). */
   publicToken?: string | null;
   publicEnabled?: boolean;
+  certEmailSubject?: string | null;
+  certEmailBody?: string | null;
+  certSerialPrefix?: string | null;
+  certSerialPad?: number | null;
+  certSerialNext?: number;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;
@@ -79,6 +84,10 @@ export interface LocalParticipant {
   categoryIds: string[];
   /** Start rank / pairing number */
   seed?: number;
+  /** Rounds this player is not paired for (0 points). */
+  excludedRounds?: number[];
+  /** If set, excluded from this round onward. */
+  withdrawnFromRound?: number | null;
   updatedAt: string;
   deletedAt?: string | null;
   dirty: 1 | 0;
@@ -183,10 +192,60 @@ export class ChessDb extends Dexie {
       tournamentTables: 'id, tournamentId, tableNumber, slug, dirty',
       meta: 'key',
     });
+    // v8: excludedRounds / withdrawnFromRound on participants
+    this.version(8).stores({
+      tournaments: 'id, ownerId, updatedAt, dirty',
+      categories: 'id, tournamentId, updatedAt, dirty',
+      participants: 'id, tournamentId, updatedAt, dirty',
+      games: 'id, tournamentId, categoryId, round, dirty',
+      certificateTemplates: 'id, tournamentId, updatedAt, dirty',
+      tournamentTables: 'id, tournamentId, tableNumber, slug, dirty',
+      meta: 'key',
+    });
+    // v9: certificate email copy + serial settings on tournaments
+    this.version(9).stores({
+      tournaments: 'id, ownerId, updatedAt, dirty',
+      categories: 'id, tournamentId, updatedAt, dirty',
+      participants: 'id, tournamentId, updatedAt, dirty',
+      games: 'id, tournamentId, categoryId, round, dirty',
+      certificateTemplates: 'id, tournamentId, updatedAt, dirty',
+      tournamentTables: 'id, tournamentId, tableNumber, slug, dirty',
+      meta: 'key',
+    });
   }
 }
 
 export const db = new ChessDb();
+
+export function isIndexedDbOpenError(err: unknown): boolean {
+  const text = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+  return /indexeddb|databaseclosed|backing store|idb/i.test(text);
+}
+
+/** Open Dexie with retries. Chromium can fail the first IndexedDB open on Windows. */
+export async function ensureDbOpen(
+  attempts = 4,
+): Promise<{ ok: true } | { ok: false; error: Error }> {
+  let last: Error = new Error('IndexedDB did not open');
+  for (let i = 0; i < attempts; i++) {
+    try {
+      if (!db.isOpen()) {
+        await db.open();
+      }
+      await db.meta.count();
+      return { ok: true };
+    } catch (err) {
+      last = err instanceof Error ? err : new Error(String(err));
+      try {
+        db.close();
+      } catch {
+        /* ignore */
+      }
+      await new Promise((r) => setTimeout(r, 350 * (i + 1)));
+    }
+  }
+  return { ok: false, error: last };
+}
 
 export async function getOrCreateClientId(): Promise<string> {
   const existing = await db.meta.get('clientId');

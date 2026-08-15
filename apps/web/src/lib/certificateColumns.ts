@@ -13,6 +13,7 @@ const COLUMN_LABELS: Record<string, string> = {
   tournament: 'Tournament',
   date: 'Date',
   title: 'Title',
+  serial: 'Serial (unique ID)',
 };
 
 export function certificateColumnLabel(key: string): string {

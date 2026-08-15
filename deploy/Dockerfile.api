@@ -21,5 +21,20 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3001
 COPY --from=build /app/apps/api/desktop-bundle ./
+# Official FIDE Dutch engine (bbpPairings v6.0.0, Apache-2.0).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl tar gzip \
+  && mkdir -p /app/vendor/bbp-pairings/linux-x64 \
+  && curl -fsSL "https://github.com/BieremaBoyzProgramming/bbpPairings/releases/download/v6.0.0/bbpPairings-v6.0.0-x86_64-pc-linux.tar.gz" \
+    -o /tmp/bbp.tar.gz \
+  && tar -xzf /tmp/bbp.tar.gz -C /tmp \
+  && find /tmp -type f \( -name 'bbpPairings.exe' -o -name 'bbpPairings' \) -exec cp {} /app/vendor/bbp-pairings/linux-x64/bbpPairings.exe \; \
+  && chmod +x /app/vendor/bbp-pairings/linux-x64/bbpPairings.exe \
+  && test -s /app/vendor/bbp-pairings/linux-x64/bbpPairings.exe \
+  && rm -rf /tmp/bbp.tar.gz /tmp/bbpPairings* \
+  && apt-get purge -y curl \
+  && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
+ENV BBP_PAIRINGS_PATH=/app/vendor/bbp-pairings/linux-x64/bbpPairings.exe
 EXPOSE 3001
 CMD ["node", "index.js"]

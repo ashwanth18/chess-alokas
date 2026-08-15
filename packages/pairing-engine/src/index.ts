@@ -31,8 +31,19 @@ export {
 export {
   pairRound,
   STYLE_META,
+  styleLabel,
   UnsupportedPairingStyleError,
 } from './registry.js';
+
+export { pairDutchRound } from './dutch/pair.js';
+
+export {
+  planAbsentAfterPairing,
+  roundHasPlayStarted,
+  findPlayerGameForRound,
+  type RoundGameLike,
+  type AbsentAfterPairingPlan,
+} from './absent.js';
 
 export {
   createSimulation,

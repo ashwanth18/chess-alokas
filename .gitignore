@@ -11,4 +11,9 @@ apps/api/data
 apps/api/desktop-bundle
 apps/desktop/out
 apps/desktop/release
+vendor/bbp-pairings/**/*.exe
+vendor/bbp-pairings/**/bbpPairings
+vendor/bbp-pairings/**/*.zip
+vendor/bbp-pairings/**/*.tar.gz
+!vendor/bbp-pairings/README.md
 .~lock.*

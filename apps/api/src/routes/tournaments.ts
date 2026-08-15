@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   CreateTournamentInputSchema,
   FilterGroupSchema,
+  TournamentStyleSchema,
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { getDatabaseSql, requireAuth } from '../auth.js';
@@ -103,7 +104,7 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
   const PatchTournamentSchema = z.object({
     name: z.string().min(1).optional(),
     date: z.string().nullable().optional(),
-    style: z.enum(['swiss', 'round_robin']).optional(),
+    style: TournamentStyleSchema.optional(),
     rounds: z.number().int().positive().optional(),
     status: z.enum(['draft', 'ready', 'in_progress', 'completed']).optional(),
     currentRound: z.number().int().nonnegative().optional(),

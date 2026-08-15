@@ -43,8 +43,12 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function persistOwnerId(userId: string | null) {
-  if (userId) await db.meta.put({ key: 'ownerId', value: userId });
-  else await db.meta.delete('ownerId');
+  try {
+    if (userId) await db.meta.put({ key: 'ownerId', value: userId });
+    else await db.meta.delete('ownerId');
+  } catch (err) {
+    console.warn('[auth] persistOwnerId failed', err);
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

@@ -10,7 +10,10 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import Layout from './components/Layout';
 import DesktopUpdateBanner from './components/DesktopUpdateBanner';
 import BootIssueCard from './components/BootIssueCard';
+import IndexedDbRecovery from './components/IndexedDbRecovery';
 import { trackDesktopPresence } from './lib/productTelemetry';
+import { ensureDbOpen } from './db/local';
+import { reportBootIssue } from './lib/bootDiagnostics';
 import HomePage from './pages/HomePage';
 import CreateTournamentPage from './pages/CreateTournamentPage';
 import TournamentPage from './pages/TournamentPage';
@@ -107,12 +110,34 @@ function RootEntry() {
   return <LandingPage />;
 }
 
-createRoot(document.getElementById('root')!, {
-  onUncaughtError: reactErrorHandler(),
-  onCaughtError: reactErrorHandler(),
-  onRecoverableError: reactErrorHandler(),
-}).render(
-  <StrictMode>
+function AppRoot() {
+  const [dbReady, setDbReady] = useState(false);
+  const [dbFailed, setDbFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void ensureDbOpen().then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setDbReady(true);
+        return;
+      }
+      reportBootIssue(
+        'INDEXEDDB_OPEN_FAILED',
+        'The local tournament database could not open on this computer.',
+        result.error.message,
+      );
+      setDbFailed(result.error.message);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (dbFailed) return <IndexedDbRecovery details={dbFailed} />;
+  if (!dbReady) return <SessionLoading title="Starting" />;
+
+  return (
     <AuthProvider>
       <Router>
         <>
@@ -148,5 +173,15 @@ createRoot(document.getElementById('root')!, {
         </>
       </Router>
     </AuthProvider>
+  );
+}
+
+createRoot(document.getElementById('root')!, {
+  onUncaughtError: reactErrorHandler(),
+  onCaughtError: reactErrorHandler(),
+  onRecoverableError: reactErrorHandler(),
+}).render(
+  <StrictMode>
+    <AppRoot />
   </StrictMode>,
 );

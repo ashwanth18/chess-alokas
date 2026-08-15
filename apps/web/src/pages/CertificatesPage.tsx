@@ -15,7 +15,18 @@ import {
   type CertificateRow,
 } from '@chess-alokas/certificates';
 import type { GameResult } from '@chess-alokas/shared';
-import { db, nowIso } from '../db/local';
+import {
+  DEFAULT_CERT_EMAIL_BODY,
+  DEFAULT_CERT_EMAIL_SUBJECT,
+  DEFAULT_CERT_SERIAL_PAD,
+  DEFAULT_CERT_SERIAL_PREFIX,
+  certBodyToHtml,
+  certificateYear,
+  certTypeLabel,
+  formatCertificateSerial,
+  renderCertTemplate,
+} from '@chess-alokas/shared';
+import { db, nowIso, type LocalTournament } from '../db/local';
 import NumberField from '../components/NumberField';
 import {
   certificateColumnLabel,
@@ -28,12 +39,37 @@ import {
 import {
   apiIssueCertificates,
   apiEmailCertificates,
+  apiEmailCertificateTest,
   apiListCertificates,
+  apiReserveCertificateSerials,
 } from '../api/client';
 import { isMixedTournament } from '../lib/tournamentProgress';
 import CertificateDesignerCanvas from '../components/CertificateDesignerCanvas';
 
 type CertMode = 'participation' | 'winner' | 'csv';
+
+type CertRow = { id: string; fileName: string; row: CertificateRow; email?: string };
+
+type ListedIssue = {
+  id: string;
+  tournamentId: string;
+  recipientName: string;
+  recipientEmail?: string | null;
+  type: 'participation' | 'winner';
+  status: string;
+  serial?: string | null;
+  error?: string | null;
+  emailedAt?: string | null;
+  createdAt: string;
+};
+
+type EmailResultRow = {
+  id: string;
+  name: string;
+  email: string | null;
+  status: string;
+  error?: string;
+};
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -42,13 +78,6 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const bin = atob(base64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
 }
 
 function downloadBlob(filename: string, data: Uint8Array, mime: string) {
@@ -66,6 +95,16 @@ function downloadBlob(filename: string, data: Uint8Array, mime: string) {
 function cellText(value: unknown): string {
   if (value == null) return '';
   return String(value).trim();
+}
+
+function looksLikeEmail(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function pendingTargets(issues: ListedIssue[], resend: boolean): ListedIssue[] {
+  if (resend) return issues.filter((i) => i.status !== 'pending');
+  return issues.filter((i) => i.status === 'stored' || i.status === 'failed');
 }
 
 export default function CertificatesPage() {
@@ -126,18 +165,29 @@ export default function CertificatesPage() {
   const [templateBytes, setTemplateBytes] = useState<Uint8Array | null>(null);
   const [layout, setLayout] = useState<CertificateLayout | null>(null);
   const [fields, setFields] = useState<CertificateField[]>([]);
-  const [rows, setRows] = useState<Array<{ id: string; fileName: string; row: CertificateRow; email?: string }>>([]);
+  const [rows, setRows] = useState<CertRow[]>([]);
   const [selectedColumn, setSelectedColumn] = useState('name');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [issuedSummary, setIssuedSummary] = useState<string | null>(null);
 
+  const [subjectDraft, setSubjectDraft] = useState(DEFAULT_CERT_EMAIL_SUBJECT);
+  const [bodyDraft, setBodyDraft] = useState(DEFAULT_CERT_EMAIL_BODY);
+  const [prefixDraft, setPrefixDraft] = useState(DEFAULT_CERT_SERIAL_PREFIX);
+  const [padDraft, setPadDraft] = useState<number | null>(DEFAULT_CERT_SERIAL_PAD);
+  const [testTo, setTestTo] = useState('');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmChecked, setConfirmChecked] = useState(false);
+  const [sendTyped, setSendTyped] = useState('');
+  const [resendEmailed, setResendEmailed] = useState(false);
+  const [issues, setIssues] = useState<ListedIssue[]>([]);
+  const [emailResults, setEmailResults] = useState<EmailResultRow[] | null>(null);
+
   function linkTournament(id: string) {
     const next = new URLSearchParams(searchParams);
     if (id) {
       next.set('tournament', id);
-      // Tournament data drives recipients — no CSV needed.
       setMode((m) => (m === 'csv' ? 'participation' : m));
     } else {
       next.delete('tournament');
@@ -149,6 +199,9 @@ export default function CertificatesPage() {
     setSearchParams(next, { replace: true });
     setHighlightTournamentPicker(false);
     setError(null);
+    setEmailResults(null);
+    setIssues([]);
+    setConfirmOpen(false);
   }
 
   const columns = useMemo(() => collectColumns(rows.map((r) => r.row)), [rows]);
@@ -159,6 +212,34 @@ export default function CertificatesPage() {
     }
   }, [columns, selectedColumn]);
 
+  useEffect(() => {
+    if (!tournament) return;
+    setSubjectDraft(tournament.certEmailSubject || DEFAULT_CERT_EMAIL_SUBJECT);
+    setBodyDraft(tournament.certEmailBody || DEFAULT_CERT_EMAIL_BODY);
+    setPrefixDraft(tournament.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX);
+    setPadDraft(tournament.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD);
+  }, [tournament?.id]);
+
+  const refreshIssues = useCallback(async () => {
+    if (!tournamentId) {
+      setIssues([]);
+      return;
+    }
+    const listed = await apiListCertificates(tournamentId);
+    if (listed.ok) setIssues(listed.data.issues);
+  }, [tournamentId]);
+
+  useEffect(() => {
+    void refreshIssues();
+  }, [refreshIssues]);
+
+  const serialPreview = useMemo(() => {
+    const pad = padDraft ?? DEFAULT_CERT_SERIAL_PAD;
+    const year = certificateYear(tournament?.date);
+    const next = tournament?.certSerialNext ?? 1;
+    return formatCertificateSerial(prefixDraft, next, pad, year);
+  }, [prefixDraft, padDraft, tournament?.date, tournament?.certSerialNext]);
+
   const rebuildTournamentRows = useCallback(() => {
     if (!tournament || !participants) return;
     const mix = isMixedTournament(tournament);
@@ -167,10 +248,15 @@ export default function CertificatesPage() {
     const dateStr = tournament.date
       ? new Date(tournament.date).toLocaleDateString()
       : '';
+    const prefix = tournament.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX;
+    const pad = tournament.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD;
+    const next = tournament.certSerialNext ?? 1;
+    const year = certificateYear(tournament.date);
+    const previewSerial = (i: number) => formatCertificateSerial(prefix, next + i, pad, year);
 
     if (mode === 'participation') {
       setRows(
-        participants.map((p) => {
+        participants.map((p, i) => {
           const catNames = (categories ?? [])
             .filter((c) => p.categoryIds?.includes(c.id))
             .map((c) => c.name)
@@ -183,6 +269,7 @@ export default function CertificatesPage() {
               tournament: tournament.name,
               date: dateStr,
               category: catNames,
+              serial: previewSerial(i),
             }),
           };
         }),
@@ -191,7 +278,8 @@ export default function CertificatesPage() {
     }
 
     if (mode === 'winner' && games) {
-      const next: typeof rows = [];
+      const nextRows: CertRow[] = [];
+      let serialIndex = 0;
       const enginePlayers = participants.map((p) => ({
         id: p.id,
         name: p.name,
@@ -218,7 +306,7 @@ export default function CertificatesPage() {
           const standings = computeStandings(enginePlayers, allPast, standingsOpts);
           for (const s of winnersFromStandings(standings, topN)) {
             const p = participants.find((x) => x.id === s.id);
-            next.push({
+            nextRows.push({
               id: s.id,
               fileName: `${s.rank}_${s.name}`,
               email: p?.email ?? undefined,
@@ -226,6 +314,7 @@ export default function CertificatesPage() {
                 tournament: tournament.name,
                 date: dateStr,
                 category: 'Overall',
+                serial: previewSerial(serialIndex++),
               }),
             });
           }
@@ -264,7 +353,7 @@ export default function CertificatesPage() {
                 );
             for (const s of winnersFromStandings(standings, catTop)) {
               const p = participants.find((x) => x.id === s.id);
-              next.push({
+              nextRows.push({
                 id: `${cat.id}:${s.id}`,
                 fileName: `${cat.name}_${s.rank}_${s.name}`,
                 email: p?.email ?? undefined,
@@ -272,6 +361,7 @@ export default function CertificatesPage() {
                   tournament: tournament.name,
                   date: dateStr,
                   category: cat.name,
+                  serial: previewSerial(serialIndex++),
                 }),
               });
             }
@@ -280,7 +370,7 @@ export default function CertificatesPage() {
           }
         }
       }
-      setRows(next);
+      setRows(nextRows);
     }
   }, [tournament, participants, categories, games, mode]);
 
@@ -288,6 +378,48 @@ export default function CertificatesPage() {
     if (mode === 'csv') return;
     rebuildTournamentRows();
   }, [mode, rebuildTournamentRows]);
+
+  async function persistTournament(patch: Partial<LocalTournament>) {
+    if (!tournamentId) return;
+    await db.tournaments.update(tournamentId, {
+      ...patch,
+      updatedAt: nowIso(),
+      dirty: 1,
+    });
+  }
+
+  async function persistEmailCopy() {
+    await persistTournament({
+      certEmailSubject: subjectDraft.trim() || DEFAULT_CERT_EMAIL_SUBJECT,
+      certEmailBody: bodyDraft.trim() || DEFAULT_CERT_EMAIL_BODY,
+    });
+  }
+
+  async function persistSerialSettings(prefix: string, pad: number | null) {
+    const nextPad = pad ?? DEFAULT_CERT_SERIAL_PAD;
+    await persistTournament({
+      certSerialPrefix: prefix.trim() || DEFAULT_CERT_SERIAL_PREFIX,
+      certSerialPad: nextPad,
+    });
+  }
+
+  async function stampReservedSerials(source: CertRow[]): Promise<CertRow[]> {
+    if (!tournamentId) return source;
+    const reserved = await apiReserveCertificateSerials(tournamentId, source.length);
+    if (!reserved.ok) {
+      throw new Error(reserved.error ?? 'Could not reserve certificate serials');
+    }
+    const serials = reserved.data.serials;
+    if (serials.length !== source.length) {
+      throw new Error('Serial reservation returned the wrong count');
+    }
+    const currentNext = tournament?.certSerialNext ?? 1;
+    await persistTournament({ certSerialNext: currentNext + source.length });
+    return source.map((r, i) => ({
+      ...r,
+      row: { ...r.row, serial: serials[i]! },
+    }));
+  }
 
   async function onTemplateFile(file: File) {
     setError(null);
@@ -401,11 +533,13 @@ export default function CertificatesPage() {
     setBusy(true);
     setError(null);
     try {
+      const stamped = await stampReservedSerials(rows);
+      setRows(stamped);
       const full: CertificateLayout = { ...layout, fields };
       const batch = await generateCertificateBatch(
         templateBytes,
         full,
-        rows.map((r) => ({ id: r.id, fileName: r.fileName, row: r.row })),
+        stamped.map((r) => ({ id: r.id, fileName: r.fileName, row: r.row })),
       );
       downloadBlob('certificates-merged.pdf', batch.mergedPdf, 'application/pdf');
       downloadBlob('certificates.zip', batch.zipBytes, 'application/zip');
@@ -417,7 +551,7 @@ export default function CertificatesPage() {
     }
   }
 
-  async function issueDigitalAndEmail(alsoEmail: boolean) {
+  async function issueDigital() {
     if (!tournamentId) {
       setHighlightTournamentPicker(true);
       setError('Choose which tournament these certificates belong to before issuing.');
@@ -431,15 +565,17 @@ export default function CertificatesPage() {
     setError(null);
     setIssuedSummary(null);
     try {
+      const stamped = await stampReservedSerials(rows);
+      setRows(stamped);
       const full: CertificateLayout = { ...layout, fields };
       const batch = await generateCertificateBatch(
         templateBytes,
         full,
-        rows.map((r) => ({ id: r.id, fileName: r.fileName, row: r.row })),
+        stamped.map((r) => ({ id: r.id, fileName: r.fileName, row: r.row })),
       );
 
       const items = batch.digital.map((d, i) => {
-        const src = rows[i]!;
+        const src = stamped[i]!;
         const participantId = src.id.includes(':') ? src.id.split(':')[1]! : src.id;
         return {
           participantId: /^[0-9a-f-]{36}$/i.test(participantId) ? participantId : null,
@@ -447,6 +583,7 @@ export default function CertificatesPage() {
           rank: typeof src.row.rank === 'number' ? src.row.rank : Number(src.row.rank) || null,
           recipientEmail: src.email || null,
           recipientName: String(src.row.name ?? src.fileName),
+          serial: String(src.row.serial ?? '') || null,
           pdfBase64: bytesToBase64(d.pdf),
         };
       });
@@ -460,17 +597,10 @@ export default function CertificatesPage() {
         issueRes.data.storageBackend === 'supabase'
           ? 'Supabase Storage'
           : 'local disk (set SUPABASE_SECRET_KEY for cloud)';
-      let summary = `Stored ${issueRes.data.issued} digital certificates to ${where}`;
-      if (alsoEmail) {
-        const emailRes = await apiEmailCertificates(tournamentId, { allPending: true });
-        if (!emailRes.ok) {
-          throw new Error(emailRes.error ?? 'Email failed');
-        }
-        summary += ` · emailed ${emailRes.data.sent}, failed ${emailRes.data.failed}`;
-      }
+      const summary = `Stored ${issueRes.data.issued} digital certificates to ${where}. Email is a separate step.`;
       setIssuedSummary(summary);
       setMessage(summary);
-      await apiListCertificates(tournamentId);
+      await refreshIssues();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Digital issue failed');
     } finally {
@@ -478,17 +608,146 @@ export default function CertificatesPage() {
     }
   }
 
+  const confirmPool = useMemo(
+    () => pendingTargets(issues, resendEmailed),
+    [issues, resendEmailed],
+  );
+  const willMail = useMemo(
+    () => confirmPool.filter((i) => looksLikeEmail(i.recipientEmail)),
+    [confirmPool],
+  );
+  const skipped = useMemo(
+    () => confirmPool.filter((i) => !looksLikeEmail(i.recipientEmail)),
+    [confirmPool],
+  );
+  const statusRows = useMemo(() => {
+    if (emailResults) {
+      return emailResults.map((r) => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        status: r.status,
+        error: r.error,
+        serial: issues.find((i) => i.id === r.id)?.serial ?? null,
+      }));
+    }
+    return issues.map((i) => ({
+      id: i.id,
+      name: i.recipientName,
+      email: i.recipientEmail ?? null,
+      status: i.status,
+      error: i.error ?? undefined,
+      serial: i.serial ?? null,
+    }));
+  }, [emailResults, issues]);
+
+  const previewVars = useMemo(() => {
+    const first = willMail[0];
+    return {
+      playerName: first?.recipientName || 'Player name',
+      tournament: tournament?.name || 'Tournament',
+      certType: certTypeLabel(first?.type || (mode === 'winner' ? 'winner' : 'participation')),
+      serial: first?.serial?.trim() || serialPreview,
+    };
+  }, [willMail, tournament?.name, mode, serialPreview]);
+
+  const previewSubject = renderCertTemplate(subjectDraft, previewVars);
+  const previewHtml = certBodyToHtml(renderCertTemplate(bodyDraft, previewVars));
+
+  async function openEmailConfirm() {
+    if (!tournamentId) {
+      setHighlightTournamentPicker(true);
+      setError('Choose a tournament before emailing certificates.');
+      return;
+    }
+    setError(null);
+    await persistEmailCopy();
+    const listed = await apiListCertificates(tournamentId);
+    if (!listed.ok) {
+      setError(listed.error ?? 'Could not load issued certificates');
+      return;
+    }
+    setIssues(listed.data.issues);
+    if (listed.data.issues.length === 0) {
+      setError('No issued certificates to email. Issue digital PDFs first.');
+      return;
+    }
+    setConfirmChecked(false);
+    setSendTyped('');
+    setResendEmailed(false);
+    setConfirmOpen(true);
+  }
+
+  async function confirmEmailPending() {
+    if (!tournamentId) return;
+    if (sendTyped !== 'SEND' || !confirmChecked || willMail.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await persistEmailCopy();
+      const emailRes = await apiEmailCertificates(tournamentId, {
+        allPending: true,
+        resend: resendEmailed,
+        subject: subjectDraft.trim() || DEFAULT_CERT_EMAIL_SUBJECT,
+        body: bodyDraft.trim() || DEFAULT_CERT_EMAIL_BODY,
+      });
+      if (!emailRes.ok) {
+        throw new Error(emailRes.error ?? 'Email failed');
+      }
+      setEmailResults(emailRes.data.results);
+      setIssuedSummary(`Emailed ${emailRes.data.sent}, failed ${emailRes.data.failed}`);
+      setMessage(`Emailed ${emailRes.data.sent}, failed ${emailRes.data.failed}`);
+      setConfirmOpen(false);
+      await refreshIssues();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Email failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendTestEmail() {
+    if (!tournamentId) {
+      setHighlightTournamentPicker(true);
+      setError('Choose a tournament before sending a test email.');
+      return;
+    }
+    if (!looksLikeEmail(testTo)) {
+      setError('Enter a valid test email address.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await persistEmailCopy();
+      const res = await apiEmailCertificateTest(tournamentId, {
+        to: testTo.trim(),
+        subject: subjectDraft.trim() || DEFAULT_CERT_EMAIL_SUBJECT,
+        body: bodyDraft.trim() || DEFAULT_CERT_EMAIL_BODY,
+      });
+      if (!res.ok) {
+        throw new Error(res.error ?? 'Test email failed');
+      }
+      setMessage(
+        res.data.attachedPdf
+          ? `Test email sent to ${res.data.to} (sample PDF attached).`
+          : `Test email sent to ${res.data.to} (no stored PDF to attach yet).`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Test email failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateAwardSettings(prizePlaces: number, awardScope: 'overall' | 'per_category') {
     if (!tournamentId || !tournament) return;
-    await db.tournaments.update(tournamentId, {
-      prizePlaces,
-      awardScope,
-      updatedAt: nowIso(),
-      dirty: 1,
-    });
+    await persistTournament({ prizePlaces, awardScope });
   }
 
   const sample = rows[0]?.row;
+  const canSendConfirm =
+    confirmChecked && sendTyped === 'SEND' && willMail.length > 0 && !busy;
 
   return (
     <div className="page-container certificates-page">
@@ -533,7 +792,7 @@ export default function CertificatesPage() {
         )}
         {!tournamentId && (
           <span className="form-hint">
-            Required before Issue digital / Issue + email. With a tournament selected, participants
+            Required before Issue digital or Email pending. With a tournament selected, participants
             load automatically — CSV is only for external lists.
           </span>
         )}
@@ -626,6 +885,89 @@ export default function CertificatesPage() {
         </div>
       )}
 
+      {tournament && (
+        <div className="cert-compose">
+          <div className="cert-compose-col">
+            <h3>Certificate serials</h3>
+            <p className="form-hint">
+              Unique per tournament. Pattern <code>{'{prefix}/{seq}/{year}'}</code>. Assigned when
+              you issue or print — not when emailing.
+            </p>
+            <div className="cert-serial-row">
+              <label>
+                Prefix
+                <input
+                  className="input input-sm"
+                  value={prefixDraft}
+                  maxLength={32}
+                  onChange={(e) => setPrefixDraft(e.target.value)}
+                  onBlur={() => void persistSerialSettings(prefixDraft, padDraft)}
+                />
+              </label>
+              <NumberField
+                label="Digits"
+                inputClassName="input input-sm"
+                value={padDraft}
+                onChange={(n) => {
+                  setPadDraft(n);
+                  if (n != null) void persistSerialSettings(prefixDraft, n);
+                }}
+                min={1}
+                max={8}
+                required
+              />
+              <div className="cert-serial-preview">
+                <span className="form-hint">Next serial</span>
+                <code>{serialPreview}</code>
+              </div>
+            </div>
+          </div>
+          <div className="cert-compose-col">
+            <h3>Email copy</h3>
+            <p className="form-hint">
+              Merge tags: <code>{'{{playerName}}'}</code> <code>{'{{tournament}}'}</code>{' '}
+              <code>{'{{certType}}'}</code> <code>{'{{serial}}'}</code>
+            </p>
+            <label>
+              Subject
+              <input
+                className="input"
+                value={subjectDraft}
+                onChange={(e) => setSubjectDraft(e.target.value)}
+                onBlur={() => void persistEmailCopy()}
+              />
+            </label>
+            <label>
+              Body
+              <textarea
+                className="input cert-email-body"
+                rows={8}
+                value={bodyDraft}
+                onChange={(e) => setBodyDraft(e.target.value)}
+                onBlur={() => void persistEmailCopy()}
+              />
+            </label>
+            <div className="cert-test-send">
+              <input
+                className="input"
+                type="email"
+                placeholder="Test address"
+                value={testTo}
+                onChange={(e) => setTestTo(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={busy || !tournamentId}
+                onClick={() => void sendTestEmail()}
+              >
+                Send test
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="cert-workspace">
         <aside className="cert-sidebar">
           <h3>Data columns</h3>
@@ -709,17 +1051,17 @@ export default function CertificatesPage() {
               type="button"
               className="btn btn-outline"
               disabled={busy || !templateBytes || fields.length === 0 || rows.length === 0}
-              onClick={() => void issueDigitalAndEmail(false)}
+              onClick={() => void issueDigital()}
             >
               Issue digital
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !templateBytes || fields.length === 0 || rows.length === 0}
-              onClick={() => void issueDigitalAndEmail(true)}
+              disabled={busy || !tournamentId}
+              onClick={() => void openEmailConfirm()}
             >
-              Issue + email
+              Email pending
             </button>
           </div>
           {message && <p className="form-hint">{message}</p>}
@@ -747,6 +1089,135 @@ export default function CertificatesPage() {
           )}
         </div>
       </div>
+
+      {statusRows.length > 0 && (
+        <section className="cert-results">
+          <h3>Issue status</h3>
+          <div className="cert-results-scroll">
+            <table className="cert-results-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Serial</th>
+                  <th>Status</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statusRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.name}</td>
+                    <td>{row.email || '—'}</td>
+                    <td>
+                      <code>{row.serial || '—'}</code>
+                    </td>
+                    <td>{row.status}</td>
+                    <td>{row.error || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {confirmOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => !busy && setConfirmOpen(false)}
+        >
+          <div
+            className="modal-card cert-email-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cert-email-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="cert-email-title">Email pending certificates</h2>
+            <p className="form-hint">
+              This sends {willMail.length} email{willMail.length === 1 ? '' : 's'} with PDF
+              attachments. It will not run until you confirm below.
+            </p>
+
+            <h3 className="settings-subtitle">Will be mailed ({willMail.length})</h3>
+            <ul className="cert-mail-list">
+              {willMail.length === 0 && <li>No recipients with a valid email.</li>}
+              {willMail.map((i) => (
+                <li key={i.id}>
+                  {i.recipientName} — {i.recipientEmail}
+                  {i.serial ? ` (${i.serial})` : ''}
+                </li>
+              ))}
+            </ul>
+
+            <h3 className="settings-subtitle">Skipped, missing email ({skipped.length})</h3>
+            <ul className="cert-mail-list">
+              {skipped.length === 0 && <li>None</li>}
+              {skipped.map((i) => (
+                <li key={i.id}>{i.recipientName}</li>
+              ))}
+            </ul>
+
+            <h3 className="settings-subtitle">Preview (first recipient)</h3>
+            <p className="cert-email-preview-subject">
+              <strong>Subject:</strong> {previewSubject}
+            </p>
+            <div
+              className="cert-email-preview"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                checked={resendEmailed}
+                onChange={(e) => setResendEmailed(e.target.checked)}
+              />
+              Also resend certificates already marked emailed
+            </label>
+
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                checked={confirmChecked}
+                onChange={(e) => setConfirmChecked(e.target.checked)}
+              />
+              Email {willMail.length} player{willMail.length === 1 ? '' : 's'} now
+            </label>
+
+            <label>
+              Type SEND to confirm
+              <input
+                className="input"
+                value={sendTyped}
+                autoComplete="off"
+                onChange={(e) => setSendTyped(e.target.value)}
+              />
+            </label>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={busy}
+                onClick={() => setConfirmOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!canSendConfirm}
+                onClick={() => void confirmEmailPending()}
+              >
+                {busy ? 'Sending…' : 'Send emails'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

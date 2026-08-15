@@ -62,5 +62,6 @@ describe('stampCertificate', () => {
     expect(out.byteLength).toBeGreaterThan(100);
     const cols = collectColumns([{ name: 'Alice', club: 'X' }]);
     expect(cols).toContain('name');
+    expect(cols).toContain('serial');
   });
 });

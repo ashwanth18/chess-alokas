@@ -18,6 +18,7 @@ export interface CertificateIssueInput {
   contentSha256: string;
   byteSize: number;
   status: CertificateIssueStatus;
+  serial?: string | null;
   emailedAt?: string | null;
   error?: string | null;
   createdAt: string;
@@ -41,6 +42,7 @@ interface IssueRow {
   content_sha256: string;
   byte_size: number;
   status: string;
+  serial: string | null;
   emailed_at: Date | string | null;
   error: string | null;
   created_at: Date | string;
@@ -60,6 +62,7 @@ function rowToIssue(row: IssueRow): CertificateIssue {
     contentSha256: row.content_sha256,
     byteSize: row.byte_size,
     status: row.status as CertificateIssueStatus,
+    serial: row.serial ?? undefined,
     emailedAt: toIso(row.emailed_at) ?? undefined,
     error: row.error ?? undefined,
     createdAt: toIso(row.created_at)!,
@@ -97,6 +100,7 @@ export class MemoryCertificateIssueStore implements CertificateIssueStore {
       contentSha256: input.contentSha256,
       byteSize: input.byteSize,
       status: input.status,
+      serial: input.serial ?? undefined,
       emailedAt: input.emailedAt ?? undefined,
       error: input.error ?? undefined,
       createdAt: input.createdAt,
@@ -143,12 +147,12 @@ export class PostgresCertificateIssueStore implements CertificateIssueStore {
     const rows = await this.sql<IssueRow[]>`
       INSERT INTO certificate_issues
         (id, tournament_id, participant_id, type, rank, category_id, recipient_email, recipient_name,
-         storage_path, content_sha256, byte_size, status, emailed_at, error, created_at)
+         storage_path, content_sha256, byte_size, status, serial, emailed_at, error, created_at)
       VALUES
         (${input.id}, ${input.tournamentId}, ${input.participantId ?? null}, ${input.type},
          ${input.rank ?? null}, ${input.categoryId ?? null}, ${input.recipientEmail ?? null},
          ${input.recipientName}, ${input.storagePath}, ${input.contentSha256}, ${input.byteSize},
-         ${input.status}, ${input.emailedAt ?? null}, ${input.error ?? null}, ${input.createdAt})
+         ${input.status}, ${input.serial ?? null}, ${input.emailedAt ?? null}, ${input.error ?? null}, ${input.createdAt})
       RETURNING *
     `;
     return rowToIssue(rows[0]!);

@@ -6,11 +6,20 @@ import { startApiSidecar, type SidecarHandle } from './sidecar.js';
 import { getLastUpdateStatus, setupAutoUpdater, dismissJustUpdatedNotice } from './updater.js';
 import { installAppMenu } from './menu.js';
 import { openLogsFolder, readLastError, writeLastError } from './errors.js';
+import { APP_INDEX_URL, registerAppProtocol } from './appProtocol.js';
+import { pairDutchFromMain, type DesktopDutchInput } from './pairDutch.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 app.setName('Chess Alokas');
+// Must match electron-builder appId so Task Manager / jump lists don't show "Electron".
+app.setAppUserModelId('com.chessalokas.desktop');
 app.setPath('userData', path.join(app.getPath('appData'), 'Chess Alokas'));
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+}
 
 log.initialize();
 log.info('Chess Alokas desktop starting', {
@@ -81,6 +90,9 @@ function registerIpc() {
   ipcMain.handle('desktop:open-logs-folder', async () => {
     await openLogsFolder();
   });
+  ipcMain.handle('desktop:pair-dutch', async (_event, input: DesktopDutchInput) => {
+    return pairDutchFromMain(input);
+  });
 }
 
 async function createWindow() {
@@ -110,6 +122,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      partition: 'persist:chess-alokas',
     },
   });
 
@@ -171,10 +184,16 @@ async function createWindow() {
     await mainWindow.loadURL(viteUrl);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    const indexHtml = app.isPackaged
-      ? path.join(process.resourcesPath, 'web', 'index.html')
-      : path.join(__dirname, '../../web/dist/index.html');
-    await mainWindow.loadFile(indexHtml);
+    registerAppProtocol();
+    try {
+      await mainWindow.loadURL(APP_INDEX_URL);
+    } catch (err) {
+      log.error('app:// load failed, falling back to loadFile', err);
+      const indexHtml = app.isPackaged
+        ? path.join(process.resourcesPath, 'web', 'index.html')
+        : path.join(__dirname, '../../web/dist/index.html');
+      await mainWindow.loadFile(indexHtml);
+    }
   }
 
   mainWindow.on('closed', () => {
@@ -209,6 +228,7 @@ async function boot() {
 }
 
 app.whenReady().then(() => {
+  if (!gotLock) return;
   void boot();
 
   app.on('activate', () => {
@@ -216,6 +236,13 @@ app.whenReady().then(() => {
       void createWindow();
     }
   });
+});
+
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 });
 
 app.on('window-all-closed', () => {

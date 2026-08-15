@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import log from 'electron-log/main';
+import { resolveDesktopBbpBinary } from './bbpPath.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -145,6 +146,10 @@ export async function startApiSidecar(): Promise<SidecarHandle> {
     HOST: '127.0.0.1',
     CERTIFICATES_DIR: certs,
   };
+  const bbpExe = resolveDesktopBbpBinary();
+  if (bbpExe) {
+    childEnv['BBP_PAIRINGS_PATH'] = bbpExe;
+  }
   if (electronAsNode) {
     childEnv['ELECTRON_RUN_AS_NODE'] = '1';
   }

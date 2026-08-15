@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const TournamentStyleSchema = z.enum(['swiss', 'round_robin']);
+export const TournamentStyleSchema = z.enum(['swiss', 'dutch', 'round_robin']);
 export type TournamentStyle = z.infer<typeof TournamentStyleSchema>;
 
 export const TournamentStatusSchema = z.enum([
@@ -150,6 +150,13 @@ export const ParticipantSchema = z.object({
   categoryIds: z.array(z.string().uuid()).default([]),
   /** Start rank / pairing number for the tournament. */
   seed: z.number().int().optional(),
+  /**
+   * Rounds this player is not paired for (0 points). Swiss-Manager “Exclude player”.
+   * They return the following round unless also withdrawn.
+   */
+  excludedRounds: z.array(z.number().int().positive()).optional(),
+  /** If set, excluded from this round onward (withdraw). */
+  withdrawnFromRound: z.number().int().positive().nullable().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
 });
@@ -200,6 +207,14 @@ export const TournamentSchema = z.object({
   publicToken: z.string().min(8).nullable().optional(),
   /** When true, GET /public/live/:token serves sanitized pairings/standings. */
   publicEnabled: z.boolean().default(false),
+  /** Mass-email subject; merge tags {{playerName}} {{tournament}} {{certType}} {{serial}}. */
+  certEmailSubject: z.string().nullable().optional(),
+  certEmailBody: z.string().nullable().optional(),
+  /** Serial prefix, e.g. ARCC → ARCC/001/2026. Unique per tournament. */
+  certSerialPrefix: z.string().min(1).max(32).nullable().optional(),
+  certSerialPad: z.number().int().min(1).max(8).nullable().optional(),
+  /** Next sequence number to allocate (server-authoritative). */
+  certSerialNext: z.number().int().positive().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),
@@ -367,6 +382,8 @@ export const CertificateIssueSchema = z.object({
   contentSha256: z.string(),
   byteSize: z.number().int().nonnegative(),
   status: CertificateIssueStatusSchema,
+  /** Unique per tournament, e.g. ARCC/001/2026. */
+  serial: z.string().nullable().optional(),
   emailedAt: z.string().datetime().nullable().optional(),
   error: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
@@ -388,7 +405,7 @@ export const SyncPushRequestSchema = z.object({
 });
 export type SyncPushRequest = z.infer<typeof SyncPushRequestSchema>;
 
-export const SUPPORTED_STYLES: TournamentStyle[] = ['swiss'];
+export const SUPPORTED_STYLES: TournamentStyle[] = ['swiss', 'dutch'];
 export const COMING_SOON_STYLES: TournamentStyle[] = ['round_robin'];
 
 export function isStyleImplemented(style: TournamentStyle): boolean {

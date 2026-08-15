@@ -3,10 +3,10 @@ import { z } from 'zod';
 import {
   GameCardTypeSchema,
   GameResultSchema,
+  isExcludedFromRound,
   isStyleImplemented,
 } from '@chess-alokas/shared';
 import {
-  pairRound,
   computeStandings,
   UnsupportedPairingStyleError,
   firstRoundMissingResults,
@@ -16,6 +16,7 @@ import type { Participant, Game, Category } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { issueGameCard, removeGameCard } from '../lib/gameCards.js';
+import { BbpPairingsError, pairRoundOfficial } from '../lib/dutchPairing.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -24,6 +25,61 @@ interface PluginOptions extends FastifyPluginOptions {
 export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
   const { store } = opts;
   app.addHook('preHandler', requireAuth);
+
+  const DutchPreviewSchema = z.object({
+    players: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          name: z.string().min(1),
+          rating: z.number().nullable().optional(),
+          seed: z.number().nullable().optional(),
+        }),
+      )
+      .min(2)
+      .max(512),
+    pastGames: z
+      .array(
+        z.object({
+          round: z.number().int().positive(),
+          whiteId: z.string().nullable(),
+          blackId: z.string().nullable(),
+          result: GameResultSchema,
+          isBye: z.boolean(),
+        }),
+      )
+      .max(20_000),
+    round: z.number().int().positive(),
+    totalRounds: z.number().int().positive(),
+    initialColor: z.enum(['W', 'B']).optional(),
+  });
+
+  app.post('/pairing/dutch', async (request, reply) => {
+    const parsed = DutchPreviewSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
+    }
+    try {
+      const output = await pairRoundOfficial('dutch', {
+        players: parsed.data.players.map((p) => ({
+          id: p.id,
+          name: p.name,
+          rating: p.rating ?? undefined,
+          seed: p.seed ?? undefined,
+        })),
+        pastGames: parsed.data.pastGames,
+        round: parsed.data.round,
+        totalRounds: parsed.data.totalRounds,
+        initialColor: parsed.data.initialColor,
+      });
+      return { ...output, engine: 'bbpPairings-6.0.0' };
+    } catch (err) {
+      if (err instanceof BbpPairingsError) {
+        return reply.code(503).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
 
   // -------------------------------------------------------------------------
   // POST /tournaments/:id/rounds/:round/pair
@@ -104,10 +160,10 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       }
 
       const players: EnginePlayer[] = allParticipants
-        .filter((p) => !p.deletedAt)
+        .filter((p) => !p.deletedAt && !isExcludedFromRound(p, round))
         .map(participantToEnginePlayer);
-      if (players.length < 2) {
-        return reply.code(400).send({ error: 'Need at least 2 participants to pair' });
+      if (players.length === 0) {
+        return reply.code(400).send({ error: 'No players available to pair for this round' });
       }
 
       const pastGames: PastGame[] = allGames
@@ -116,12 +172,20 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
 
       let pairingOutput;
       try {
-        pairingOutput = pairRound(tournament.style, { players, pastGames, round });
+        pairingOutput = await pairRoundOfficial(tournament.style, {
+          players,
+          pastGames,
+          round,
+          totalRounds: tournament.rounds,
+        });
       } catch (err) {
         if (err instanceof UnsupportedPairingStyleError) {
           return reply
             .code(422)
             .send({ error: `Pairing style "${tournament.style}" is not yet implemented` });
+        }
+        if (err instanceof BbpPairingsError) {
+          return reply.code(503).send({ error: err.message });
         }
         throw err;
       }
@@ -174,9 +238,12 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
       }
 
       const catParticipants = allParticipants.filter(
-        (p) => p.categoryIds.includes(category.id) && !p.deletedAt,
+        (p) =>
+          p.categoryIds.includes(category.id) &&
+          !p.deletedAt &&
+          !isExcludedFromRound(p, round),
       );
-      if (catParticipants.length < 2) continue;
+      if (catParticipants.length === 0) continue;
 
       const players: EnginePlayer[] = catParticipants.map(participantToEnginePlayer);
       const pastGames: PastGame[] = allGames
@@ -185,12 +252,20 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
 
       let pairingOutput;
       try {
-        pairingOutput = pairRound(tournament.style, { players, pastGames, round });
+        pairingOutput = await pairRoundOfficial(tournament.style, {
+          players,
+          pastGames,
+          round,
+          totalRounds: tournament.rounds,
+        });
       } catch (err) {
         if (err instanceof UnsupportedPairingStyleError) {
           return reply
             .code(422)
             .send({ error: `Pairing style "${tournament.style}" is not yet implemented` });
+        }
+        if (err instanceof BbpPairingsError) {
+          return reply.code(503).send({ error: err.message });
         }
         throw err;
       }

@@ -47,6 +47,22 @@ export interface DesktopBridge {
   }) => void;
   openLogsFolder: () => Promise<void>;
   onUpdateStatus: (listener: (status: DesktopUpdateStatus) => void) => () => void;
+  pairDutch?: (input: {
+    players: Array<{ id: string; name: string; rating?: number | null; seed?: number | null }>;
+    pastGames: Array<{
+      round: number;
+      whiteId: string | null;
+      blackId: string | null;
+      result: string;
+      isBye: boolean;
+    }>;
+    round: number;
+    totalRounds?: number;
+    initialColor?: 'W' | 'B';
+  }) => Promise<{
+    boards: Array<{ board: number; whiteId: string | null; blackId: string | null; isBye: boolean }>;
+    byePlayerId: string | null;
+  }>;
 }
 
 declare global {

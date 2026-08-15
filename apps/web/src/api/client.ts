@@ -109,10 +109,27 @@ export async function apiImportParticipants(
 }
 
 // ── Pairing ──────────────────────────────────────────────────────────────────
-export async function apiPairRound(tournamentId: string, categoryId: string, round: number) {
-  return req<{ boards: unknown[] }>(`/tournaments/${tournamentId}/pair`, {
+export async function apiDutchPair(input: {
+  players: Array<{ id: string; name: string; rating?: number | null; seed?: number | null }>;
+  pastGames: Array<{
+    round: number;
+    whiteId: string | null;
+    blackId: string | null;
+    result: string;
+    isBye: boolean;
+  }>;
+  round: number;
+  totalRounds: number;
+  initialColor?: 'W' | 'B';
+}) {
+  return req<{
+    boards: Array<{ board: number; whiteId: string | null; blackId: string | null; isBye: boolean }>;
+    byePlayerId: string | null;
+    engine: string;
+  }>('/pairing/dutch', {
     method: 'POST',
-    body: JSON.stringify({ categoryId, round }),
+    body: JSON.stringify(input),
+    timeoutMs: 30_000,
   });
 }
 
@@ -162,6 +179,7 @@ type CertificateIssueItem = {
   categoryId?: string | null;
   recipientEmail?: string | null;
   recipientName: string;
+  serial?: string | null;
   pdfBase64: string;
 };
 
@@ -207,15 +225,61 @@ export async function apiIssueCertificates(
 }
 
 export async function apiListCertificates(tournamentId: string) {
-  return req<{ issues: unknown[] }>(`/tournaments/${tournamentId}/certificates`);
+  return req<{
+    issues: Array<{
+      id: string;
+      tournamentId: string;
+      recipientName: string;
+      recipientEmail?: string | null;
+      type: 'participation' | 'winner';
+      status: string;
+      serial?: string | null;
+      error?: string | null;
+      emailedAt?: string | null;
+      createdAt: string;
+    }>;
+  }>(`/tournaments/${tournamentId}/certificates`);
+}
+
+export async function apiReserveCertificateSerials(tournamentId: string, count: number) {
+  return req<{ serials: string[] }>(`/tournaments/${tournamentId}/certificates/reserve-serials`, {
+    method: 'POST',
+    body: JSON.stringify({ count }),
+  });
 }
 
 export async function apiEmailCertificates(
   tournamentId: string,
-  body: { issueIds?: string[]; allPending?: boolean },
+  body: {
+    issueIds?: string[];
+    allPending?: boolean;
+    resend?: boolean;
+    subject?: string;
+    body?: string;
+  },
 ) {
-  return req<{ sent: number; failed: number; results: unknown[] }>(
-    `/tournaments/${tournamentId}/certificates/email`,
+  return req<{
+    sent: number;
+    failed: number;
+    results: Array<{
+      id: string;
+      name: string;
+      email: string | null;
+      status: string;
+      error?: string;
+    }>;
+  }>(`/tournaments/${tournamentId}/certificates/email`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiEmailCertificateTest(
+  tournamentId: string,
+  body: { to: string; subject?: string; body?: string; issueId?: string },
+) {
+  return req<{ sent: boolean; attachedPdf: boolean; to: string }>(
+    `/tournaments/${tournamentId}/certificates/email-test`,
     {
       method: 'POST',
       body: JSON.stringify(body),

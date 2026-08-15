@@ -36,8 +36,8 @@ const RESULT_OPTIONS: { value: ArbiterScorableResult; label: string; hint: strin
   { value: '1-0', label: 'White wins', hint: '1–0' },
   { value: '0-1', label: 'Black wins', hint: '0–1' },
   { value: '1/2-1/2', label: 'Draw', hint: '½–½' },
-  { value: '1-0F', label: 'Black forfeit', hint: 'White wins' },
-  { value: '0-1F', label: 'White forfeit', hint: 'Black wins' },
+  { value: '1-0F', label: 'Black absent', hint: 'White wins' },
+  { value: '0-1F', label: 'White absent', hint: 'Black wins' },
   { value: '0-0', label: 'Both absent', hint: '0–0' },
 ];
 

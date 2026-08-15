@@ -172,8 +172,8 @@ const FEATURES = [
     glyph: '♟',
   },
   {
-    title: 'FIDE Swiss',
-    body: 'Score groups, color balance, and rematch avoidance built in.',
+    title: 'Swiss and FIDE Dutch',
+    body: 'Swiss stays on our engine. FIDE Dutch boards come from bbpPairings v6 — the 2026 handbook pairing program.',
     glyph: '⚔',
   },
   {
