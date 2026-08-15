@@ -53,6 +53,8 @@ type CertRow = { id: string; fileName: string; row: CertificateRow; email?: stri
 type ListedIssue = {
   id: string;
   tournamentId: string;
+  participantId?: string | null;
+  categoryId?: string | null;
   recipientName: string;
   recipientEmail?: string | null;
   type: 'participation' | 'winner';
@@ -62,6 +64,9 @@ type ListedIssue = {
   emailedAt?: string | null;
   createdAt: string;
 };
+
+const FONT_SIZE_MIN = 8;
+const FONT_SIZE_MAX = 72;
 
 type EmailResultRow = {
   id: string;
@@ -105,6 +110,41 @@ function looksLikeEmail(value: string | null | undefined): boolean {
 function pendingTargets(issues: ListedIssue[], resend: boolean): ListedIssue[] {
   if (resend) return issues.filter((i) => i.status !== 'pending');
   return issues.filter((i) => i.status === 'stored' || i.status === 'failed');
+}
+
+function certRowParticipantId(id: string): string {
+  return id.includes(':') ? id.slice(id.indexOf(':') + 1) : id;
+}
+
+function certRowCategoryId(id: string): string | null {
+  return id.includes(':') ? id.slice(0, id.indexOf(':')) : null;
+}
+
+function issueMatchesRow(issue: ListedIssue, row: CertRow): boolean {
+  const pid = certRowParticipantId(row.id);
+  const catId = certRowCategoryId(row.id);
+  const uuid = /^[0-9a-f-]{36}$/i.test(pid);
+  if (uuid && issue.participantId === pid) {
+    if (catId && issue.categoryId) return issue.categoryId === catId;
+    return true;
+  }
+  const name = String(row.row.name ?? row.fileName).trim().toLowerCase();
+  const email = (row.email ?? '').trim().toLowerCase();
+  const issueName = issue.recipientName.trim().toLowerCase();
+  const issueEmail = (issue.recipientEmail ?? '').trim().toLowerCase();
+  if (email && issueEmail && email === issueEmail) {
+    return !name || !issueName || name === issueName;
+  }
+  return Boolean(name && issueName && name === issueName && !email && !issueEmail);
+}
+
+function issuesForSelectedRows(issues: ListedIssue[], selected: CertRow[]): ListedIssue[] {
+  return issues.filter((issue) => selected.some((row) => issueMatchesRow(issue, row)));
+}
+
+function recipientExtra(row: CertificateRow): string {
+  const parts = [cellText(row.category), cellText(row.place)].filter(Boolean);
+  return parts.join(' · ');
 }
 
 export default function CertificatesPage() {
@@ -165,7 +205,9 @@ export default function CertificatesPage() {
   const [templateBytes, setTemplateBytes] = useState<Uint8Array | null>(null);
   const [layout, setLayout] = useState<CertificateLayout | null>(null);
   const [fields, setFields] = useState<CertificateField[]>([]);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [rows, setRows] = useState<CertRow[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [selectedColumn, setSelectedColumn] = useState('name');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -181,6 +223,7 @@ export default function CertificatesPage() {
   const [confirmChecked, setConfirmChecked] = useState(false);
   const [sendTyped, setSendTyped] = useState('');
   const [resendEmailed, setResendEmailed] = useState(false);
+  const [mailIssueIds, setMailIssueIds] = useState<Set<string>>(() => new Set());
   const [issues, setIssues] = useState<ListedIssue[]>([]);
   const [emailResults, setEmailResults] = useState<EmailResultRow[] | null>(null);
 
@@ -193,6 +236,7 @@ export default function CertificatesPage() {
       next.delete('tournament');
       setMode('csv');
       setRows([]);
+      setSelectedIds(new Set());
       setMessage(null);
       setIssuedSummary(null);
     }
@@ -205,6 +249,23 @@ export default function CertificatesPage() {
   }
 
   const columns = useMemo(() => collectColumns(rows.map((r) => r.row)), [rows]);
+
+  const rowIdsKey = rows.map((r) => r.id).join('|');
+  useEffect(() => {
+    const ids = rowIdsKey ? rowIdsKey.split('|') : [];
+    setSelectedIds((prev) => {
+      const kept = ids.filter((id) => prev.has(id));
+      const added = ids.filter((id) => !prev.has(id));
+      if (kept.length > 0) return new Set([...kept, ...added]);
+      return new Set(ids);
+    });
+  }, [rowIdsKey]);
+
+  const selectedRows = useMemo(
+    () => rows.filter((r) => selectedIds.has(r.id)),
+    [rows, selectedIds],
+  );
+  const allRecipientsSelected = rows.length > 0 && selectedRows.length === rows.length;
 
   useEffect(() => {
     if (columns.length && !columns.includes(selectedColumn)) {
@@ -433,6 +494,7 @@ export default function CertificatesPage() {
         fields: [],
       });
       setFields([]);
+      setSelectedFieldId(null);
       setMessage(`Template loaded (${Math.round(size.pageWidth)}×${Math.round(size.pageHeight)} pt)`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read PDF');
@@ -443,6 +505,7 @@ export default function CertificatesPage() {
     setTemplateBytes(null);
     setLayout(null);
     setFields([]);
+    setSelectedFieldId(null);
     setMessage(null);
     setError(null);
   }
@@ -492,6 +555,7 @@ export default function CertificatesPage() {
       font: 'Helvetica-Bold',
     };
     setSelectedColumn(column);
+    setSelectedFieldId(id);
     setFields((prev) => [...prev, field]);
   }
 
@@ -530,11 +594,16 @@ export default function CertificatesPage() {
       setError('Need a template, fields, and at least one recipient');
       return;
     }
+    if (selectedRows.length === 0) {
+      setError('Pick at least one recipient');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const stamped = await stampReservedSerials(rows);
-      setRows(stamped);
+      const stamped = await stampReservedSerials(selectedRows);
+      const stampedById = new Map(stamped.map((r) => [r.id, r]));
+      setRows((prev) => prev.map((r) => stampedById.get(r.id) ?? r));
       const full: CertificateLayout = { ...layout, fields };
       const batch = await generateCertificateBatch(
         templateBytes,
@@ -561,12 +630,17 @@ export default function CertificatesPage() {
       setError('Need a template, fields, and recipients');
       return;
     }
+    if (selectedRows.length === 0) {
+      setError('Pick at least one recipient');
+      return;
+    }
     setBusy(true);
     setError(null);
     setIssuedSummary(null);
     try {
-      const stamped = await stampReservedSerials(rows);
-      setRows(stamped);
+      const stamped = await stampReservedSerials(selectedRows);
+      const stampedById = new Map(stamped.map((r) => [r.id, r]));
+      setRows((prev) => prev.map((r) => stampedById.get(r.id) ?? r));
       const full: CertificateLayout = { ...layout, fields };
       const batch = await generateCertificateBatch(
         templateBytes,
@@ -576,9 +650,11 @@ export default function CertificatesPage() {
 
       const items = batch.digital.map((d, i) => {
         const src = stamped[i]!;
-        const participantId = src.id.includes(':') ? src.id.split(':')[1]! : src.id;
+        const participantId = certRowParticipantId(src.id);
+        const categoryId = certRowCategoryId(src.id);
         return {
           participantId: /^[0-9a-f-]{36}$/i.test(participantId) ? participantId : null,
+          categoryId: categoryId && /^[0-9a-f-]{36}$/i.test(categoryId) ? categoryId : null,
           type: (mode === 'winner' ? 'winner' : 'participation') as 'participation' | 'winner',
           rank: typeof src.row.rank === 'number' ? src.row.rank : Number(src.row.rank) || null,
           recipientEmail: src.email || null,
@@ -608,16 +684,27 @@ export default function CertificatesPage() {
     }
   }
 
+  const selectedIssues = useMemo(
+    () => issuesForSelectedRows(issues, selectedRows),
+    [issues, selectedRows],
+  );
   const confirmPool = useMemo(
-    () => pendingTargets(issues, resendEmailed),
-    [issues, resendEmailed],
+    () => pendingTargets(selectedIssues, resendEmailed),
+    [selectedIssues, resendEmailed],
   );
   const willMail = useMemo(
-    () => confirmPool.filter((i) => looksLikeEmail(i.recipientEmail)),
-    [confirmPool],
+    () =>
+      confirmPool.filter(
+        (i) => looksLikeEmail(i.recipientEmail) && mailIssueIds.has(i.id),
+      ),
+    [confirmPool, mailIssueIds],
   );
   const skipped = useMemo(
     () => confirmPool.filter((i) => !looksLikeEmail(i.recipientEmail)),
+    [confirmPool],
+  );
+  const mailCandidates = useMemo(
+    () => confirmPool.filter((i) => looksLikeEmail(i.recipientEmail)),
     [confirmPool],
   );
   const statusRows = useMemo(() => {
@@ -660,6 +747,10 @@ export default function CertificatesPage() {
       setError('Choose a tournament before emailing certificates.');
       return;
     }
+    if (selectedRows.length === 0) {
+      setError('Pick at least one recipient');
+      return;
+    }
     setError(null);
     await persistEmailCopy();
     const listed = await apiListCertificates(tournamentId);
@@ -668,10 +759,15 @@ export default function CertificatesPage() {
       return;
     }
     setIssues(listed.data.issues);
-    if (listed.data.issues.length === 0) {
-      setError('No issued certificates to email. Issue digital PDFs first.');
+    const matched = issuesForSelectedRows(listed.data.issues, selectedRows);
+    if (matched.length === 0) {
+      setError('Issue digital for the selected people first.');
       return;
     }
+    const initialMail = pendingTargets(matched, false).filter((i) =>
+      looksLikeEmail(i.recipientEmail),
+    );
+    setMailIssueIds(new Set(initialMail.map((i) => i.id)));
     setConfirmChecked(false);
     setSendTyped('');
     setResendEmailed(false);
@@ -686,7 +782,7 @@ export default function CertificatesPage() {
     try {
       await persistEmailCopy();
       const emailRes = await apiEmailCertificates(tournamentId, {
-        allPending: true,
+        issueIds: willMail.map((i) => i.id),
         resend: resendEmailed,
         subject: subjectDraft.trim() || DEFAULT_CERT_EMAIL_SUBJECT,
         body: bodyDraft.trim() || DEFAULT_CERT_EMAIL_BODY,
@@ -745,7 +841,7 @@ export default function CertificatesPage() {
     await persistTournament({ prizePlaces, awardScope });
   }
 
-  const sample = rows[0]?.row;
+  const sample = (selectedRows[0] ?? rows[0])?.row;
   const canSendConfirm =
     confirmChecked && sendTyped === 'SEND' && willMail.length > 0 && !busy;
 
@@ -792,7 +888,7 @@ export default function CertificatesPage() {
         )}
         {!tournamentId && (
           <span className="form-hint">
-            Required before Issue digital or Email pending. With a tournament selected, participants
+            Required before Issue digital or Email selected. With a tournament selected, participants
             load automatically — CSV is only for external lists.
           </span>
         )}
@@ -881,8 +977,79 @@ export default function CertificatesPage() {
               <option value="overall">Overall</option>
             </select>
           </label>
-          <span className="form-hint">{rows.length} recipient(s)</span>
+          <span className="form-hint">
+            {selectedRows.length} of {rows.length} selected
+          </span>
         </div>
+      )}
+
+      {rows.length > 0 && (
+        <section className="cert-recipients">
+          <div className="cert-recipients-head">
+            <h3>Recipients</h3>
+            <span className="form-hint">
+              Download, issue, and email use the checked people only.
+            </span>
+          </div>
+          <div className="cert-recipients-scroll">
+            <table className="cert-results-table cert-recipients-table">
+              <thead>
+                <tr>
+                  <th className="cert-check-col">
+                    <input
+                      type="checkbox"
+                      checked={allRecipientsSelected}
+                      ref={(el) => {
+                        if (el) {
+                          el.indeterminate =
+                            selectedRows.length > 0 && !allRecipientsSelected;
+                        }
+                      }}
+                      onChange={() => {
+                        setSelectedIds(
+                          allRecipientsSelected
+                            ? new Set()
+                            : new Set(rows.map((r) => r.id)),
+                        );
+                      }}
+                      aria-label="Select all recipients"
+                    />
+                  </th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const extra = recipientExtra(r.row);
+                  return (
+                    <tr key={r.id} className={selectedIds.has(r.id) ? 'is-selected' : ''}>
+                      <td className="cert-check-col">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(r.id)}
+                          onChange={() => {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(r.id)) next.delete(r.id);
+                              else next.add(r.id);
+                              return next;
+                            });
+                          }}
+                          aria-label={`Select ${String(r.row.name ?? r.fileName)}`}
+                        />
+                      </td>
+                      <td>{String(r.row.name ?? r.fileName)}</td>
+                      <td>{r.email || '—'}</td>
+                      <td>{extra || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       {tournament && (
@@ -1019,15 +1186,39 @@ export default function CertificatesPage() {
               <li className="cert-field-empty">No fields placed yet</li>
             )}
             {fields.map((f) => (
-              <li key={f.id}>
+              <li
+                key={f.id}
+                className={selectedFieldId === f.id ? 'is-selected' : ''}
+                onClick={() => setSelectedFieldId(f.id)}
+              >
                 <span>
                   <span className="cert-field-name">{certificateColumnLabel(f.sourceColumn)}</span>
                   <span className="cert-field-key">{f.sourceColumn}</span>
                 </span>
+                <NumberField
+                  className="cert-field-size"
+                  label="pt"
+                  inputClassName="input input-sm"
+                  value={f.fontSize}
+                  min={FONT_SIZE_MIN}
+                  max={FONT_SIZE_MAX}
+                  required
+                  onChange={(n) => {
+                    if (n == null) return;
+                    setSelectedFieldId(f.id);
+                    setFields((prev) =>
+                      prev.map((x) => (x.id === f.id ? { ...x, fontSize: n } : x)),
+                    );
+                  }}
+                />
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFields((prev) => prev.filter((x) => x.id !== f.id));
+                    setSelectedFieldId((cur) => (cur === f.id ? null : cur));
+                  }}
                 >
                   Remove
                 </button>
@@ -1042,26 +1233,36 @@ export default function CertificatesPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !templateBytes || fields.length === 0 || rows.length === 0}
+              disabled={
+                busy ||
+                !templateBytes ||
+                fields.length === 0 ||
+                selectedRows.length === 0
+              }
               onClick={() => void exportPhysical()}
             >
-              Download print pack
+              Download print pack ({selectedRows.length})
             </button>
             <button
               type="button"
               className="btn btn-outline"
-              disabled={busy || !templateBytes || fields.length === 0 || rows.length === 0}
+              disabled={
+                busy ||
+                !templateBytes ||
+                fields.length === 0 ||
+                selectedRows.length === 0
+              }
               onClick={() => void issueDigital()}
             >
-              Issue digital
+              Issue digital ({selectedRows.length})
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !tournamentId}
+              disabled={busy || !tournamentId || selectedRows.length === 0}
               onClick={() => void openEmailConfirm()}
             >
-              Email pending
+              Email selected ({selectedRows.length})
             </button>
           </div>
           {message && <p className="form-hint">{message}</p>}
@@ -1082,9 +1283,11 @@ export default function CertificatesPage() {
               fields={fields}
               sampleRow={sample}
               selectedColumn={selectedColumn}
+              selectedFieldId={selectedFieldId}
               onPlace={placeFieldAt}
               onMoveField={moveField}
               onSelectColumn={setSelectedColumn}
+              onSelectField={setSelectedFieldId}
             />
           )}
         </div>
@@ -1135,7 +1338,7 @@ export default function CertificatesPage() {
             aria-labelledby="cert-email-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="cert-email-title">Email pending certificates</h2>
+            <h2 id="cert-email-title">Email selected certificates</h2>
             <p className="form-hint">
               This sends {willMail.length} email{willMail.length === 1 ? '' : 's'} with PDF
               attachments. It will not run until you confirm below.
@@ -1143,11 +1346,25 @@ export default function CertificatesPage() {
 
             <h3 className="settings-subtitle">Will be mailed ({willMail.length})</h3>
             <ul className="cert-mail-list">
-              {willMail.length === 0 && <li>No recipients with a valid email.</li>}
-              {willMail.map((i) => (
+              {mailCandidates.length === 0 && <li>No recipients with a valid email.</li>}
+              {mailCandidates.map((i) => (
                 <li key={i.id}>
-                  {i.recipientName} — {i.recipientEmail}
-                  {i.serial ? ` (${i.serial})` : ''}
+                  <label className="settings-check">
+                    <input
+                      type="checkbox"
+                      checked={mailIssueIds.has(i.id)}
+                      onChange={() => {
+                        setMailIssueIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(i.id)) next.delete(i.id);
+                          else next.add(i.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    {i.recipientName} — {i.recipientEmail}
+                    {i.serial ? ` (${i.serial})` : ''}
+                  </label>
                 </li>
               ))}
             </ul>
@@ -1173,7 +1390,18 @@ export default function CertificatesPage() {
               <input
                 type="checkbox"
                 checked={resendEmailed}
-                onChange={(e) => setResendEmailed(e.target.checked)}
+                onChange={(e) => {
+                  const nextResend = e.target.checked;
+                  setResendEmailed(nextResend);
+                  const pool = pendingTargets(selectedIssues, nextResend);
+                  setMailIssueIds(
+                    new Set(
+                      pool
+                        .filter((i) => looksLikeEmail(i.recipientEmail))
+                        .map((i) => i.id),
+                    ),
+                  );
+                }}
               />
               Also resend certificates already marked emailed
             </label>

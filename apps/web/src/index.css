@@ -2495,6 +2495,12 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   padding: 0.15rem 0;
   overflow-wrap: anywhere;
 }
+
+.cert-mail-list .settings-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
 .cert-email-preview-subject {
   margin: 0 0 0.4rem;
   font-size: 0.88rem;
@@ -2540,6 +2546,39 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink-300);
+}
+
+.cert-recipients {
+  margin: 0 0 1.25rem;
+}
+
+.cert-recipients-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.cert-recipients-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.cert-recipients-scroll {
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.cert-recipients-table .cert-check-col {
+  width: 2.1rem;
+  text-align: center;
+}
+
+.cert-recipients-table tr.is-selected td {
+  background: rgba(196, 165, 116, 0.12);
 }
 
 .cert-workspace {
@@ -2653,6 +2692,7 @@ details[open] .round-summary::before { transform: rotate(90deg); }
 
 .cert-field-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
@@ -2662,6 +2702,31 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   border: 1px solid var(--color-border);
   font-size: 0.9rem;
   color: var(--wood-100);
+  cursor: pointer;
+}
+
+.cert-field-list li.is-selected {
+  border-color: var(--wood-400);
+  background: rgba(196, 165, 116, 0.18);
+  box-shadow: inset 3px 0 0 var(--wood-400);
+}
+
+.cert-field-size {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.cert-field-size label {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ink-300);
+}
+
+.cert-field-size .input {
+  width: 3.4rem;
+  padding: 0.25rem 0.35rem;
 }
 
 .cert-field-list .cert-field-name {
@@ -2681,6 +2746,7 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   color: var(--ink-300);
   font-style: italic;
   border-style: dashed;
+  cursor: default;
 }
 
 .cert-actions {
@@ -2786,6 +2852,13 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   user-select: none;
   line-height: 1.15;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.cert-field-marker.is-selected {
+  border-style: solid;
+  border-color: #8a6a20;
+  background: rgba(255, 236, 170, 0.78);
+  box-shadow: 0 0 0 2px rgba(180, 140, 60, 0.45);
 }
 
 .cert-field-label {

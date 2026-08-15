@@ -229,6 +229,8 @@ export async function apiListCertificates(tournamentId: string) {
     issues: Array<{
       id: string;
       tournamentId: string;
+      participantId?: string | null;
+      categoryId?: string | null;
       recipientName: string;
       recipientEmail?: string | null;
       type: 'participation' | 'winner';

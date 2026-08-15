@@ -14,9 +14,11 @@ interface CertificateDesignerCanvasProps {
   fields: CertificateField[];
   sampleRow?: CertificateRow;
   selectedColumn: string;
+  selectedFieldId?: string | null;
   onPlace: (x: number, y: number, column?: string) => void;
   onMoveField: (id: string, x: number, y: number) => void;
   onSelectColumn?: (column: string) => void;
+  onSelectField?: (id: string) => void;
 }
 
 /** Render page 1 to canvas so overlay % coords match PDF page coords 1:1. */
@@ -27,9 +29,11 @@ export default function CertificateDesignerCanvas({
   fields,
   sampleRow,
   selectedColumn,
+  selectedFieldId,
   onPlace,
   onMoveField,
   onSelectColumn,
+  onSelectField,
 }: CertificateDesignerCanvasProps) {
   const pageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -122,6 +126,7 @@ export default function CertificateDesignerCanvas({
     e.stopPropagation();
     e.preventDefault();
     if (spaceDown) return;
+    onSelectField?.(id);
 
     const move = (ev: MouseEvent) => {
       const norm = clientToNorm(ev.clientX, ev.clientY);
@@ -241,7 +246,7 @@ export default function CertificateDesignerCanvas({
                 return (
                   <div
                     key={f.id}
-                    className="cert-field-marker"
+                    className={`cert-field-marker${selectedFieldId === f.id ? ' is-selected' : ''}`}
                     style={{
                       left: `${f.x * 100}%`,
                       top: `${f.y * 100}%`,
