@@ -60,64 +60,14 @@ export default defineConfig(({ mode }) => {
           }
         },
       },
-      // Service workers interfere with Electron file:// / loadFile — skip for desktop builds
+      // Emit a self-destroying sw.js so existing installs uninstall themselves.
+      // Offline data lives in IndexedDB; a caching SW was intercepting /api (Failed to fetch)
+      // while Supabase auth (other origin) still worked.
       !isDesktopBuild &&
         VitePWA({
-          registerType: 'autoUpdate',
+          selfDestroying: true,
           injectRegister: false,
-          workbox: {
-            // Do not precache index.html — a cached shell hides deploys until cache wipe.
-            globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
-            globIgnores: ['**/index.html', '**/sw.js', '**/registerSW.js'],
-            navigateFallback: 'index.html',
-            navigateFallbackDenylist: [/^\/api/, /^\/t\//, /^\/live\//],
-            cleanupOutdatedCaches: true,
-            skipWaiting: true,
-            clientsClaim: true,
-            runtimeCaching: [
-              {
-                urlPattern: ({ url }) => url.pathname.startsWith('/api'),
-                handler: 'NetworkOnly',
-              },
-              {
-                urlPattern: ({ request }) => request.mode === 'navigate',
-                handler: 'NetworkFirst',
-                options: {
-                  cacheName: 'html-shell',
-                  networkTimeoutSeconds: 4,
-                  expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 },
-                },
-              },
-            ],
-            maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-            disableDevLogs: true,
-          },
-          devOptions: {
-            enabled: false,
-          },
-          manifest: {
-            name: 'Chess Alokas',
-            short_name: 'Chess Alokas',
-            description: 'Offline-first chess tournament pairing system',
-            theme_color: '#0f3d2e',
-            background_color: '#0f3d2e',
-            display: 'standalone',
-            start_url: '/app',
-            icons: [
-              {
-                src: '/favicon.svg',
-                sizes: 'any',
-                type: 'image/svg+xml',
-                purpose: 'any',
-              },
-              {
-                src: '/icon-512.svg',
-                sizes: '512x512',
-                type: 'image/svg+xml',
-                purpose: 'any maskable',
-              },
-            ],
-          },
+          manifest: false,
         }),
       uploadSourceMaps &&
         sentryVitePlugin({

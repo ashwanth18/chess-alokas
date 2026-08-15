@@ -39,6 +39,32 @@
       </div>
     </div>
     <script>
+      (function () {
+        var FLAG = 'alokas-sw-cleared';
+        if (!('serviceWorker' in navigator)) return;
+        Promise.all([
+          navigator.serviceWorker.getRegistrations(),
+          window.caches ? caches.keys() : Promise.resolve([]),
+        ]).then(function (result) {
+          var regs = result[0];
+          var keys = result[1];
+          var tasks = regs.map(function (r) {
+            return r.unregister();
+          });
+          keys.forEach(function (k) {
+            tasks.push(caches.delete(k));
+          });
+          return Promise.all(tasks).then(function () {
+            if (
+              (regs.length || navigator.serviceWorker.controller) &&
+              !sessionStorage.getItem(FLAG)
+            ) {
+              sessionStorage.setItem(FLAG, '1');
+              location.reload();
+            }
+          });
+        });
+      })();
       setTimeout(function () {
         var el = document.getElementById('boot-splash-msg');
         if (el) {
