@@ -19,6 +19,8 @@ import {
   countCardsForPlayer,
   emptyCardCounts,
   exclusionStatus,
+  isAbsenceResult,
+  isCardLimitAutoResult,
   isExcludedFromRound,
   normalizeTiebreakOrder,
   withAbsentThisRound,
@@ -129,12 +131,15 @@ function ResultSelector({
   isBye,
   readOnly,
   locked,
+  hideAbsence,
 }: {
   value: string;
   onChange: (r: GameResult) => void;
   isBye: boolean;
   readOnly?: boolean;
   locked?: boolean;
+  /** Hide no-show buttons once cards show the game started. */
+  hideAbsence?: boolean;
 }) {
   if (isBye) return <span className="result-bye">BYE (1pt)</span>;
   if (readOnly) {
@@ -153,9 +158,12 @@ function ResultSelector({
     { value: '0-1F', label: 'White abs.' },
     { value: '0-0', label: 'Both abs.' },
   ];
+  const visible = hideAbsence
+    ? options.filter((opt) => !isAbsenceResult(opt.value) || opt.value === value)
+    : options;
   return (
     <div className="result-selector">
-      {options.map((opt) => (
+      {visible.map((opt) => (
         <button
           key={opt.value}
           type="button"
@@ -1245,8 +1253,8 @@ export default function TournamentPage() {
         if (res.data.forfeited) {
           setCardMsg(
             res.data.forfeitReason
-              ? `Auto-forfeit: ${res.data.forfeitReason}`
-              : 'Auto-forfeit applied',
+              ? `Auto-loss: ${res.data.forfeitReason}`
+              : 'Card-limit loss applied',
           );
         }
       } finally {
@@ -1261,9 +1269,13 @@ export default function TournamentPage() {
       if (!id || !tournament) return;
       const game = (games ?? []).find((g) => g.id === gameId);
       if (!game) return;
-      const cardForfeit =
-        Boolean(game.resultLockedAt) &&
-        (game.result === '1-0F' || game.result === '0-1F');
+      const gameCards = roundCards.filter((c) => c.gameId === gameId);
+      const cardForfeit = isCardLimitAutoResult(
+        game.result,
+        Boolean(game.resultLockedAt),
+        game.whiteId ? countCardsForPlayer(gameCards, game.whiteId) : emptyCardCounts(),
+        game.blackId ? countCardsForPlayer(gameCards, game.blackId) : emptyCardCounts(),
+      );
       if (!canEditRoundResults(tournament, game.round)) return;
       if (game.result !== 'pending' && !cardForfeit) return;
       const last = [...roundCards]
@@ -1284,6 +1296,8 @@ export default function TournamentPage() {
           await db.games.update(gameId, {
             result: res.data.game.result as GameResult,
             resultLockedAt: res.data.game.resultLockedAt ?? null,
+            resultEnteredByName: res.data.game.resultEnteredByName ?? null,
+            resultEnteredByRole: res.data.game.resultEnteredByRole ?? null,
             updatedAt: res.data.game.updatedAt || nowIso(),
             dirty: 0,
           });
@@ -1291,7 +1305,7 @@ export default function TournamentPage() {
         const cardsRes = await apiListGameCards(id, displayRound);
         if (cardsRes.ok && cardsRes.data?.cards) setRoundCards(cardsRes.data.cards);
         if (res.data?.unlocked) {
-          setCardMsg('Card removed — board unlocked (forfeit cleared).');
+          setCardMsg('Card removed — board unlocked.');
         }
       } finally {
         setCardBusyId(null);
@@ -2285,9 +2299,12 @@ export default function TournamentPage() {
                 const blackCounts = game.blackId
                   ? countCardsForPlayer(gameCards, game.blackId)
                   : emptyCardCounts();
-                const cardForfeitLocked =
-                  Boolean(game.resultLockedAt) &&
-                  (game.result === '1-0F' || game.result === '0-1F');
+                const cardForfeitLocked = isCardLimitAutoResult(
+                  game.result,
+                  Boolean(game.resultLockedAt),
+                  whiteCounts,
+                  blackCounts,
+                );
                 const canCard =
                   Boolean(tournament) &&
                   !game.isBye &&
@@ -2463,6 +2480,13 @@ export default function TournamentPage() {
                       onChange={(r) => requestGameResult(game.id, r)}
                       isBye={game.isBye}
                       locked={Boolean(game.resultLockedAt)}
+                      hideAbsence={
+                        whiteCounts.illegalMove +
+                          whiteCounts.warning +
+                          blackCounts.illegalMove +
+                          blackCounts.warning >
+                        0
+                      }
                       readOnly={
                         !tournament || !canEditRoundResults(tournament, game.round)
                       }

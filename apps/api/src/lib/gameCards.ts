@@ -1,9 +1,13 @@
 import {
   ILLEGAL_MOVE_LIMIT,
   WARNING_LIMIT,
+  atCardLimit,
   cardLimit,
+  cardLimitBannerReason,
   countCardsForPlayer,
   emptyCardCounts,
+  isAbsenceResult,
+  isCardLimitAutoResult,
   type Game,
   type GameCard,
   type GameCardType,
@@ -35,12 +39,13 @@ export type IssueCardResult =
     }
   | { ok: false; status: number; error: string };
 
-export function forfeitResultForOffender(
+/** Played win for the opponent — the game started, so this is not a no-show. */
+export function cardLimitLossResult(
   game: Game,
   offenderId: string,
-): '1-0F' | '0-1F' | null {
-  if (game.whiteId === offenderId) return '0-1F';
-  if (game.blackId === offenderId) return '1-0F';
+): '1-0' | '0-1' | null {
+  if (game.whiteId === offenderId) return '0-1';
+  if (game.blackId === offenderId) return '1-0';
   return null;
 }
 
@@ -49,6 +54,25 @@ export function forfeitReasonForCard(cardType: GameCardType, count: number): str
     return `${count} illegal move${count === 1 ? '' : 's'} (limit ${ILLEGAL_MOVE_LIMIT})`;
   }
   return `${count} warning${count === 1 ? '' : 's'} (limit ${WARNING_LIMIT})`;
+}
+
+/** Floor/director must not record a no-show after cards (the game already started). */
+export function absenceBlockedByCards(
+  result: string,
+  cards: GameCard[],
+): string | null {
+  if (!isAbsenceResult(result)) return null;
+  if (cards.length === 0) return null;
+  return 'This board already has cards, so the game started. Score a played result (1-0 / 0-1 / draw), not an absence.';
+}
+
+export function publicCardLimitReason(
+  result: string,
+  whiteCounts: PlayerCardCounts,
+  blackCounts: PlayerCardCounts,
+): string | null {
+  if (!atCardLimit(whiteCounts) && !atCardLimit(blackCounts)) return null;
+  return cardLimitBannerReason(result, whiteCounts, blackCounts);
 }
 
 export async function issueGameCard(
@@ -108,14 +132,14 @@ export async function issueGameCard(
   let forfeitReason: string | null = null;
 
   if (afterCount >= limit) {
-    const forfeit = forfeitResultForOffender(game, playerId);
-    if (!forfeit) {
-      return { ok: false, status: 500, error: 'Could not determine forfeit side' };
+    const loss = cardLimitLossResult(game, playerId);
+    if (!loss) {
+      return { ok: false, status: 500, error: 'Could not determine which side lost' };
     }
     forfeitReason = forfeitReasonForCard(cardType, afterCount);
     const note = [forfeitReason, input.note?.trim()].filter(Boolean).join(' — ');
     const saved = await store.recordGameResult(game.id, {
-      result: forfeit,
+      result: loss,
       actorRole: input.actorRole,
       actorName: input.actorName,
       actorUserId: input.actorUserId,
@@ -123,7 +147,7 @@ export async function issueGameCard(
       lock: true,
     });
     if (!saved) {
-      return { ok: false, status: 500, error: 'Failed to apply forfeit' };
+      return { ok: false, status: 500, error: 'Failed to apply card-limit loss' };
     }
     updatedGame = saved;
     forfeited = true;
@@ -157,21 +181,27 @@ export async function countsForGame(store: Store, game: Game): Promise<{
   };
 }
 
-function isCardAutoForfeit(result: string): boolean {
-  return result === '1-0F' || result === '0-1F';
-}
-
-/** True when remaining cards for either side are still at/over a card limit. */
-function stillAtCardLimit(
-  game: Game,
-  cards: GameCard[],
-): boolean {
+function stillAtCardLimit(game: Game, cards: GameCard[]): boolean {
   for (const pid of [game.whiteId, game.blackId]) {
     if (!pid) continue;
-    const c = countCardsForPlayer(cards, pid);
-    if (c.illegalMove >= ILLEGAL_MOVE_LIMIT || c.warning >= WARNING_LIMIT) return true;
+    if (atCardLimit(countCardsForPlayer(cards, pid))) return true;
   }
   return false;
+}
+
+function wasCardLimitAutoLoss(game: Game, cards: GameCard[]): boolean {
+  const whiteCounts = game.whiteId
+    ? countCardsForPlayer(cards, game.whiteId)
+    : emptyCardCounts();
+  const blackCounts = game.blackId
+    ? countCardsForPlayer(cards, game.blackId)
+    : emptyCardCounts();
+  return isCardLimitAutoResult(
+    game.result,
+    Boolean(game.resultLockedAt),
+    whiteCounts,
+    blackCounts,
+  );
 }
 
 export type RemoveCardResult =
@@ -186,8 +216,8 @@ export type RemoveCardResult =
   | { ok: false; status: number; error: string };
 
 /**
- * Soft-delete a card. If the board was auto-forfeited by a card limit and counts
- * drop below the limit, clear the forfeit and unlock the result.
+ * Soft-delete a card. If the board was auto-lost by a card limit and counts
+ * drop below the limit, clear the result and unlock.
  */
 export async function removeGameCard(
   store: Store,
@@ -209,18 +239,17 @@ export async function removeGameCard(
     return { ok: false, status: 404, error: 'Card not found' };
   }
 
-  const wasCardForfeit =
-    Boolean(game.resultLockedAt) && isCardAutoForfeit(game.result);
+  const wasCardLoss = wasCardLimitAutoLoss(game, cards);
 
-  // Allow remove while pending, or while locked only if it was a card auto-forfeit.
-  if (game.result !== 'pending' && !wasCardForfeit) {
+  // Allow remove while pending, or while locked only if it was a card auto-loss.
+  if (game.result !== 'pending' && !wasCardLoss) {
     return {
       ok: false,
       status: 409,
       error: 'Cannot remove cards after the result is entered or locked',
     };
   }
-  if (game.result === 'pending' && game.resultLockedAt && !wasCardForfeit) {
+  if (game.result === 'pending' && game.resultLockedAt && !wasCardLoss) {
     return {
       ok: false,
       status: 409,
@@ -237,10 +266,12 @@ export async function removeGameCard(
   let updatedGame = game;
   let unlocked = false;
 
-  if (wasCardForfeit && !stillAtCardLimit(game, remaining)) {
+  if (wasCardLoss && !stillAtCardLimit(game, remaining)) {
     const cleared = await store.updateGame(game.id, {
       result: 'pending',
       resultLockedAt: null,
+      resultEnteredByName: null,
+      resultEnteredByRole: null,
       updatedAt: new Date().toISOString(),
     });
     if (cleared) {

@@ -71,14 +71,19 @@ export const GameResultSchema = z.enum([
   '1/2-1/2',
   'bye',
   'pending',
-  /** Black absent/forfeit — White wins */
+  /** Black no-show — White wins. Unplayed: no colour, rematch allowed. */
   '1-0F',
-  /** White absent/forfeit — Black wins */
+  /** White no-show — Black wins. Unplayed: no colour, rematch allowed. */
   '0-1F',
-  /** Both absent */
+  /** Both absent. Unplayed. */
   '0-0',
 ]);
 export type GameResult = z.infer<typeof GameResultSchema>;
+
+/** No-show / double no-show. Card-limit losses are played 1-0 / 0-1, not these. */
+export function isAbsenceResult(result: string): boolean {
+  return result === '1-0F' || result === '0-1F' || result === '0-0';
+}
 
 /** Results the floor arbiter may confirm (excludes bye/pending). */
 export const ArbiterScorableResultSchema = z.enum([
@@ -280,6 +285,69 @@ export const WARNING_LIMIT = 3;
 
 export function cardLimit(cardType: GameCardType): number {
   return cardType === 'illegal_move' ? ILLEGAL_MOVE_LIMIT : WARNING_LIMIT;
+}
+
+export function atCardLimit(counts: PlayerCardCounts): boolean {
+  return counts.illegalMove >= ILLEGAL_MOVE_LIMIT || counts.warning >= WARNING_LIMIT;
+}
+
+/**
+ * Locked board whose result was produced by a card limit (played 1-0/0-1),
+ * including historical rows that were stored as 1-0F/0-1F before that split.
+ */
+export function isCardLimitAutoResult(
+  result: string,
+  locked: boolean,
+  whiteCounts: PlayerCardCounts,
+  blackCounts: PlayerCardCounts,
+): boolean {
+  if (!locked) return false;
+  if (
+    result !== '1-0' &&
+    result !== '0-1' &&
+    result !== '1-0F' &&
+    result !== '0-1F'
+  ) {
+    return false;
+  }
+  return atCardLimit(whiteCounts) || atCardLimit(blackCounts);
+}
+
+/** Short floor/live banner, e.g. "2 illegal moves". */
+export function cardLimitBannerReason(
+  result: string,
+  whiteCounts: PlayerCardCounts,
+  blackCounts: PlayerCardCounts,
+): string | null {
+  if (
+    result !== '1-0' &&
+    result !== '0-1' &&
+    result !== '1-0F' &&
+    result !== '0-1F'
+  ) {
+    return null;
+  }
+  const offenderIsWhite = result === '0-1' || result === '0-1F';
+  const counts = offenderIsWhite ? whiteCounts : blackCounts;
+  if (counts.illegalMove >= ILLEGAL_MOVE_LIMIT) {
+    return `${counts.illegalMove} illegal moves`;
+  }
+  if (counts.warning >= WARNING_LIMIT) {
+    return `${counts.warning} warnings`;
+  }
+  if (atCardLimit(whiteCounts)) {
+    if (whiteCounts.illegalMove >= ILLEGAL_MOVE_LIMIT) {
+      return `${whiteCounts.illegalMove} illegal moves`;
+    }
+    return `${whiteCounts.warning} warnings`;
+  }
+  if (atCardLimit(blackCounts)) {
+    if (blackCounts.illegalMove >= ILLEGAL_MOVE_LIMIT) {
+      return `${blackCounts.illegalMove} illegal moves`;
+    }
+    return `${blackCounts.warning} warnings`;
+  }
+  return null;
 }
 
 export const GameCardSchema = z.object({

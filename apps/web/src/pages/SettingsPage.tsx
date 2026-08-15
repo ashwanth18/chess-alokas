@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext';
 import { checkOnline } from '../api/client';
 import { getLastSyncAt } from '../db/local';
 import { syncOnline } from '../sync/sync';
+import { reportSyncFailure, syncErrorMessage } from '../lib/syncError';
 import type { DesktopUpdateStatus } from '../desktop';
 
 export default function SettingsPage() {
@@ -44,7 +45,8 @@ export default function SettingsPage() {
       setLastSync(now);
       setMessage(`Synced ↑ ${pushed} · ↓ ${pulled}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sync failed');
+      reportSyncFailure(err);
+      setError(syncErrorMessage(err));
     } finally {
       setSyncing(false);
     }

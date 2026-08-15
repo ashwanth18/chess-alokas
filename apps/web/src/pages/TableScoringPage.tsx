@@ -5,6 +5,7 @@ import {
   ILLEGAL_MOVE_LIMIT,
   WARNING_LIMIT,
   emptyCardCounts,
+  isAbsenceResult,
 } from '@chess-alokas/shared';
 import {
   apiPublicTableCard,
@@ -69,6 +70,16 @@ function resultLabel(result: string | null): string {
   if (!result) return '';
   const opt = RESULT_OPTIONS.find((o) => o.value === result);
   return opt ? `${opt.label} (${opt.hint})` : result;
+}
+
+function boardHasCards(view: FloorTableView): boolean {
+  return (
+    (view.whiteCards?.illegalMove ?? 0) +
+      (view.whiteCards?.warning ?? 0) +
+      (view.blackCards?.illegalMove ?? 0) +
+      (view.blackCards?.warning ?? 0) >
+    0
+  );
 }
 
 function CardChips({ counts }: { counts: PlayerCardCounts }) {
@@ -480,7 +491,7 @@ export default function TableScoringPage() {
           />
           <p className="table-score-result">{resultLabel(view.result)}</p>
           {view.forfeitReason && (
-            <p className="form-hint stage-banner-warn">Auto-forfeit: {view.forfeitReason}</p>
+            <p className="form-hint stage-banner-warn">Auto-loss: {view.forfeitReason}</p>
           )}
           <p className="form-hint">This result cannot be changed from the floor.</p>
         </div>
@@ -557,8 +568,16 @@ export default function TableScoringPage() {
             }}
           />
           <h2>Select result</h2>
+          {boardHasCards(view) ? (
+            <p className="form-hint">
+              Cards were issued, so this game started — score a played result, not an absence.
+            </p>
+          ) : null}
           <div className="table-score-options">
-            {RESULT_OPTIONS.map((opt) => (
+            {(boardHasCards(view)
+              ? RESULT_OPTIONS.filter((opt) => !isAbsenceResult(opt.value))
+              : RESULT_OPTIONS
+            ).map((opt) => (
               <button
                 key={opt.value}
                 type="button"
@@ -573,7 +592,7 @@ export default function TableScoringPage() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!selected}
+            disabled={!selected || (boardHasCards(view) && isAbsenceResult(selected))}
             onClick={() => setConfirming(true)}
           >
             Continue

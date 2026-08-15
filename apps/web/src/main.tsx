@@ -2,7 +2,7 @@ import './instrument';
 
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { reactErrorHandler } from '@sentry/react';
 import './index.css';
 
@@ -34,6 +34,10 @@ import LivePage from './pages/LivePage';
 const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
   import.meta.env.VITE_DESKTOP === '1';
+
+if (import.meta.env.VITE_DESKTOP !== '1') {
+  void import('./pwaRegister');
+}
 
 if (typeof document !== 'undefined' && isDesktop) {
   document.documentElement.classList.add('is-desktop');
@@ -116,8 +120,19 @@ function AppRoot() {
 
   useEffect(() => {
     let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      if (cancelled) return;
+      reportBootIssue(
+        'INDEXEDDB_OPEN_FAILED',
+        'The local tournament database took too long to open.',
+        'Timed out after 12s',
+      );
+      setDbFailed('Timed out opening the local database.');
+    }, 12_000);
+
     void ensureDbOpen().then((result) => {
       if (cancelled) return;
+      window.clearTimeout(timeout);
       if (result.ok) {
         setDbReady(true);
         return;
@@ -131,6 +146,7 @@ function AppRoot() {
     });
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
     };
   }, []);
 
@@ -169,6 +185,20 @@ function AppRoot() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/admin" element={<AdminPage />} />
           </Route>
+          <Route
+            path="*"
+            element={
+              <div className="auth-page">
+                <div className="auth-card">
+                  <h1>Page not found</h1>
+                  <p className="form-hint">This screen did not match a route. Open the tournament list to continue.</p>
+                  <Link className="btn btn-primary" to="/app">
+                    Go to tournaments
+                  </Link>
+                </div>
+              </div>
+            }
+          />
           </Routes>
         </>
       </Router>

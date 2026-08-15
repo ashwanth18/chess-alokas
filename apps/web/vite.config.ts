@@ -64,8 +64,31 @@ export default defineConfig(({ mode }) => {
       !isDesktopBuild &&
         VitePWA({
           registerType: 'autoUpdate',
+          injectRegister: false,
           workbox: {
-            globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+            // Do not precache index.html — a cached shell hides deploys until cache wipe.
+            globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
+            globIgnores: ['**/index.html', '**/sw.js', '**/registerSW.js'],
+            navigateFallback: 'index.html',
+            navigateFallbackDenylist: [/^\/api/, /^\/t\//, /^\/live\//],
+            cleanupOutdatedCaches: true,
+            skipWaiting: true,
+            clientsClaim: true,
+            runtimeCaching: [
+              {
+                urlPattern: ({ url }) => url.pathname.startsWith('/api'),
+                handler: 'NetworkOnly',
+              },
+              {
+                urlPattern: ({ request }) => request.mode === 'navigate',
+                handler: 'NetworkFirst',
+                options: {
+                  cacheName: 'html-shell',
+                  networkTimeoutSeconds: 4,
+                  expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 },
+                },
+              },
+            ],
             maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
             disableDevLogs: true,
           },

@@ -15,7 +15,7 @@ import type { EnginePlayer, PastGame } from '@chess-alokas/pairing-engine';
 import type { Participant, Game, Category } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { issueGameCard, removeGameCard } from '../lib/gameCards.js';
+import { absenceBlockedByCards, issueGameCard, removeGameCard } from '../lib/gameCards.js';
 import { BbpPairingsError, pairRoundOfficial } from '../lib/dutchPairing.js';
 
 interface PluginOptions extends FastifyPluginOptions {
@@ -339,6 +339,11 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
           error: 'Confirm required to change an entered result',
           code: 'CONFIRM_REQUIRED',
         });
+      }
+      const existingCards = await store.listGameCards(id);
+      const absenceBlock = absenceBlockedByCards(parsed.data.result, existingCards);
+      if (absenceBlock) {
+        return reply.code(409).send({ error: absenceBlock });
       }
       const updated = await store.recordGameResult(id, {
         result: parsed.data.result,

@@ -208,6 +208,35 @@ describe('pairSwissRound', () => {
     expect(section[1]!.buchholz).toBe(1);
   });
 
+  it('does not treat no-show forfeits as played opponents or colours', () => {
+    const plist = players(4);
+    const [a, b, c, d] = plist;
+    const past: PastGame[] = [
+      {
+        round: 1,
+        whiteId: a!.id,
+        blackId: b!.id,
+        result: '1-0F',
+        isBye: false,
+      },
+      {
+        round: 1,
+        whiteId: c!.id,
+        blackId: d!.id,
+        result: '1-0',
+        isBye: false,
+      },
+    ];
+    const standings = computeStandings(plist, past);
+    const byId = Object.fromEntries(standings.map((s) => [s.id, s]));
+    expect(byId[a!.id]!.opponents).toEqual([]);
+    expect(byId[b!.id]!.opponents).toEqual([]);
+    expect(byId[a!.id]!.colors).toEqual([]);
+    expect(byId[c!.id]!.opponents).toEqual([d!.id]);
+    expect(byId[c!.id]!.colors).toEqual(['W']);
+    expect(byId[a!.id]!.score).toBe(1);
+  });
+
   it('scores forfeit and double-absent results', () => {
     const plist = players(4);
     const [a, b, c, d] = plist;

@@ -66,6 +66,9 @@ export function gameForPlayerRound(
 export function formatResultLabel(result: string, isBye: boolean): string {
   if (isBye || result === 'bye') return 'Bye';
   if (result === 'pending') return 'Pending';
+  if (result === '1-0F') return '1-0F abs.';
+  if (result === '0-1F') return '0-1F abs.';
+  if (result === '0-0') return '0-0 abs.';
   return result;
 }
 

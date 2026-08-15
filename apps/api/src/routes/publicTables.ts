@@ -12,7 +12,12 @@ import {
   verifyArbiterSession,
 } from '../floor/pin.js';
 import type { FloorTableView } from '../floor/types.js';
-import { countsForGame, issueGameCard } from '../lib/gameCards.js';
+import {
+  absenceBlockedByCards,
+  countsForGame,
+  issueGameCard,
+  publicCardLimitReason,
+} from '../lib/gameCards.js';
 
 type Opts = { store: Store };
 
@@ -117,25 +122,10 @@ async function buildView(
   else if (game.resultLockedAt) status = 'locked';
   else if (game.result !== 'pending') status = 'locked';
 
-  let forfeitReason: string | null = null;
-  if (
-    status === 'locked' &&
-    (game.result === '1-0F' || game.result === '0-1F') &&
-    (cardInfo.whiteCounts.illegalMove >= 2 ||
-      cardInfo.whiteCounts.warning >= 3 ||
-      cardInfo.blackCounts.illegalMove >= 2 ||
-      cardInfo.blackCounts.warning >= 3)
-  ) {
-    const offenderIsWhite =
-      game.result === '0-1F' &&
-      (cardInfo.whiteCounts.illegalMove >= 2 || cardInfo.whiteCounts.warning >= 3);
-    const counts = offenderIsWhite ? cardInfo.whiteCounts : cardInfo.blackCounts;
-    if (counts.illegalMove >= 2) {
-      forfeitReason = `${counts.illegalMove} illegal moves`;
-    } else if (counts.warning >= 3) {
-      forfeitReason = `${counts.warning} warnings`;
-    }
-  }
+  const forfeitReason =
+    status === 'locked'
+      ? publicCardLimitReason(game.result, cardInfo.whiteCounts, cardInfo.blackCounts)
+      : null;
 
   return {
     slug: table.slug,
@@ -267,6 +257,12 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
       }
       if (game.resultLockedAt || game.result !== 'pending') {
         return reply.code(409).send({ error: 'Result already locked for this table' });
+      }
+
+      const existingCards = await store.listGameCards(game.id);
+      const absenceBlock = absenceBlockedByCards(parsed.data.result, existingCards);
+      if (absenceBlock) {
+        return reply.code(409).send({ error: absenceBlock });
       }
 
       const updated = await store.recordGameResult(game.id, {

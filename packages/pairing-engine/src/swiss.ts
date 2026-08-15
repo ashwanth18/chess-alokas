@@ -102,10 +102,18 @@ export function buildPlayerStates(
       const black = game.blackId ? states.get(game.blackId) : undefined;
       if (!white || !black) continue;
 
-      white.opponents.push(black.id);
-      black.opponents.push(white.id);
-      white.colors.push('W');
-      black.colors.push('B');
+      // C.04.2.3.5: no-shows are unplayed — no opponent, no colour.
+      // Played results (including card-limit 1-0 / 0-1) do count.
+      const played =
+        game.result === '1-0' ||
+        game.result === '0-1' ||
+        game.result === '1/2-1/2';
+      if (played) {
+        white.opponents.push(black.id);
+        black.opponents.push(white.id);
+        white.colors.push('W');
+        black.colors.push('B');
+      }
       white.floatHistory.push(null);
       black.floatHistory.push(null);
 
@@ -117,7 +125,7 @@ export function buildPlayerStates(
         white.score += 0.5;
         black.score += 0.5;
       }
-      // '0-0' both absent — no points; still counts as played for opponents/colors above.
+      // '0-0' / '1-0F' / '0-1F' — points as above; not opponents or colours.
     }
   }
 

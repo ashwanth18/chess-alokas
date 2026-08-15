@@ -1,4 +1,4 @@
-import { db, getOrCreateClientId, getLastSyncAt, setLastSyncAt } from '../db/local';
+import { db, getOrCreateClientId, getLastSyncAt, setLastSyncAt, ensureDbOpen } from '../db/local';
 import { apiSyncPush, apiSyncPull } from '../api/client';
 import type { LocalTournament, LocalCategory, LocalParticipant, LocalGame } from '../db/local';
 import { repairInvalidGameCategoryIds, softDeleteOrphanGames } from '../lib/poolCategory';
@@ -30,6 +30,9 @@ function toSyncItem(
 }
 
 export async function syncOnline(): Promise<{ pushed: number; pulled: number }> {
+  const opened = await ensureDbOpen();
+  if (!opened.ok) throw opened.error;
+
   const clientId = await getOrCreateClientId();
 
   // Legacy mixed-pool games used categoryId "__mixed__", which Postgres rejects.

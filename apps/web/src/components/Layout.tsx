@@ -5,6 +5,7 @@ import { syncOnline } from '../sync/sync';
 import { getLastSyncAt } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
 import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
+import { reportSyncFailure, syncErrorMessage } from '../lib/syncError';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -18,6 +19,7 @@ export default function Layout() {
   const [online, setOnline] = useState(navigator.onLine);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [syncFailed, setSyncFailed] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -71,6 +73,7 @@ export default function Layout() {
     if (!online || syncing || !auth.user) return;
     setSyncing(true);
     setSyncResult(null);
+    setSyncFailed(false);
     try {
       const { pushed, pulled } = await syncOnline();
       const now = new Date().toISOString();
@@ -78,10 +81,9 @@ export default function Layout() {
       setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
       setTimeout(() => setSyncResult(null), 4000);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Sync failed';
-      setSyncResult(message.length > 60 ? 'Sync failed' : message);
-      console.error('[sync]', err);
-      setTimeout(() => setSyncResult(null), 5000);
+      reportSyncFailure(err);
+      setSyncFailed(true);
+      setSyncResult(syncErrorMessage(err));
     } finally {
       setSyncing(false);
     }
@@ -99,9 +101,12 @@ export default function Layout() {
         if (cancelled) return;
         setLastSync(new Date().toISOString());
         setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
+        setSyncFailed(false);
         setTimeout(() => setSyncResult(null), 4000);
       } catch (err) {
-        console.warn('[desktop auto-sync]', err);
+        reportSyncFailure(err);
+        setSyncFailed(true);
+        setSyncResult(syncErrorMessage(err));
       }
     })();
     return () => {
@@ -200,7 +205,9 @@ export default function Layout() {
               Synced {formatSyncTime(lastSync)}
             </span>
           )}
-          {syncResult && <span className="sync-result">{syncResult}</span>}
+          {syncResult && (
+            <span className={`sync-result${syncFailed ? ' is-error' : ''}`}>{syncResult}</span>
+          )}
           <button
             type="button"
             className="btn btn-sm btn-sync"

@@ -243,6 +243,7 @@ html.is-desktop-linux .desktop-update-banner {
 .status-label { font-size: 0.82rem; color: var(--ink-500); }
 .sync-time { font-size: 0.78rem; color: var(--ink-300); white-space: nowrap; }
 .sync-result { font-size: 0.82rem; color: var(--green-200); animation: fadeSlide 0.3s ease; }
+.sync-result.is-error { color: #f3c4b4; max-width: 28rem; }
 
 /* Hamburger */
 .menu-toggle {

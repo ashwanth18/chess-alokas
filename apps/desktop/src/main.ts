@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import log from 'electron-log/main';
@@ -16,6 +17,11 @@ app.setName('Chess Alokas');
 app.setAppUserModelId('com.chessalokas.desktop');
 app.setPath('userData', path.join(app.getPath('appData'), 'Chess Alokas'));
 
+const GPU_FLAG = path.join(app.getPath('userData'), 'disable-gpu');
+if (fs.existsSync(GPU_FLAG)) {
+  app.disableHardwareAcceleration();
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -25,6 +31,7 @@ log.initialize();
 log.info('Chess Alokas desktop starting', {
   packaged: app.isPackaged,
   version: app.getVersion(),
+  gpuDisabled: fs.existsSync(GPU_FLAG),
 });
 
 const CLOUD_API_URL =
@@ -39,6 +46,26 @@ const isDev = !app.isPackaged && process.env['ELECTRON_DEV'] !== '0';
 const useLocalSidecar = isDev || process.env['DESKTOP_LOCAL_API'] === '1';
 
 const updater = setupAutoUpdater(() => mainWindow);
+
+function loadFailHtml(message: string): string {
+  const safe = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Chess Alokas</title>
+<style>
+  html,body{margin:0;background:#071f17;color:#d4b98a;font-family:Georgia,serif;
+    min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem}
+  p{opacity:.85}
+  button{margin-top:1rem;padding:.5rem 1rem;background:#d4b98a;color:#071f17;border:0;border-radius:6px;cursor:pointer}
+</style></head>
+<body>
+  <div>
+    <h1>Chess Alokas could not start</h1>
+    <p>${safe}</p>
+    <p>Quit the app from Task Manager, then open it again. You can keep working on chess-manager.alokas.com.</p>
+    <button onclick="location.reload()">Try again</button>
+  </div>
+</body></html>`;
+}
 
 function loadFailMessage(errorCode: number, errorDescription: string): string {
   if (errorCode === -106) return 'No internet connection.';
@@ -104,7 +131,7 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: `Chess Alokas ${app.getVersion()}`,
-    show: false,
+    show: true,
     // Notion-style: content under a hidden titlebar; native controls overlay the UI.
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     ...(isMac
@@ -127,25 +154,15 @@ async function createWindow() {
   });
 
   const showWindow = () => {
-    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return;
-    mainWindow.show();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!mainWindow.isVisible()) mainWindow.show();
     updater.announceJustUpdated();
     setTimeout(() => {
       void updater.check();
     }, 2500);
   };
 
-  const showTimer = setTimeout(() => {
-    log.warn('Window show timed out waiting for ready-to-show');
-    writeLastError({
-      code: 'WINDOW_SHOW_TIMEOUT',
-      message: 'Window did not become ready to show within 4 seconds.',
-    });
-    showWindow();
-  }, 4000);
-
   mainWindow.once('ready-to-show', () => {
-    clearTimeout(showTimer);
     showWindow();
   });
 
@@ -156,13 +173,19 @@ async function createWindow() {
 
   mainWindow.webContents.on(
     'did-fail-load',
-    (_event, errorCode, errorDescription, validatedURL) => {
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (errorCode === -3) return; // ERR_ABORTED (normal on navigation)
+      if (!isMainFrame) return;
+      if (validatedURL.startsWith('data:')) return;
+      const message = loadFailMessage(errorCode, errorDescription);
       writeLastError({
         code: 'PAGE_LOAD_FAILED',
-        message: loadFailMessage(errorCode, errorDescription),
+        message,
         details: `${errorCode} ${errorDescription} ${validatedURL}`,
       });
+      void mainWindow?.loadURL(
+        `data:text/html;charset=utf-8,${encodeURIComponent(loadFailHtml(message))}`,
+      );
     },
   );
   mainWindow.webContents.on('unresponsive', () => {
@@ -247,6 +270,16 @@ app.on('second-instance', () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('child-process-gone', (_event, details) => {
+  if (details.type !== 'GPU') return;
+  try {
+    fs.writeFileSync(GPU_FLAG, new Date().toISOString(), 'utf8');
+    log.error('GPU process gone — next launch will disable hardware acceleration', details);
+  } catch {
+    /* ignore */
+  }
 });
 
 app.on('before-quit', () => {
