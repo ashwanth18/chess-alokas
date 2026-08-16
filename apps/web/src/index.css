@@ -2711,22 +2711,46 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   box-shadow: inset 3px 0 0 var(--wood-400);
 }
 
-.cert-field-size {
+.cert-font-control {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-mid);
+}
+
+.cert-font-control-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.82rem;
+  color: var(--wood-100);
+}
+
+.cert-font-pt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--wood-300);
+}
+
+.cert-font-control-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  margin: 0;
+  gap: 0.4rem;
 }
 
-.cert-field-size label {
-  margin: 0;
-  font-size: 0.72rem;
-  color: var(--ink-300);
+.cert-font-control-row input[type='range'] {
+  flex: 1;
+  min-width: 0;
 }
 
-.cert-field-size .input {
-  width: 3.4rem;
-  padding: 0.25rem 0.35rem;
+.cert-font-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
 }
 
 .cert-field-list .cert-field-name {
@@ -2843,41 +2867,61 @@ details[open] .round-summary::before { transform: rotate(90deg); }
 .cert-field-marker {
   position: absolute;
   min-width: 3rem;
-  max-width: 70%;
-  padding: 0.15rem 0.4rem;
+  max-width: 78%;
+  padding: 0.2rem 0.45rem 0.3rem;
   border: 1px dashed rgba(180, 140, 60, 0.95);
-  background: rgba(255, 248, 220, 0.55);
+  background: rgba(255, 248, 220, 0.35);
   border-radius: 3px;
   cursor: move;
   user-select: none;
-  line-height: 1.15;
+  line-height: 1.1;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
 .cert-field-marker.is-selected {
   border-style: solid;
   border-color: #8a6a20;
-  background: rgba(255, 236, 170, 0.78);
+  background: rgba(255, 236, 170, 0.45);
   box-shadow: 0 0 0 2px rgba(180, 140, 60, 0.45);
+  z-index: 3;
 }
 
-.cert-field-label {
-  display: block;
-  font-size: 0.62rem;
-  text-transform: none;
-  letter-spacing: 0.01em;
-  color: #4a3a1c;
-  font-weight: 700;
+.cert-field-marker.is-ghost {
+  pointer-events: none;
+  opacity: 0.88;
+  border-style: dashed;
+  background: rgba(255, 236, 170, 0.55);
+  z-index: 4;
 }
 
 .cert-field-sample {
   display: block;
   font-weight: 700;
-  font-size: 0.85rem;
   color: #1a1208;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.05;
+}
+
+.cert-field-size-badge {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: #5a4a28;
+}
+
+.cert-field-resize {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  min-width: 10rem;
+}
+
+.cert-field-resize input[type='range'] {
+  flex: 1;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {

@@ -6,9 +6,10 @@ import log from 'electron-log/main';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Privileged scheme so IndexedDB has a stable origin (not file://). */
-export const APP_SCHEME = 'app';
-export const APP_HOST = 'chess-alokas';
+/** Privileged scheme so IndexedDB has a stable origin (not file://).
+ * Do not use `app://` — Windows 11 treats that as an “app link” and opens the Store. */
+export const APP_SCHEME = 'chess-alokas';
+export const APP_HOST = 'desktop';
 export const APP_INDEX_URL = `${APP_SCHEME}://${APP_HOST}/index.html`;
 
 protocol.registerSchemesAsPrivileged([
@@ -63,7 +64,7 @@ export function registerAppProtocol(): void {
       }
       return net.fetch(pathToFileURL(filePath).href);
     } catch (err) {
-      log.error('app:// protocol failed', err);
+      log.error('chess-alokas:// protocol failed', err);
       return new Response('Not found', { status: 404 });
     }
   });

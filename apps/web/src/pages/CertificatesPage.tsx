@@ -147,6 +147,69 @@ function recipientExtra(row: CertificateRow): string {
   return parts.join(' · ');
 }
 
+const FONT_PRESETS = [
+  { label: 'Small', size: 14 },
+  { label: 'Medium', size: 22 },
+  { label: 'Large', size: 36 },
+  { label: 'Title', size: 48 },
+] as const;
+
+function FontSizeControl({
+  value,
+  onChange,
+  label,
+}: {
+  value: number;
+  onChange: (size: number) => void;
+  label: string;
+}) {
+  const clamped = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, value));
+  return (
+    <div className="cert-font-control">
+      <div className="cert-font-control-top">
+        <span>{label}</span>
+        <span className="cert-font-pt">{clamped} pt</span>
+      </div>
+      <div className="cert-font-control-row">
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          onClick={() => onChange(Math.max(FONT_SIZE_MIN, clamped - 2))}
+        >
+          −
+        </button>
+        <input
+          type="range"
+          min={FONT_SIZE_MIN}
+          max={FONT_SIZE_MAX}
+          value={clamped}
+          aria-label={label}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          onClick={() => onChange(Math.min(FONT_SIZE_MAX, clamped + 2))}
+        >
+          +
+        </button>
+      </div>
+      <div className="cert-font-presets">
+        {FONT_PRESETS.map((p) => (
+          <button
+            key={p.size}
+            type="button"
+            className={`btn btn-sm ${clamped === p.size ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => onChange(p.size)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function CertificatesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tournamentId = searchParams.get('tournament') ?? '';
@@ -209,6 +272,7 @@ export default function CertificatesPage() {
   const [rows, setRows] = useState<CertRow[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [selectedColumn, setSelectedColumn] = useState('name');
+  const [placeFontSize, setPlaceFontSize] = useState(22);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -549,7 +613,7 @@ export default function CertificatesPage() {
       x: Math.min(0.98, Math.max(0.02, nx)),
       y: Math.min(0.98, Math.max(0.02, ny)),
       width: 0.7,
-      fontSize: 22,
+      fontSize: placeFontSize,
       align: 'center',
       color: '#1a1208',
       font: 'Helvetica-Bold',
@@ -557,6 +621,13 @@ export default function CertificatesPage() {
     setSelectedColumn(column);
     setSelectedFieldId(id);
     setFields((prev) => [...prev, field]);
+  }
+
+  function setFieldFontSize(id: string, fontSize: number) {
+    const next = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, fontSize));
+    setPlaceFontSize(next);
+    setSelectedFieldId(id);
+    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, fontSize: next } : f)));
   }
 
   function moveField(id: string, nx: number, ny: number) {
@@ -842,6 +913,7 @@ export default function CertificatesPage() {
   }
 
   const sample = (selectedRows[0] ?? rows[0])?.row;
+  const selectedField = fields.find((f) => f.id === selectedFieldId) ?? null;
   const canSendConfirm =
     confirmChecked && sendTyped === 'SEND' && willMail.length > 0 && !busy;
 
@@ -1139,9 +1211,21 @@ export default function CertificatesPage() {
         <aside className="cert-sidebar">
           <h3>Data columns</h3>
           <p className="cert-sidebar-lead">
-            Pick a column below, then click the certificate to place it. Selected column is
-            highlighted.
+            Set the text size, then drag a column onto the certificate. The sample on the page
+            matches the printed size.
           </p>
+          <FontSizeControl
+            label={
+              selectedField
+                ? `${certificateColumnLabel(selectedField.sourceColumn)} size`
+                : 'Size for next field'
+            }
+            value={selectedField?.fontSize ?? placeFontSize}
+            onChange={(size) => {
+              if (selectedField) setFieldFontSize(selectedField.id, size);
+              else setPlaceFontSize(size);
+            }}
+          />
           <div className="cert-column-list" role="listbox" aria-label="Certificate data columns">
             {columns.length === 0 && (
               <p className="cert-sidebar-lead">
@@ -1193,24 +1277,10 @@ export default function CertificatesPage() {
               >
                 <span>
                   <span className="cert-field-name">{certificateColumnLabel(f.sourceColumn)}</span>
-                  <span className="cert-field-key">{f.sourceColumn}</span>
+                  <span className="cert-field-key">
+                    {f.sourceColumn} · {f.fontSize} pt
+                  </span>
                 </span>
-                <NumberField
-                  className="cert-field-size"
-                  label="pt"
-                  inputClassName="input input-sm"
-                  value={f.fontSize}
-                  min={FONT_SIZE_MIN}
-                  max={FONT_SIZE_MAX}
-                  required
-                  onChange={(n) => {
-                    if (n == null) return;
-                    setSelectedFieldId(f.id);
-                    setFields((prev) =>
-                      prev.map((x) => (x.id === f.id ? { ...x, fontSize: n } : x)),
-                    );
-                  }}
-                />
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -1284,10 +1354,12 @@ export default function CertificatesPage() {
               sampleRow={sample}
               selectedColumn={selectedColumn}
               selectedFieldId={selectedFieldId}
+              placeFontSize={placeFontSize}
               onPlace={placeFieldAt}
               onMoveField={moveField}
               onSelectColumn={setSelectedColumn}
               onSelectField={setSelectedFieldId}
+              onFontSizeChange={setFieldFontSize}
             />
           )}
         </div>

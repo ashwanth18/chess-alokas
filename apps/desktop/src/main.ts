@@ -7,8 +7,12 @@ import { startApiSidecar, type SidecarHandle } from './sidecar.js';
 import { getLastUpdateStatus, setupAutoUpdater, dismissJustUpdatedNotice } from './updater.js';
 import { installAppMenu } from './menu.js';
 import { openLogsFolder, readLastError, writeLastError } from './errors.js';
-import { APP_INDEX_URL, registerAppProtocol } from './appProtocol.js';
+import { APP_INDEX_URL, APP_SCHEME, registerAppProtocol } from './appProtocol.js';
 import { pairDutchFromMain, type DesktopDutchInput } from './pairDutch.js';
+
+function isSafeExternalUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url) || url.startsWith('mailto:');
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -167,8 +171,21 @@ async function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (
+      url.startsWith(`${APP_SCHEME}:`) ||
+      url.startsWith('file:') ||
+      url.startsWith('data:') ||
+      (isDev && /^https?:\/\/localhost(?::\d+)?\//i.test(url))
+    ) {
+      return;
+    }
+    event.preventDefault();
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
   });
 
   mainWindow.webContents.on(
@@ -211,7 +228,7 @@ async function createWindow() {
     try {
       await mainWindow.loadURL(APP_INDEX_URL);
     } catch (err) {
-      log.error('app:// load failed, falling back to loadFile', err);
+      log.error('chess-alokas:// load failed, falling back to loadFile', err);
       const indexHtml = app.isPackaged
         ? path.join(process.resourcesPath, 'web', 'index.html')
         : path.join(__dirname, '../../web/dist/index.html');

@@ -15,10 +15,16 @@ interface CertificateDesignerCanvasProps {
   sampleRow?: CertificateRow;
   selectedColumn: string;
   selectedFieldId?: string | null;
+  placeFontSize: number;
   onPlace: (x: number, y: number, column?: string) => void;
   onMoveField: (id: string, x: number, y: number) => void;
   onSelectColumn?: (column: string) => void;
   onSelectField?: (id: string) => void;
+  onFontSizeChange?: (id: string, fontSize: number) => void;
+}
+
+function previewPx(fontSize: number, pageHeight: number, displayHeight: number): number {
+  return Math.max(8, (fontSize / pageHeight) * displayHeight);
 }
 
 /** Render page 1 to canvas so overlay % coords match PDF page coords 1:1. */
@@ -30,10 +36,12 @@ export default function CertificateDesignerCanvas({
   sampleRow,
   selectedColumn,
   selectedFieldId,
+  placeFontSize,
   onPlace,
   onMoveField,
-  onSelectColumn,
+  onSelectColumn: _onSelectColumn,
   onSelectField,
+  onFontSizeChange,
 }: CertificateDesignerCanvasProps) {
   const pageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,6 +49,7 @@ export default function CertificateDesignerCanvas({
   const [renderError, setRenderError] = useState<string | null>(null);
   const [rendering, setRendering] = useState(true);
   const [spaceDown, setSpaceDown] = useState(false);
+  const [ghost, setGhost] = useState<{ x: number; y: number; column: string } | null>(null);
   const panRef = useRef<{ active: boolean; x: number; y: number; sl: number; st: number } | null>(
     null,
   );
@@ -185,6 +194,30 @@ export default function CertificateDesignerCanvas({
     setZoom((z) => Math.min(3, Math.max(0.35, Math.round((z + delta) * 100) / 100)));
   }
 
+  function fieldSample(column: string): string {
+    return sampleRow?.[column] != null ? String(sampleRow[column]) : `[${column}]`;
+  }
+
+  function renderMarker(
+    column: string,
+    fontSize: number,
+    opts: { selected?: boolean; ghost?: boolean; sizeLabel?: boolean },
+  ) {
+    const px = previewPx(fontSize, pageHeight, displayHeight);
+    return (
+      <>
+        <span className="cert-field-sample" style={{ fontSize: px }}>
+          {fieldSample(column)}
+        </span>
+        {opts.sizeLabel && (
+          <span className="cert-field-size-badge">
+            {certificateColumnLabel(column)} · {fontSize} pt
+          </span>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="cert-designer">
       <div className="cert-zoom-bar">
@@ -202,7 +235,7 @@ export default function CertificateDesignerCanvas({
           100%
         </button>
         <span className="form-hint cert-zoom-hint">
-          Click to place · drag fields · hold Space + drag to pan · Ctrl+scroll to zoom
+          Drag a column onto the page to preview its size · click a field to resize
         </span>
       </div>
 
@@ -221,9 +254,18 @@ export default function CertificateDesignerCanvas({
             className="cert-page"
             style={{ width: displayWidth, height: displayHeight }}
             onClick={onPageClick}
-            onDragOver={(e) => e.preventDefault()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              const col = e.dataTransfer.getData('text/plain') || selectedColumn;
+              const norm = clientToNorm(e.clientX, e.clientY);
+              if (norm) setGhost({ x: norm.x, y: norm.y, column: col });
+            }}
+            onDragLeave={(e) => {
+              if (!pageRef.current?.contains(e.relatedTarget as Node)) setGhost(null);
+            }}
             onDrop={(e) => {
               e.preventDefault();
+              setGhost(null);
               const col = e.dataTransfer.getData('text/plain') || selectedColumn;
               const norm = clientToNorm(e.clientX, e.clientY);
               if (norm) onPlace(norm.x, norm.y, col);
@@ -235,22 +277,15 @@ export default function CertificateDesignerCanvas({
 
             <div className="cert-overlay">
               {fields.map((f) => {
-                const sample =
-                  sampleRow?.[f.sourceColumn] != null
-                    ? String(sampleRow[f.sourceColumn])
-                    : `[${f.sourceColumn}]`;
-                const previewFontPx = Math.max(
-                  10,
-                  (f.fontSize / pageHeight) * displayHeight,
-                );
+                const selected = selectedFieldId === f.id;
+                const px = previewPx(f.fontSize, pageHeight, displayHeight);
                 return (
                   <div
                     key={f.id}
-                    className={`cert-field-marker${selectedFieldId === f.id ? ' is-selected' : ''}`}
+                    className={`cert-field-marker${selected ? ' is-selected' : ''}`}
                     style={{
                       left: `${f.x * 100}%`,
                       top: `${f.y * 100}%`,
-                      fontSize: previewFontPx,
                       transform:
                         f.align === 'center'
                           ? 'translate(-50%, -50%)'
@@ -261,15 +296,60 @@ export default function CertificateDesignerCanvas({
                     }}
                     onMouseDown={(e) => onFieldMouseDown(f.id, e)}
                     onClick={(e) => e.stopPropagation()}
-                    title="Drag to reposition"
+                    title="Drag to move · use the slider to resize"
                   >
-                    <span className="cert-field-label">{certificateColumnLabel(f.sourceColumn)}</span>
-                    <span className="cert-field-sample" style={{ fontSize: 'inherit' }}>
-                      {sample}
+                    <span className="cert-field-sample" style={{ fontSize: px }}>
+                      {fieldSample(f.sourceColumn)}
                     </span>
+                    <span className="cert-field-size-badge">
+                      {certificateColumnLabel(f.sourceColumn)} · {f.fontSize} pt
+                    </span>
+                    {selected && onFontSizeChange && (
+                      <div
+                        className="cert-field-resize"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={() => onFontSizeChange(f.id, Math.max(8, f.fontSize - 2))}
+                        >
+                          −
+                        </button>
+                        <input
+                          type="range"
+                          min={8}
+                          max={72}
+                          value={f.fontSize}
+                          aria-label={`${certificateColumnLabel(f.sourceColumn)} font size`}
+                          onChange={(e) => onFontSizeChange(f.id, Number(e.target.value))}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={() => onFontSizeChange(f.id, Math.min(72, f.fontSize + 2))}
+                        >
+                          +
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
+              {ghost && (
+                <div
+                  className="cert-field-marker is-ghost"
+                  style={{
+                    left: `${ghost.x * 100}%`,
+                    top: `${ghost.y * 100}%`,
+                    transform: 'translate(-50%, -50%)',
+                    textAlign: 'center',
+                  }}
+                >
+                  {renderMarker(ghost.column, placeFontSize, { ghost: true, sizeLabel: true })}
+                </div>
+              )}
             </div>
           </div>
         </div>
