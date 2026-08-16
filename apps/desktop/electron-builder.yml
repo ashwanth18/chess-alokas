@@ -69,9 +69,4 @@ mac:
   category: public.app-category.sports
   artifactName: Chess-Alokas-${os}-${arch}.${ext}
   identity: null
-# So Windows opens Chess Alokas instead of the Microsoft Store for chess-alokas://
-protocols:
-  - name: Chess Alokas
-    schemes:
-      - chess-alokas
 asar: true

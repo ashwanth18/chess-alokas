@@ -7,7 +7,6 @@ import { startApiSidecar, type SidecarHandle } from './sidecar.js';
 import { getLastUpdateStatus, setupAutoUpdater, dismissJustUpdatedNotice } from './updater.js';
 import { installAppMenu } from './menu.js';
 import { openLogsFolder, readLastError, writeLastError } from './errors.js';
-import { APP_INDEX_URL, APP_SCHEME, registerAppProtocol } from './appProtocol.js';
 import { pairDutchFromMain, type DesktopDutchInput } from './pairDutch.js';
 
 function isSafeExternalUrl(url: string): boolean {
@@ -177,7 +176,6 @@ async function createWindow() {
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (
-      url.startsWith(`${APP_SCHEME}:`) ||
       url.startsWith('file:') ||
       url.startsWith('data:') ||
       (isDev && /^https?:\/\/localhost(?::\d+)?\//i.test(url))
@@ -224,16 +222,12 @@ async function createWindow() {
     await mainWindow.loadURL(viteUrl);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    registerAppProtocol();
-    try {
-      await mainWindow.loadURL(APP_INDEX_URL);
-    } catch (err) {
-      log.error('chess-alokas:// load failed, falling back to loadFile', err);
-      const indexHtml = app.isPackaged
-        ? path.join(process.resourcesPath, 'web', 'index.html')
-        : path.join(__dirname, '../../web/dist/index.html');
-      await mainWindow.loadFile(indexHtml);
-    }
+    // loadFile — never chess-alokas:// or app://. Windows 11 treats unknown
+    // custom schemes as Store “get an app to open this link” prompts.
+    const indexHtml = app.isPackaged
+      ? path.join(process.resourcesPath, 'web', 'index.html')
+      : path.join(__dirname, '../../web/dist/index.html');
+    await mainWindow.loadFile(indexHtml);
   }
 
   mainWindow.on('closed', () => {
