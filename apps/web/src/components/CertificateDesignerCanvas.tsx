@@ -198,26 +198,6 @@ export default function CertificateDesignerCanvas({
     return sampleRow?.[column] != null ? String(sampleRow[column]) : `[${column}]`;
   }
 
-  function renderMarker(
-    column: string,
-    fontSize: number,
-    opts: { selected?: boolean; ghost?: boolean; sizeLabel?: boolean },
-  ) {
-    const px = previewPx(fontSize, pageHeight, displayHeight);
-    return (
-      <>
-        <span className="cert-field-sample" style={{ fontSize: px }}>
-          {fieldSample(column)}
-        </span>
-        {opts.sizeLabel && (
-          <span className="cert-field-size-badge">
-            {certificateColumnLabel(column)} · {fontSize} pt
-          </span>
-        )}
-      </>
-    );
-  }
-
   return (
     <div className="cert-designer">
       <div className="cert-zoom-bar">
@@ -301,37 +281,41 @@ export default function CertificateDesignerCanvas({
                     <span className="cert-field-sample" style={{ fontSize: px }}>
                       {fieldSample(f.sourceColumn)}
                     </span>
-                    <span className="cert-field-size-badge">
-                      {certificateColumnLabel(f.sourceColumn)} · {f.fontSize} pt
-                    </span>
-                    {selected && onFontSizeChange && (
-                      <div
-                        className="cert-field-resize"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={() => onFontSizeChange(f.id, Math.max(8, f.fontSize - 2))}
-                        >
-                          −
-                        </button>
-                        <input
-                          type="range"
-                          min={8}
-                          max={72}
-                          value={f.fontSize}
-                          aria-label={`${certificateColumnLabel(f.sourceColumn)} font size`}
-                          onChange={(e) => onFontSizeChange(f.id, Number(e.target.value))}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={() => onFontSizeChange(f.id, Math.min(72, f.fontSize + 2))}
-                        >
-                          +
-                        </button>
+                    {selected && (
+                      <div className="cert-field-chrome">
+                        <span className="cert-field-size-badge">
+                          {certificateColumnLabel(f.sourceColumn)} · {f.fontSize} pt
+                        </span>
+                        {onFontSizeChange && (
+                          <div
+                            className="cert-field-resize"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline"
+                              onClick={() => onFontSizeChange(f.id, Math.max(8, f.fontSize - 2))}
+                            >
+                              −
+                            </button>
+                            <input
+                              type="range"
+                              min={8}
+                              max={72}
+                              value={f.fontSize}
+                              aria-label={`${certificateColumnLabel(f.sourceColumn)} font size`}
+                              onChange={(e) => onFontSizeChange(f.id, Number(e.target.value))}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline"
+                              onClick={() => onFontSizeChange(f.id, Math.min(72, f.fontSize + 2))}
+                            >
+                              +
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -347,7 +331,17 @@ export default function CertificateDesignerCanvas({
                     textAlign: 'center',
                   }}
                 >
-                  {renderMarker(ghost.column, placeFontSize, { ghost: true, sizeLabel: true })}
+                  <span
+                    className="cert-field-sample"
+                    style={{ fontSize: previewPx(placeFontSize, pageHeight, displayHeight) }}
+                  >
+                    {fieldSample(ghost.column)}
+                  </span>
+                  <div className="cert-field-chrome">
+                    <span className="cert-field-size-badge">
+                      {certificateColumnLabel(ghost.column)} · {placeFontSize} pt
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

@@ -2837,7 +2837,7 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   position: relative;
   background: #fff;
   box-shadow: 0 10px 36px rgba(0, 0, 0, 0.35);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .cert-page-canvas {
@@ -2866,31 +2866,21 @@ details[open] .round-summary::before { transform: rotate(90deg); }
 
 .cert-field-marker {
   position: absolute;
-  min-width: 3rem;
-  max-width: 78%;
-  padding: 0.2rem 0.45rem 0.3rem;
-  border: 1px dashed rgba(180, 140, 60, 0.95);
-  background: rgba(255, 248, 220, 0.35);
-  border-radius: 3px;
+  padding: 0;
+  border: none;
+  background: transparent;
   cursor: move;
   user-select: none;
-  line-height: 1.1;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  line-height: 1;
 }
 
 .cert-field-marker.is-selected {
-  border-style: solid;
-  border-color: #8a6a20;
-  background: rgba(255, 236, 170, 0.45);
-  box-shadow: 0 0 0 2px rgba(180, 140, 60, 0.45);
   z-index: 3;
 }
 
 .cert-field-marker.is-ghost {
   pointer-events: none;
   opacity: 0.88;
-  border-style: dashed;
-  background: rgba(255, 236, 170, 0.55);
   z-index: 4;
 }
 
@@ -2899,24 +2889,50 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   font-weight: 700;
   color: #1a1208;
   white-space: nowrap;
-  line-height: 1.05;
+  line-height: 1;
+  outline: 1px dashed rgba(180, 140, 60, 0.85);
+  outline-offset: 2px;
+}
+
+.cert-field-marker.is-selected .cert-field-sample {
+  outline-style: solid;
+  outline-color: #8a6a20;
+}
+
+.cert-field-chrome {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  pointer-events: none;
 }
 
 .cert-field-size-badge {
-  display: block;
-  margin-top: 0.15rem;
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0.01em;
   color: #5a4a28;
+  background: rgba(255, 248, 220, 0.92);
+  border: 1px solid rgba(180, 140, 60, 0.45);
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+  white-space: nowrap;
 }
 
 .cert-field-resize {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  margin-top: 0.35rem;
   min-width: 10rem;
+  padding: 0.2rem 0.3rem;
+  background: rgba(255, 248, 220, 0.96);
+  border: 1px solid rgba(180, 140, 60, 0.5);
+  border-radius: 4px;
+  pointer-events: auto;
 }
 
 .cert-field-resize input[type='range'] {
