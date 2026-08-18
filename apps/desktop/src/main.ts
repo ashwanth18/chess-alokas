@@ -20,21 +20,36 @@ app.setName('Chess Alokas');
 app.setAppUserModelId('com.chessalokas.desktop');
 app.setPath('userData', path.join(app.getPath('appData'), 'Chess Alokas'));
 
+// Initialized before the single-instance-lock check below so a launch that
+// silently quits because a zombie/hung prior instance still holds the lock
+// (indistinguishable to the user from "the app won't open") at least leaves
+// a trace — previously nothing was logged for that path at all.
+log.initialize();
+
+// Remote Desktop's virtual GPU driver is a well-documented source of Electron
+// windows that open but never paint anything (black screen) — disable
+// hardware acceleration proactively there instead of waiting for a crash.
+const isRemoteSession = /^RDP-Tcp#/i.test(process.env['SESSIONNAME'] ?? '');
+
 const GPU_FLAG = path.join(app.getPath('userData'), 'disable-gpu');
-if (fs.existsSync(GPU_FLAG)) {
+const gpuDisabled = isRemoteSession || fs.existsSync(GPU_FLAG);
+if (gpuDisabled) {
   app.disableHardwareAcceleration();
 }
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  log.warn('Single-instance lock held by another process — quitting this launch', {
+    version: app.getVersion(),
+  });
   app.quit();
 }
 
-log.initialize();
 log.info('Chess Alokas desktop starting', {
   packaged: app.isPackaged,
   version: app.getVersion(),
-  gpuDisabled: fs.existsSync(GPU_FLAG),
+  gpuDisabled,
+  remoteSession: isRemoteSession,
 });
 
 const CLOUD_API_URL =
@@ -236,6 +251,16 @@ async function createWindow() {
 }
 
 async function boot() {
+  // Black-screen reports (window opens, nothing ever paints) are otherwise
+  // undiagnosable from here — the compositor failing is invisible to every
+  // other lifecycle event this file listens for. Log actual GPU feature
+  // status so the next report comes with real data instead of a guess.
+  try {
+    log.info('GPU feature status', app.getGPUFeatureStatus());
+  } catch (err) {
+    log.warn('Could not read GPU feature status', err);
+  }
+
   registerIpc();
   installAppMenu({
     checkForUpdates: () => {
