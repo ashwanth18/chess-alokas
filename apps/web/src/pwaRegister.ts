@@ -1,3 +1,5 @@
+export {};
+
 const FLAG = 'alokas-sw-cleared';
 
 /**

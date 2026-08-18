@@ -175,251 +175,335 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
       }
 
       try {
-        const accounts = await sql<
-          {
-            id: string;
-            email: string | null;
-            display_name: string | null;
-            created_at: string;
-            last_sign_in_at: string | null;
-            tournament_count: string;
-            participant_count: string;
-            is_platform_admin: boolean;
-          }[]
-        >`
-          SELECT
-            p.id::text AS id,
-            u.email,
-            p.display_name,
-            p.created_at,
-            u.last_sign_in_at,
-            p.is_platform_admin,
-            (
-              SELECT COUNT(*)::text
-              FROM tournaments t
-              WHERE t.owner_id = p.id AND t.deleted_at IS NULL
-            ) AS tournament_count,
-            (
-              SELECT COUNT(*)::text
-              FROM participants pt
-              JOIN tournaments t ON t.id = pt.tournament_id
-              WHERE t.owner_id = p.id
-                AND t.deleted_at IS NULL
-                AND pt.deleted_at IS NULL
-            ) AS participant_count
-          FROM profiles p
-          JOIN auth.users u ON u.id = p.id
-          ORDER BY p.created_at ASC
-        `;
-
-        const statusRows = await sql<{ status: string; count: string }[]>`
-          SELECT status, COUNT(*)::text AS count
-          FROM tournaments
-          WHERE deleted_at IS NULL
-          GROUP BY status
-        `;
-
-        const [totalsRow] = await sql<
-          {
-            users: string;
-            tournaments: string;
-            public_live: string;
-            participants: string;
-            games: string;
-            games_pending: string;
-            games_finished: string;
-            floor_tournaments: string;
-            tournaments_with_certs: string;
-          }[]
-        >`
-          SELECT
-            (SELECT COUNT(*)::text FROM profiles) AS users,
-            (SELECT COUNT(*)::text FROM tournaments WHERE deleted_at IS NULL) AS tournaments,
-            (
-              SELECT COUNT(*)::text
-              FROM tournaments
-              WHERE deleted_at IS NULL AND public_enabled = true
-            ) AS public_live,
-            (
-              SELECT COUNT(*)::text
-              FROM participants
-              WHERE deleted_at IS NULL
-            ) AS participants,
-            (
-              SELECT COUNT(*)::text
-              FROM games
-              WHERE deleted_at IS NULL
-            ) AS games,
-            (
-              SELECT COUNT(*)::text
-              FROM games
-              WHERE deleted_at IS NULL AND result = 'pending'
-            ) AS games_pending,
-            (
-              SELECT COUNT(*)::text
-              FROM games
-              WHERE deleted_at IS NULL AND result <> 'pending'
-            ) AS games_finished,
-            (
-              SELECT COUNT(*)::text
-              FROM tournaments
-              WHERE deleted_at IS NULL AND COALESCE(table_count, 0) > 0
-            ) AS floor_tournaments,
-            (
-              SELECT COUNT(DISTINCT tournament_id)::text
-              FROM certificate_issues
-            ) AS tournaments_with_certs
-        `;
-
-        const certRows = await sql<{ status: string; count: string }[]>`
-          SELECT status, COUNT(*)::text AS count
-          FROM certificate_issues
-          GROUP BY status
-        `;
-
-        const cardRows = await sql<{ card_type: string; count: string }[]>`
-          SELECT card_type, COUNT(*)::text AS count
-          FROM game_cards
-          WHERE deleted_at IS NULL
-          GROUP BY card_type
-        `;
-
-        const eventRows = await sql<{ actor_role: string; count: string }[]>`
-          SELECT actor_role, COUNT(*)::text AS count
-          FROM game_result_events
-          WHERE created_at >= now() - interval '7 days'
-          GROUP BY actor_role
-        `;
-
-        // tournaments/participants have no created_at — use event-style growth proxies
-        const growthRows = await sql<
-          {
-            week_start: string;
-            users: string;
-            result_events: string;
-            page_views: string;
-            certificates: string;
-          }[]
-        >`
-          WITH weeks AS (
-            SELECT generate_series(
-              date_trunc('week', now() - interval '7 weeks'),
-              date_trunc('week', now()),
-              interval '1 week'
-            )::date AS week_start
-          )
-          SELECT
-            w.week_start::text AS week_start,
-            (
-              SELECT COUNT(*)::text
-              FROM profiles p
-              WHERE date_trunc('week', p.created_at)::date = w.week_start
-            ) AS users,
-            (
-              SELECT COUNT(*)::text
-              FROM game_result_events e
-              WHERE date_trunc('week', e.created_at)::date = w.week_start
-            ) AS result_events,
-            (
-              SELECT COUNT(*)::text
-              FROM page_views pv
-              WHERE date_trunc('week', pv.created_at)::date = w.week_start
-            ) AS page_views,
-            (
-              SELECT COUNT(*)::text
-              FROM certificate_issues c
-              WHERE date_trunc('week', c.created_at)::date = w.week_start
-            ) AS certificates
-          FROM weeks w
-          ORDER BY w.week_start ASC
-        `;
-
-        const [pvTotals] = await sql<{ last7d: string; last30d: string }[]>`
-          SELECT
-            (
-              SELECT COUNT(*)::text
-              FROM page_views
-              WHERE created_at >= now() - interval '7 days'
-            ) AS last7d,
-            (
-              SELECT COUNT(*)::text
-              FROM page_views
-              WHERE created_at >= now() - interval '30 days'
-            ) AS last30d
-        `;
-
-        const pvByRoute = await sql<{ route_key: string; count: string }[]>`
-          SELECT route_key, COUNT(*)::text AS count
-          FROM page_views
-          WHERE created_at >= now() - interval '7 days'
-          GROUP BY route_key
-          ORDER BY COUNT(*) DESC
-        `;
-
-        const pvByDay = await sql<{ day: string; count: string }[]>`
-          WITH days AS (
-            SELECT generate_series(
-              (current_date - 13)::timestamp,
-              current_date::timestamp,
-              interval '1 day'
-            )::date AS day
-          )
-          SELECT
-            d.day::text AS day,
-            (
-              SELECT COUNT(*)::text
-              FROM page_views pv
-              WHERE pv.created_at::date = d.day
-            ) AS count
-          FROM days d
-          ORDER BY d.day ASC
-        `;
-
-        const topLive = await sql<{ hash_prefix: string; count: string }[]>`
-          SELECT left(live_token_hash, 8) AS hash_prefix, COUNT(*)::text AS count
-          FROM page_views
-          WHERE created_at >= now() - interval '7 days'
-            AND live_token_hash IS NOT NULL
-          GROUP BY live_token_hash
-          ORDER BY COUNT(*) DESC
-          LIMIT 5
-        `;
-
-        const recent = await sql<
-          {
-            id: string;
-            name: string;
-            status: string;
-            owner_email: string | null;
-            participant_count: string;
-            public_enabled: boolean;
-            current_round: number;
-            created_at: string;
-            completed_at: string | null;
-            updated_at: string;
-          }[]
-        >`
-          SELECT
-            t.id::text AS id,
-            t.name,
-            t.status,
-            u.email AS owner_email,
-            (
-              SELECT COUNT(*)::text
-              FROM participants pt
-              WHERE pt.tournament_id = t.id AND pt.deleted_at IS NULL
-            ) AS participant_count,
-            COALESCE(t.public_enabled, false) AS public_enabled,
-            COALESCE(t.current_round, 0) AS current_round,
-            t.created_at,
-            t.completed_at,
-            t.updated_at
-          FROM tournaments t
-          LEFT JOIN auth.users u ON u.id = t.owner_id
-          WHERE t.deleted_at IS NULL
-          ORDER BY t.updated_at DESC
-          LIMIT 20
-        `;
+        // Every query below is independent (no data dependencies between
+        // them) — run them concurrently instead of one round trip at a time.
+        const [
+          accounts,
+          statusRows,
+          [totalsRow],
+          certRows,
+          cardRows,
+          eventRows,
+          growthRows,
+          [pvTotals],
+          pvByRoute,
+          pvByDay,
+          topLive,
+          recent,
+          github,
+          [distTotals],
+          byOs,
+          byArch,
+          byCountry,
+          byAsset,
+          byTimezone,
+        ] = await Promise.all([
+          sql<
+            {
+              id: string;
+              email: string | null;
+              display_name: string | null;
+              created_at: string;
+              last_sign_in_at: string | null;
+              tournament_count: string;
+              participant_count: string;
+              is_platform_admin: boolean;
+            }[]
+          >`
+            SELECT
+              p.id::text AS id,
+              u.email,
+              p.display_name,
+              p.created_at,
+              u.last_sign_in_at,
+              p.is_platform_admin,
+              (
+                SELECT COUNT(*)::text
+                FROM tournaments t
+                WHERE t.owner_id = p.id AND t.deleted_at IS NULL
+              ) AS tournament_count,
+              (
+                SELECT COUNT(*)::text
+                FROM participants pt
+                JOIN tournaments t ON t.id = pt.tournament_id
+                WHERE t.owner_id = p.id
+                  AND t.deleted_at IS NULL
+                  AND pt.deleted_at IS NULL
+              ) AS participant_count
+            FROM profiles p
+            JOIN auth.users u ON u.id = p.id
+            ORDER BY p.created_at ASC
+          `,
+          sql<{ status: string; count: string }[]>`
+            SELECT status, COUNT(*)::text AS count
+            FROM tournaments
+            WHERE deleted_at IS NULL
+            GROUP BY status
+          `,
+          sql<
+            {
+              users: string;
+              tournaments: string;
+              public_live: string;
+              participants: string;
+              games: string;
+              games_pending: string;
+              games_finished: string;
+              floor_tournaments: string;
+              tournaments_with_certs: string;
+            }[]
+          >`
+            SELECT
+              (SELECT COUNT(*)::text FROM profiles) AS users,
+              (SELECT COUNT(*)::text FROM tournaments WHERE deleted_at IS NULL) AS tournaments,
+              (
+                SELECT COUNT(*)::text
+                FROM tournaments
+                WHERE deleted_at IS NULL AND public_enabled = true
+              ) AS public_live,
+              (
+                SELECT COUNT(*)::text
+                FROM participants
+                WHERE deleted_at IS NULL
+              ) AS participants,
+              (
+                SELECT COUNT(*)::text
+                FROM games
+                WHERE deleted_at IS NULL
+              ) AS games,
+              (
+                SELECT COUNT(*)::text
+                FROM games
+                WHERE deleted_at IS NULL AND result = 'pending'
+              ) AS games_pending,
+              (
+                SELECT COUNT(*)::text
+                FROM games
+                WHERE deleted_at IS NULL AND result <> 'pending'
+              ) AS games_finished,
+              (
+                SELECT COUNT(*)::text
+                FROM tournaments
+                WHERE deleted_at IS NULL AND COALESCE(table_count, 0) > 0
+              ) AS floor_tournaments,
+              (
+                SELECT COUNT(DISTINCT tournament_id)::text
+                FROM certificate_issues
+              ) AS tournaments_with_certs
+          `,
+          sql<{ status: string; count: string }[]>`
+            SELECT status, COUNT(*)::text AS count
+            FROM certificate_issues
+            GROUP BY status
+          `,
+          sql<{ card_type: string; count: string }[]>`
+            SELECT card_type, COUNT(*)::text AS count
+            FROM game_cards
+            WHERE deleted_at IS NULL
+            GROUP BY card_type
+          `,
+          sql<{ actor_role: string; count: string }[]>`
+            SELECT actor_role, COUNT(*)::text AS count
+            FROM game_result_events
+            WHERE created_at >= now() - interval '7 days'
+            GROUP BY actor_role
+          `,
+          // tournaments/participants have no created_at — use event-style growth proxies
+          sql<
+            {
+              week_start: string;
+              users: string;
+              result_events: string;
+              page_views: string;
+              certificates: string;
+            }[]
+          >`
+            WITH weeks AS (
+              SELECT generate_series(
+                date_trunc('week', now() - interval '7 weeks'),
+                date_trunc('week', now()),
+                interval '1 week'
+              )::date AS week_start
+            )
+            SELECT
+              w.week_start::text AS week_start,
+              (
+                SELECT COUNT(*)::text
+                FROM profiles p
+                WHERE date_trunc('week', p.created_at)::date = w.week_start
+              ) AS users,
+              (
+                SELECT COUNT(*)::text
+                FROM game_result_events e
+                WHERE date_trunc('week', e.created_at)::date = w.week_start
+              ) AS result_events,
+              (
+                SELECT COUNT(*)::text
+                FROM page_views pv
+                WHERE date_trunc('week', pv.created_at)::date = w.week_start
+              ) AS page_views,
+              (
+                SELECT COUNT(*)::text
+                FROM certificate_issues c
+                WHERE date_trunc('week', c.created_at)::date = w.week_start
+              ) AS certificates
+            FROM weeks w
+            ORDER BY w.week_start ASC
+          `,
+          sql<{ last7d: string; last30d: string }[]>`
+            SELECT
+              (
+                SELECT COUNT(*)::text
+                FROM page_views
+                WHERE created_at >= now() - interval '7 days'
+              ) AS last7d,
+              (
+                SELECT COUNT(*)::text
+                FROM page_views
+                WHERE created_at >= now() - interval '30 days'
+              ) AS last30d
+          `,
+          sql<{ route_key: string; count: string }[]>`
+            SELECT route_key, COUNT(*)::text AS count
+            FROM page_views
+            WHERE created_at >= now() - interval '7 days'
+            GROUP BY route_key
+            ORDER BY COUNT(*) DESC
+          `,
+          sql<{ day: string; count: string }[]>`
+            WITH days AS (
+              SELECT generate_series(
+                (current_date - 13)::timestamp,
+                current_date::timestamp,
+                interval '1 day'
+              )::date AS day
+            )
+            SELECT
+              d.day::text AS day,
+              (
+                SELECT COUNT(*)::text
+                FROM page_views pv
+                WHERE pv.created_at::date = d.day
+              ) AS count
+            FROM days d
+            ORDER BY d.day ASC
+          `,
+          sql<{ hash_prefix: string; count: string }[]>`
+            SELECT left(live_token_hash, 8) AS hash_prefix, COUNT(*)::text AS count
+            FROM page_views
+            WHERE created_at >= now() - interval '7 days'
+              AND live_token_hash IS NOT NULL
+            GROUP BY live_token_hash
+            ORDER BY COUNT(*) DESC
+            LIMIT 5
+          `,
+          sql<
+            {
+              id: string;
+              name: string;
+              status: string;
+              owner_email: string | null;
+              participant_count: string;
+              public_enabled: boolean;
+              current_round: number;
+              created_at: string;
+              completed_at: string | null;
+              updated_at: string;
+            }[]
+          >`
+            SELECT
+              t.id::text AS id,
+              t.name,
+              t.status,
+              u.email AS owner_email,
+              (
+                SELECT COUNT(*)::text
+                FROM participants pt
+                WHERE pt.tournament_id = t.id AND pt.deleted_at IS NULL
+              ) AS participant_count,
+              COALESCE(t.public_enabled, false) AS public_enabled,
+              COALESCE(t.current_round, 0) AS current_round,
+              t.created_at,
+              t.completed_at,
+              t.updated_at
+            FROM tournaments t
+            LEFT JOIN auth.users u ON u.id = t.owner_id
+            WHERE t.deleted_at IS NULL
+            ORDER BY t.updated_at DESC
+            LIMIT 20
+          `,
+          fetchGithubDownloads(),
+          sql<
+            {
+              clicks7d: string;
+              clicks30d: string;
+              launches7d: string;
+              unique30d: string;
+            }[]
+          >`
+            SELECT
+              (
+                SELECT COUNT(*)::text FROM product_events
+                WHERE event_name = 'download_click'
+                  AND created_at >= now() - interval '7 days'
+              ) AS clicks7d,
+              (
+                SELECT COUNT(*)::text FROM product_events
+                WHERE event_name = 'download_click'
+                  AND created_at >= now() - interval '30 days'
+              ) AS clicks30d,
+              (
+                SELECT COUNT(*)::text FROM product_events
+                WHERE event_name IN ('desktop_launch', 'desktop_heartbeat')
+                  AND created_at >= now() - interval '7 days'
+              ) AS launches7d,
+              (
+                SELECT COUNT(DISTINCT install_id_hash)::text FROM product_events
+                WHERE install_id_hash IS NOT NULL
+                  AND created_at >= now() - interval '30 days'
+              ) AS unique30d
+          `,
+          sql<{ key: string | null; count: string }[]>`
+            SELECT os AS key, COUNT(*)::text AS count
+            FROM product_events
+            WHERE created_at >= now() - interval '7 days'
+            GROUP BY os
+            ORDER BY COUNT(*) DESC
+          `,
+          sql<{ key: string | null; count: string }[]>`
+            SELECT arch AS key, COUNT(*)::text AS count
+            FROM product_events
+            WHERE created_at >= now() - interval '7 days'
+              AND event_name IN ('desktop_launch', 'desktop_heartbeat', 'download_click')
+            GROUP BY arch
+            ORDER BY COUNT(*) DESC
+          `,
+          sql<{ key: string | null; count: string }[]>`
+            SELECT country AS key, COUNT(*)::text AS count
+            FROM product_events
+            WHERE created_at >= now() - interval '7 days'
+            GROUP BY country
+            ORDER BY COUNT(*) DESC
+            LIMIT 20
+          `,
+          sql<{ key: string | null; count: string }[]>`
+            SELECT asset_id AS key, COUNT(*)::text AS count
+            FROM product_events
+            WHERE event_name = 'download_click'
+              AND created_at >= now() - interval '7 days'
+            GROUP BY asset_id
+            ORDER BY COUNT(*) DESC
+          `,
+          sql<{ key: string | null; count: string }[]>`
+            SELECT timezone AS key, COUNT(*)::text AS count
+            FROM product_events
+            WHERE created_at >= now() - interval '7 days'
+              AND timezone IS NOT NULL
+            GROUP BY timezone
+            ORDER BY COUNT(*) DESC
+            LIMIT 15
+          `,
+        ]);
 
         const tournamentsByStatus: Record<string, number> = {};
         for (const row of statusRows) {
@@ -446,79 +530,6 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           byRouteKeyLast7d[row.route_key] = Number(row.count);
         }
 
-        const github = await fetchGithubDownloads();
-
-        const [distTotals] = await sql<
-          {
-            clicks7d: string;
-            clicks30d: string;
-            launches7d: string;
-            unique30d: string;
-          }[]
-        >`
-          SELECT
-            (
-              SELECT COUNT(*)::text FROM product_events
-              WHERE event_name = 'download_click'
-                AND created_at >= now() - interval '7 days'
-            ) AS clicks7d,
-            (
-              SELECT COUNT(*)::text FROM product_events
-              WHERE event_name = 'download_click'
-                AND created_at >= now() - interval '30 days'
-            ) AS clicks30d,
-            (
-              SELECT COUNT(*)::text FROM product_events
-              WHERE event_name IN ('desktop_launch', 'desktop_heartbeat')
-                AND created_at >= now() - interval '7 days'
-            ) AS launches7d,
-            (
-              SELECT COUNT(DISTINCT install_id_hash)::text FROM product_events
-              WHERE install_id_hash IS NOT NULL
-                AND created_at >= now() - interval '30 days'
-            ) AS unique30d
-        `;
-
-        const byOs = await sql<{ key: string | null; count: string }[]>`
-          SELECT os AS key, COUNT(*)::text AS count
-          FROM product_events
-          WHERE created_at >= now() - interval '7 days'
-          GROUP BY os
-          ORDER BY COUNT(*) DESC
-        `;
-        const byArch = await sql<{ key: string | null; count: string }[]>`
-          SELECT arch AS key, COUNT(*)::text AS count
-          FROM product_events
-          WHERE created_at >= now() - interval '7 days'
-            AND event_name IN ('desktop_launch', 'desktop_heartbeat', 'download_click')
-          GROUP BY arch
-          ORDER BY COUNT(*) DESC
-        `;
-        const byCountry = await sql<{ key: string | null; count: string }[]>`
-          SELECT country AS key, COUNT(*)::text AS count
-          FROM product_events
-          WHERE created_at >= now() - interval '7 days'
-          GROUP BY country
-          ORDER BY COUNT(*) DESC
-          LIMIT 20
-        `;
-        const byAsset = await sql<{ key: string | null; count: string }[]>`
-          SELECT asset_id AS key, COUNT(*)::text AS count
-          FROM product_events
-          WHERE event_name = 'download_click'
-            AND created_at >= now() - interval '7 days'
-          GROUP BY asset_id
-          ORDER BY COUNT(*) DESC
-        `;
-        const byTimezone = await sql<{ key: string | null; count: string }[]>`
-          SELECT timezone AS key, COUNT(*)::text AS count
-          FROM product_events
-          WHERE created_at >= now() - interval '7 days'
-            AND timezone IS NOT NULL
-          GROUP BY timezone
-          ORDER BY COUNT(*) DESC
-          LIMIT 15
-        `;
         const tournamentCount = Number(totalsRow?.tournaments ?? 0);
         const publicLive = Number(totalsRow?.public_live ?? 0);
         const floorTournaments = Number(totalsRow?.floor_tournaments ?? 0);
