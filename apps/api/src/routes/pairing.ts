@@ -196,23 +196,21 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         throw err;
       }
 
-      const poolGames = await Promise.all(
-        pairingOutput.boards.map((board) =>
-          store.createGame({
-            id: crypto.randomUUID(),
-            tournamentId,
-            categoryId: poolId,
-            round,
-            board: board.board,
-            whiteId: board.whiteId,
-            blackId: board.blackId,
-            result: board.isBye ? 'bye' : 'pending',
-            isBye: board.isBye,
-            updatedAt: now,
-          }),
-        ),
-      );
-      createdGames.push(...poolGames);
+      for (const board of pairingOutput.boards) {
+        const game = await store.createGame({
+          id: crypto.randomUUID(),
+          tournamentId,
+          categoryId: poolId,
+          round,
+          board: board.board,
+          whiteId: board.whiteId,
+          blackId: board.blackId,
+          result: board.isBye ? 'bye' : 'pending',
+          isBye: board.isBye,
+          updatedAt: now,
+        });
+        createdGames.push(game);
+      }
 
       await store.updateTournament(tournamentId, {
         currentRound: Math.max(tournament.currentRound, round),
@@ -278,23 +276,21 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         throw err;
       }
 
-      const categoryGames = await Promise.all(
-        pairingOutput.boards.map((board) =>
-          store.createGame({
-            id: crypto.randomUUID(),
-            tournamentId,
-            categoryId: category.id,
-            round,
-            board: board.board,
-            whiteId: board.whiteId,
-            blackId: board.blackId,
-            result: board.isBye ? 'bye' : 'pending',
-            isBye: board.isBye,
-            updatedAt: now,
-          }),
-        ),
-      );
-      createdGames.push(...categoryGames);
+      for (const board of pairingOutput.boards) {
+        const game = await store.createGame({
+          id: crypto.randomUUID(),
+          tournamentId,
+          categoryId: category.id,
+          round,
+          board: board.board,
+          whiteId: board.whiteId,
+          blackId: board.blackId,
+          result: board.isBye ? 'bye' : 'pending',
+          isBye: board.isBye,
+          updatedAt: now,
+        });
+        createdGames.push(game);
+      }
     }
 
     await store.updateTournament(tournamentId, {
