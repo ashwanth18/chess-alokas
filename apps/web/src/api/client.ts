@@ -53,6 +53,13 @@ async function req<T>(
       } catch {
         /* ignore */
       }
+      if (res.status === 401 && typeof window !== 'undefined') {
+        // The access token was rejected server-side and auto-refresh didn't
+        // save it (revoked/expired session) — stop retrying silently and
+        // let AuthContext sign the user out so they're prompted to log in
+        // again instead of failing every sync forever with no feedback.
+        window.dispatchEvent(new CustomEvent('auth:session-expired'));
+      }
       return { data: null, ok: false, error };
     }
     if (res.status === 204) {

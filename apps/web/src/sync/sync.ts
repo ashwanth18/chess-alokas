@@ -2,6 +2,7 @@ import { db, getOrCreateClientId, getLastSyncAt, setLastSyncAt, ensureDbOpen } f
 import { apiSyncPush, apiSyncPull } from '../api/client';
 import type { LocalTournament, LocalCategory, LocalParticipant, LocalGame } from '../db/local';
 import { repairInvalidGameCategoryIds, softDeleteOrphanGames } from '../lib/poolCategory';
+import { supabase } from '../lib/supabase';
 
 function toSyncItem(
   entity: 'tournament' | 'category' | 'participant' | 'game',
@@ -29,7 +30,25 @@ function toSyncItem(
   };
 }
 
-export async function syncOnline(): Promise<{ pushed: number; pulled: number }> {
+let syncInFlight: Promise<{ pushed: number; pulled: number }> | null = null;
+
+/**
+ * Runs a full push/pull sync. Multiple triggers (timers, window focus, a
+ * manual button, desktop auto-sync) can call this at nearly the same time —
+ * overlapping runs would race on the same dirty rows, so a call that arrives
+ * while one is already in flight just awaits that same run instead of
+ * starting a second one.
+ */
+export function syncOnline(): Promise<{ pushed: number; pulled: number }> {
+  if (syncInFlight) return syncInFlight;
+  const run = syncOnlineImpl().finally(() => {
+    if (syncInFlight === run) syncInFlight = null;
+  });
+  syncInFlight = run;
+  return run;
+}
+
+async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   const opened = await ensureDbOpen();
   if (!opened.ok) throw opened.error;
 
@@ -39,10 +58,37 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   await repairInvalidGameCategoryIds();
   await softDeleteOrphanGames();
 
-  const dirtyTournaments = await db.tournaments.where('dirty').equals(1).toArray();
-  const dirtyCategories = await db.categories.where('dirty').equals(1).toArray();
-  const dirtyParticipants = await db.participants.where('dirty').equals(1).toArray();
-  const dirtyGames = await db.games.where('dirty').equals(1).toArray();
+  // Scope what gets pushed to the currently signed-in owner, so a previous
+  // user's leftover unsynced edits on a shared device never get pushed
+  // under a different account's session. Local rows with no owner yet
+  // (created before the tournament's first sync) are treated as belonging
+  // to whoever is currently signed in.
+  const currentUserId = supabase
+    ? ((await supabase.auth.getSession()).data.session?.user.id ?? null)
+    : null;
+  const ownsRow = (ownerId: string | null | undefined) =>
+    !currentUserId || !ownerId || ownerId === currentUserId;
+
+  const allDirtyTournaments = await db.tournaments.where('dirty').equals(1).toArray();
+  const dirtyTournaments = allDirtyTournaments.filter((t) => ownsRow(t.ownerId));
+  const ownedTournamentIds = currentUserId
+    ? new Set(
+        (await db.tournaments.filter((t) => ownsRow(t.ownerId)).toArray()).map((t) => t.id),
+      )
+    : null;
+
+  const allDirtyCategories = await db.categories.where('dirty').equals(1).toArray();
+  const allDirtyParticipants = await db.participants.where('dirty').equals(1).toArray();
+  const allDirtyGames = await db.games.where('dirty').equals(1).toArray();
+  const dirtyCategories = ownedTournamentIds
+    ? allDirtyCategories.filter((c) => ownedTournamentIds.has(c.tournamentId))
+    : allDirtyCategories;
+  const dirtyParticipants = ownedTournamentIds
+    ? allDirtyParticipants.filter((p) => ownedTournamentIds.has(p.tournamentId))
+    : allDirtyParticipants;
+  const dirtyGames = ownedTournamentIds
+    ? allDirtyGames.filter((g) => ownedTournamentIds.has(g.tournamentId))
+    : allDirtyGames;
 
   // Always push parent tournaments before children so ownership/FK sync cannot 403.
   const dirtyTournamentIds = new Set(dirtyTournaments.map((t) => t.id));
@@ -67,6 +113,26 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
   let pushed = 0;
   let pulled = 0;
 
+  // Only clear `dirty` on rows whose updatedAt still matches what we just
+  // pushed — if the user (or another sync trigger) edited a row again while
+  // this request was in flight, its updatedAt will have moved on and it
+  // must stay dirty so the newer edit gets picked up by the next push.
+  function clearDirtyIfUnchanged<T extends { id: string; updatedAt: string; dirty: 1 | 0 }>(
+    table: { where(index: string): { anyOf(keys: string[]): { modify(fn: (rec: T) => void): Promise<number> } } },
+    snapshot: T[],
+  ) {
+    if (snapshot.length === 0) return Promise.resolve(0);
+    const byId = new Map(snapshot.map((r) => [r.id, r.updatedAt]));
+    return table
+      .where('id')
+      .anyOf(snapshot.map((r) => r.id))
+      .modify((rec) => {
+        if (byId.get(rec.id) === rec.updatedAt) {
+          rec.dirty = 0;
+        }
+      });
+  }
+
   if (items.length > 0) {
     const pushResult = await apiSyncPush({ clientId, items });
     if (!pushResult.ok) {
@@ -74,30 +140,10 @@ export async function syncOnline(): Promise<{ pushed: number; pulled: number }> 
     }
     pushed = pushResult.data.accepted;
 
-    if (dirtyTournaments.length > 0) {
-      await db.tournaments
-        .where('id')
-        .anyOf(dirtyTournaments.map((r) => r.id))
-        .modify({ dirty: 0 });
-    }
-    if (dirtyCategories.length > 0) {
-      await db.categories
-        .where('id')
-        .anyOf(dirtyCategories.map((r) => r.id))
-        .modify({ dirty: 0 });
-    }
-    if (dirtyParticipants.length > 0) {
-      await db.participants
-        .where('id')
-        .anyOf(dirtyParticipants.map((r) => r.id))
-        .modify({ dirty: 0 });
-    }
-    if (dirtyGames.length > 0) {
-      await db.games
-        .where('id')
-        .anyOf(dirtyGames.map((r) => r.id))
-        .modify({ dirty: 0 });
-    }
+    await clearDirtyIfUnchanged(db.tournaments, dirtyTournaments);
+    await clearDirtyIfUnchanged(db.categories, dirtyCategories);
+    await clearDirtyIfUnchanged(db.participants, dirtyParticipants);
+    await clearDirtyIfUnchanged(db.games, dirtyGames);
   }
 
   const since = (await getLastSyncAt()) ?? '1970-01-01T00:00:00.000Z';

@@ -139,6 +139,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshProfile();
   }, [refreshProfile]);
 
+  // The API rejected our access token with 401 and it wasn't a token we can
+  // recover from client-side (auto-refresh already tried) — sign out so the
+  // user sees the login screen instead of every request silently failing.
+  useEffect(() => {
+    const client = supabase;
+    if (!client) return;
+    const onExpired = () => {
+      void client.auth.signOut({ scope: 'local' }).then(() => persistOwnerId(null));
+    };
+    window.addEventListener('auth:session-expired', onExpired);
+    return () => window.removeEventListener('auth:session-expired', onExpired);
+  }, []);
+
   useEffect(() => {
     if (!sentryEnabled) return;
     if (session?.user) {

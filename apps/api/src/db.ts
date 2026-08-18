@@ -16,6 +16,7 @@ import {
   DEFAULT_CERT_SERIAL_PAD,
   DEFAULT_CERT_SERIAL_PREFIX,
   formatCertificateSerial,
+  normalizeExcludedRounds,
 } from '@chess-alokas/shared';
 import { generateTableSlug } from './floor/pin.js';
 
@@ -860,9 +861,7 @@ function exclusionFields(p: {
   excludedRounds?: number[] | null;
   withdrawnFromRound?: number | null;
 }): { excluded: number[]; withdrawn: number | null } {
-  const excluded = Array.isArray(p.excludedRounds)
-    ? p.excludedRounds.filter((n) => Number.isInteger(n) && n > 0)
-    : [];
+  const excluded = normalizeExcludedRounds(p.excludedRounds);
   const withdrawn =
     p.withdrawnFromRound != null && Number(p.withdrawnFromRound) > 0
       ? Number(p.withdrawnFromRound)
@@ -1512,13 +1511,21 @@ export class PostgresStore implements Store {
     const sorted = [...items].sort(
       (a, b) => (order[a.entity] ?? 9) - (order[b.entity] ?? 9),
     );
+    // A batch can carry hundreds of items for the same tournament (e.g. a
+    // desktop client catching up after an offline session) — cache the
+    // ownership lookup per tournament id instead of one SELECT per item.
+    const tournamentCache = new Map<string, Tournament | null>();
     for (const item of sorted) {
       if (ownerId && item.entity === 'tournament') {
         item.payload = { ...item.payload, ownerId };
       }
       if (ownerId && item.entity !== 'tournament') {
         const tid = String(item.payload['tournamentId'] ?? '');
-        const existing = await this.getTournament(tid);
+        let existing = tournamentCache.get(tid);
+        if (existing === undefined) {
+          existing = await this.getTournament(tid);
+          tournamentCache.set(tid, existing);
+        }
         // Soft-deleted rows are reclaimable by a later tournament sync; only block a
         // live tournament owned by a different user.
         if (
@@ -1531,6 +1538,11 @@ export class PostgresStore implements Store {
         }
       }
       await this.applySyncItem(item);
+      if (item.entity === 'tournament') {
+        // This item may have just created/changed the tournament — drop any
+        // cached lookup so a later item in the same batch sees it fresh.
+        tournamentCache.delete(item.id);
+      }
     }
   }
 
@@ -1675,9 +1687,9 @@ export class PostgresStore implements Store {
           round = EXCLUDED.round, board = EXCLUDED.board,
           white_id = EXCLUDED.white_id, black_id = EXCLUDED.black_id,
           result = EXCLUDED.result, is_bye = EXCLUDED.is_bye,
-          result_locked_at = COALESCE(EXCLUDED.result_locked_at, games.result_locked_at),
-          result_entered_by_name = COALESCE(EXCLUDED.result_entered_by_name, games.result_entered_by_name),
-          result_entered_by_role = COALESCE(EXCLUDED.result_entered_by_role, games.result_entered_by_role),
+          result_locked_at = EXCLUDED.result_locked_at,
+          result_entered_by_name = EXCLUDED.result_entered_by_name,
+          result_entered_by_role = EXCLUDED.result_entered_by_role,
           result_override_count = GREATEST(EXCLUDED.result_override_count, games.result_override_count),
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > games.updated_at

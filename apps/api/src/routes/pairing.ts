@@ -105,6 +105,9 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     if (!tournament || tournament.deletedAt) {
       return reply.code(404).send({ error: 'Tournament not found' });
     }
+    if (!(await store.isTournamentOwnedBy(tournamentId, request.userId ?? ''))) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
     if (round > tournament.rounds) {
       return reply
         .code(400)
@@ -116,7 +119,12 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         .send({ error: `Pairing style "${tournament.style}" is not yet implemented` });
     }
 
-    const allGames = await store.listGames(tournamentId);
+    const [allGames, allCategories, allParticipants] = await Promise.all([
+      store.listGames(tournamentId),
+      store.listCategories(tournamentId),
+      store.listParticipants(tournamentId),
+    ]);
+
     const pastForCheck = allGames.filter((g) => !g.deletedAt).map(gameToPastGame);
     const pendingRound = firstRoundMissingResults(pastForCheck, round);
     if (pendingRound !== null) {
@@ -131,11 +139,9 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     }
     const { categoryId: filterCategoryId } = bodyParsed.data;
 
-    const allCategories = await store.listCategories(tournamentId);
     const activeCategories = allCategories.filter((c) => !c.deletedAt);
     const mix = tournament.mixCategories === true;
 
-    const allParticipants = await store.listParticipants(tournamentId);
     const createdGames: Game[] = [];
     const now = new Date().toISOString();
 
@@ -190,21 +196,23 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         throw err;
       }
 
-      for (const board of pairingOutput.boards) {
-        const game = await store.createGame({
-          id: crypto.randomUUID(),
-          tournamentId,
-          categoryId: poolId,
-          round,
-          board: board.board,
-          whiteId: board.whiteId,
-          blackId: board.blackId,
-          result: board.isBye ? 'bye' : 'pending',
-          isBye: board.isBye,
-          updatedAt: now,
-        });
-        createdGames.push(game);
-      }
+      const poolGames = await Promise.all(
+        pairingOutput.boards.map((board) =>
+          store.createGame({
+            id: crypto.randomUUID(),
+            tournamentId,
+            categoryId: poolId,
+            round,
+            board: board.board,
+            whiteId: board.whiteId,
+            blackId: board.blackId,
+            result: board.isBye ? 'bye' : 'pending',
+            isBye: board.isBye,
+            updatedAt: now,
+          }),
+        ),
+      );
+      createdGames.push(...poolGames);
 
       await store.updateTournament(tournamentId, {
         currentRound: Math.max(tournament.currentRound, round),
@@ -270,21 +278,23 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
         throw err;
       }
 
-      for (const board of pairingOutput.boards) {
-        const game = await store.createGame({
-          id: crypto.randomUUID(),
-          tournamentId,
-          categoryId: category.id,
-          round,
-          board: board.board,
-          whiteId: board.whiteId,
-          blackId: board.blackId,
-          result: board.isBye ? 'bye' : 'pending',
-          isBye: board.isBye,
-          updatedAt: now,
-        });
-        createdGames.push(game);
-      }
+      const categoryGames = await Promise.all(
+        pairingOutput.boards.map((board) =>
+          store.createGame({
+            id: crypto.randomUUID(),
+            tournamentId,
+            categoryId: category.id,
+            round,
+            board: board.board,
+            whiteId: board.whiteId,
+            blackId: board.blackId,
+            result: board.isBye ? 'bye' : 'pending',
+            isBye: board.isBye,
+            updatedAt: now,
+          }),
+        ),
+      );
+      createdGames.push(...categoryGames);
     }
 
     await store.updateTournament(tournamentId, {
@@ -369,6 +379,9 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     if (!tournament || tournament.deletedAt) {
       return reply.code(404).send({ error: 'Tournament not found' });
     }
+    if (!(await store.isTournamentOwnedBy(tournamentId, request.userId ?? ''))) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
     const round =
       request.query.round != null ? parseInt(request.query.round, 10) : undefined;
     if (request.query.round != null && (isNaN(round!) || round! < 1)) {
@@ -404,6 +417,9 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     const tournament = await store.getTournament(tournamentId);
     if (!tournament || tournament.deletedAt) {
       return reply.code(404).send({ error: 'Tournament not found' });
+    }
+    if (!(await store.isTournamentOwnedBy(tournamentId, request.userId ?? ''))) {
+      return reply.code(403).send({ error: 'Forbidden' });
     }
     const game = await store.getGame(gameId);
     if (!game || game.deletedAt || game.tournamentId !== tournamentId) {
@@ -454,6 +470,9 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     if (!tournament || tournament.deletedAt) {
       return reply.code(404).send({ error: 'Tournament not found' });
     }
+    if (!(await store.isTournamentOwnedBy(tournamentId, request.userId ?? ''))) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
     const game = await store.getGame(gameId);
     if (!game || game.deletedAt || game.tournamentId !== tournamentId) {
       return reply.code(404).send({ error: 'Game not found' });
@@ -491,11 +510,16 @@ export const pairingPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts
     if (!tournament || tournament.deletedAt) {
       return reply.code(404).send({ error: 'Tournament not found' });
     }
+    if (!(await store.isTournamentOwnedBy(tournamentId, request.userId ?? ''))) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
 
     const mix = tournament.mixCategories === true;
-    const allCategories = await store.listCategories(tournamentId);
-    const allParticipants = await store.listParticipants(tournamentId);
-    const allGames = await store.listGames(tournamentId);
+    const [allCategories, allParticipants, allGames] = await Promise.all([
+      store.listCategories(tournamentId),
+      store.listParticipants(tournamentId),
+      store.listGames(tournamentId),
+    ]);
 
     if (mix || allCategories.filter((c) => !c.deletedAt).length === 0) {
       const players: EnginePlayer[] = allParticipants

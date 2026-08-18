@@ -30,6 +30,9 @@ export const importPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts)
       if (!tournament || tournament.deletedAt) {
         return reply.code(404).send({ error: 'Tournament not found' });
       }
+      if (!(await store.isTournamentOwnedBy(tournamentId, request.userId ?? ''))) {
+        return reply.code(403).send({ error: 'Forbidden' });
+      }
 
       // --- Parse multipart parts ---
       let fileBuffer: Buffer | null = null;

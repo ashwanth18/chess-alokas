@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const PIN_LEN = 6;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -59,10 +59,7 @@ export function signArbiterSession(payload: Omit<ArbiterSessionPayload, 'exp'>):
     exp: Date.now() + SESSION_TTL_MS,
   };
   const raw = Buffer.from(JSON.stringify(body), 'utf8');
-  const sig = createHash('sha256')
-    .update(sessionSecret())
-    .update(raw)
-    .digest();
+  const sig = createHmac('sha256', sessionSecret()).update(raw).digest();
   return `${b64url(raw)}.${b64url(sig)}`;
 }
 
@@ -73,7 +70,7 @@ export function verifyArbiterSession(token: string | undefined | null): ArbiterS
   try {
     const raw = fromB64url(rawPart);
     const sig = fromB64url(sigPart);
-    const expected = createHash('sha256').update(sessionSecret()).update(raw).digest();
+    const expected = createHmac('sha256', sessionSecret()).update(raw).digest();
     if (sig.length !== expected.length || !timingSafeEqual(sig, expected)) return null;
     const payload = JSON.parse(raw.toString('utf8')) as ArbiterSessionPayload;
     if (!payload.exp || Date.now() > payload.exp) return null;

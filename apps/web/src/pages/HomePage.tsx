@@ -7,6 +7,7 @@ import { softDeleteTournament } from '../lib/deleteTournament';
 import TableSearch from '../components/TableSearch';
 import { matchesTextSearch } from '../lib/textSearch';
 import { styleLabel } from '@chess-alokas/pairing-engine';
+import { useAuth } from '../auth/AuthContext';
 
 const PAGE_SIZE = 10;
 
@@ -23,6 +24,7 @@ function deriveListStatus(t: { status: string; currentRound: number; rounds: num
 }
 
 export default function HomePage() {
+  const { user } = useAuth();
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -35,10 +37,13 @@ export default function HomePage() {
   const tournaments = useLiveQuery(
     () =>
       db.tournaments
-        .filter((t) => !t.deletedAt)
+        // Shared devices can carry another signed-in user's local rows —
+        // only show tournaments owned by whoever is signed in now (or
+        // not-yet-owned local-only rows, which belong to the current session).
+        .filter((t) => !t.deletedAt && (!t.ownerId || t.ownerId === user?.id))
         .reverse()
         .sortBy('updatedAt'),
-    [],
+    [user?.id],
   );
 
   const filtered = useMemo(() => {
