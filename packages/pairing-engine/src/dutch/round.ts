@@ -4,6 +4,15 @@ import { allocateColours } from './colour.js';
 import { buildDutchPlayers, canReceivePab } from './state.js';
 import type { DutchContext, DutchPair, DutchPlayer } from './types.js';
 
+export class DutchPairingIncompleteError extends Error {
+  constructor(public readonly missingPlayerIds: string[]) {
+    super(
+      `Dutch pairing left ${missingPlayerIds.length} player(s) unpaired: ${missingPlayerIds.join(', ')}`,
+    );
+    this.name = 'DutchPairingIncompleteError';
+  }
+}
+
 function higherOf(a: DutchPlayer, b: DutchPlayer): DutchPlayer {
   if (a.score !== b.score) return a.score > b.score ? a : b;
   if (a.tpn !== b.tpn) return a.tpn < b.tpn ? a : b;
@@ -79,12 +88,20 @@ export function pairDutchRound(input: PairingInput): PairingOutput {
     ({ pairs, bye } = pairScoreBrackets(players, rematchCtx));
   }
 
-  const pairedIds = new Set(pairs.flatMap((p) => [p.a.id, p.b.id]));
+  let pairedIds = new Set(pairs.flatMap((p) => [p.a.id, p.b.id]));
   if (bye) pairedIds.add(bye.id);
-  const missing = players.filter((p) => !pairedIds.has(p.id));
+  let missing = players.filter((p) => !pairedIds.has(p.id));
   if (missing.length > 0) {
     const rematchCtx: DutchContext = { ...ctx, allowRematch: true, matchMemo: new Map() };
     ({ pairs, bye } = pairScoreBrackets(players, rematchCtx));
+    pairedIds = new Set(pairs.flatMap((p) => [p.a.id, p.b.id]));
+    if (bye) pairedIds.add(bye.id);
+    missing = players.filter((p) => !pairedIds.has(p.id));
+    if (missing.length > 0) {
+      // Even allowing a rematch, the bracket logic couldn't place everyone —
+      // publishing anyway would silently drop these players from the round.
+      throw new DutchPairingIncompleteError(missing.map((p) => p.id));
+    }
   }
 
   const boards = publishBoards(pairs, bye, ctx);

@@ -29,7 +29,12 @@ export interface PairingInput {
   players: EnginePlayer[];
   pastGames: PastGame[];
   round: number;
-  /** Known tournament length; required for Dutch topscorer (A.7 / 1.8). */
+  /**
+   * Known tournament length; required for Dutch topscorer (A.7 / 1.8) and
+   * the TRF `XXR` header bbpPairings reads to know if this is the final
+   * round. Swiss pairing doesn't use it. Dutch pairing throws if it's
+   * missing rather than guessing — see dutch/trf.ts.
+   */
   totalRounds?: number;
   /** Colour drawn for odd pairing numbers in round 1 (Dutch E.5). Default White. */
   initialColor?: 'W' | 'B';
@@ -229,38 +234,35 @@ function findPerfectMatching(
   return pairs.map(([a, b]) => [byId.get(a)!, byId.get(b)!]);
 }
 
-function pairGroup(
-  group: PlayerState[],
-): { pairs: Array<[PlayerState, PlayerState]>; leftover: PlayerState | null } {
-  const sorted = sortWithinGroup(group);
-  if (sorted.length === 0) return { pairs: [], leftover: null };
+/**
+ * Try to pair a bracket (one score group, plus anything floated down from
+ * above) without a rematch. Returns null if no rematch-free pairing exists
+ * for this exact set — the caller should widen into the next score group
+ * rather than settle for a rematch immediately, since a repeat pairing a
+ * bracket down usually isn't necessary.
+ */
+function pairBracketNoRematch(
+  bracket: PlayerState[],
+): { pairs: Array<[PlayerState, PlayerState]>; leftover: PlayerState | null } | null {
+  const sorted = sortWithinGroup(bracket);
 
-  let leftover: PlayerState | null = null;
-  let working = sorted;
-
-  if (working.length % 2 === 1) {
-    // Downfloat lowest-ranked in group
-    leftover = working[working.length - 1] ?? null;
-    working = working.slice(0, -1);
+  if (sorted.length % 2 === 0) {
+    const pairs = findPerfectMatching(sorted, false);
+    if (!pairs) return null;
+    return { pairs, leftover: null };
   }
 
-  const pairs =
-    findPerfectMatching(working, false) ?? findPerfectMatching(working, true) ?? [];
-
-  // If matching failed partially (shouldn't), greedy fill
-  if (pairs.length * 2 !== working.length) {
-    const used = new Set(pairs.flatMap(([a, b]) => [a.id, b.id]));
-    const rem = working.filter((p) => !used.has(p.id));
-    for (let i = 0; i + 1 < rem.length; i += 2) {
-      const a = rem[i], b = rem[i + 1];
-      if (a && b) pairs.push([a, b]);
-    }
-    if (rem.length % 2 === 1) {
-      leftover = rem[rem.length - 1] ?? null;
-    }
+  // Odd bracket: which single player floats down matters for whether the
+  // rest can be paired without a rematch. Prefer downfloating the
+  // lowest-ranked player, but try each candidate (lowest-ranked first)
+  // until one leaves a fully rematch-free remainder.
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const candidate = sorted[i]!;
+    const rest = sorted.filter((_, idx) => idx !== i);
+    const pairs = findPerfectMatching(rest, false);
+    if (pairs) return { pairs, leftover: candidate };
   }
-
-  return { pairs, leftover };
+  return null;
 }
 
 function assignColors(
@@ -343,13 +345,11 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
   if (isFirstRound(input)) {
     allPairs = dutchFoldPairs(pool);
   } else {
-  // Try global rematch-free matching first (best for small fields)
-  const globalNoRematch = findPerfectMatching(pool, false);
-
-  if (globalNoRematch) {
-    allPairs = globalNoRematch;
-  } else {
-    // Score-group pairing with floaters
+    // Score-group pairing with floaters — pair within the same score group
+    // first (FIDE Swiss principle). If a bracket can't be paired without a
+    // rematch, widen it to include the next lower score group instead of
+    // forcing the rematch immediately; only the very last (lowest) bracket
+    // falls back to allowing a rematch, as a last resort.
     const scoreMap = new Map<number, PlayerState[]>();
     for (const p of pool) {
       const list = scoreMap.get(p.score) ?? [];
@@ -359,37 +359,57 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
     const scores = [...scoreMap.keys()].sort((a, b) => b - a);
 
     allPairs = [];
-    let floater: PlayerState | null = null;
+    let carry: PlayerState[] = [];
+    // Stack of already-committed brackets, so a bracket that turns out to be
+    // impossible to solve without a rematch can unwind earlier commitments
+    // and retry with a wider pool, instead of forcing a rematch right away.
+    const committed: Array<Array<[PlayerState, PlayerState]>> = [];
 
     for (let si = 0; si < scores.length; si++) {
-      const score = scores[si]!;
-      const group = [...(scoreMap.get(score) ?? [])];
-      if (floater) {
-        group.push(floater);
-        floater = null;
+      carry = carry.concat(scoreMap.get(scores[si]!) ?? []);
+
+      let resolved = pairBracketNoRematch(carry);
+      while (!resolved && committed.length > 0) {
+        const prevPairs = committed.pop()!;
+        allPairs.splice(allPairs.length - prevPairs.length, prevPairs.length);
+        carry = prevPairs.flatMap(([a, b]) => [a, b]).concat(carry);
+        resolved = pairBracketNoRematch(carry);
       }
 
-      const { pairs, leftover } = pairGroup(group);
-      allPairs.push(...pairs);
-
-      if (leftover) {
-        if (si === scores.length - 1) {
-          // Last group leftover — should not happen with even pool
-          // Re-pair entire remaining including leftover via allow rematch
-          const unpaired = [leftover];
-          floater = leftover;
-        } else {
-          floater = leftover;
-        }
+      if (resolved) {
+        allPairs.push(...resolved.pairs);
+        committed.push(resolved.pairs);
+        carry = resolved.leftover ? [resolved.leftover] : [];
+        continue;
       }
+
+      const isLastGroup = si === scores.length - 1;
+      if (!isLastGroup) {
+        // No rematch-free pairing yet even after unwinding — keep the whole
+        // bracket in `carry` and merge the next (lower) score group into it.
+        continue;
+      }
+
+      // Every bracket has been unwound and merged and there is still no
+      // rematch-free pairing for the entire remaining pool — a rematch is
+      // truly unavoidable. Allow it as an absolute last resort.
+      let working = sortWithinGroup(carry);
+      let leftover: PlayerState | null = null;
+      if (working.length % 2 === 1) {
+        leftover = working[working.length - 1] ?? null;
+        working = working.slice(0, -1);
+      }
+      allPairs.push(...(findPerfectMatching(working, true) ?? []));
+      carry = leftover ? [leftover] : [];
     }
 
-    if (floater) {
-      // Emergency: rematch-allowed global rematch of anyone still needing a game
-      // Floater means our group logic left one out — re-solve whole pool allowing rematch
-      allPairs = findPerfectMatching(pool, true) ?? allPairs;
+    if (carry.length > 0) {
+      // Any players never absorbed into a bracket (shouldn't normally
+      // happen — covers the single-bye/odd-pool edge case defensively).
+      allPairs.push(
+        ...(findPerfectMatching(carry, false) ?? findPerfectMatching(carry, true) ?? []),
+      );
     }
-  }
   }
 
   const boards: PairingBoard[] = [];

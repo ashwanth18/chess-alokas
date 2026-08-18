@@ -114,12 +114,21 @@ export function buildTrf(input: PairingInput): TrfBuildResult {
   const rounds = Array.from({ length: maxPlayed }, (_, i) => i + 1);
   void playedRounds;
 
-  const totalRounds = input.totalRounds ?? Math.max(input.round, maxPlayed + 1);
+  if (input.totalRounds == null) {
+    // Silently defaulting this to the current round would tell bbpPairings
+    // this is the tournament's final round, activating last-round-only
+    // rules (topscorer exceptions to colour clashes, PAB handling) too
+    // early and producing a non-standard pairing with no warning.
+    throw new Error(
+      `Dutch pairing requires totalRounds (got round ${input.round} with none set)`,
+    );
+  }
+
   const initial = input.initialColor === 'B' ? 'black1' : 'white1';
 
   const lines: string[] = [
     `012 Chess Alokas`,
-    `XXR ${totalRounds}`,
+    `XXR ${input.totalRounds}`,
     `XXC ${initial}`,
   ];
 

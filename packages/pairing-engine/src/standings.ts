@@ -237,21 +237,13 @@ export function computeStandingsFromStates(
   return assignRanks(withMetrics, pastGames, sharedPlaces);
 }
 
+/** Standing already carries every MetricsRow field (plus rank), so re-ranking
+ * an already-sorted section is the same shared-places logic as the initial
+ * ranking pass. */
 export function reRankSection(
   section: Standing[],
   pastGames: PastGame[],
   sharedPlaces: boolean,
 ): Standing[] {
-  if (!sharedPlaces) {
-    return section.map((s, i) => ({ ...s, rank: i + 1 }));
-  }
-  const ranks: number[] = new Array(section.length);
-  for (let i = 0; i < section.length; i++) {
-    if (i > 0 && performanceEqual(section[i]!, section[i - 1]!, pastGames)) {
-      ranks[i] = ranks[i - 1]!;
-    } else {
-      ranks[i] = i + 1;
-    }
-  }
-  return section.map((s, i) => ({ ...s, rank: ranks[i]! }));
+  return assignRanks(section, pastGames, sharedPlaces);
 }
