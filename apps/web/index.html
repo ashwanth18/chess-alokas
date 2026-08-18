@@ -39,6 +39,52 @@
       </div>
     </div>
     <script>
+      // Runs before the app bundle (main.tsx) — and must keep working even if
+      // that bundle never successfully loads or mounts, since that's exactly
+      // the failure mode Sentry (initialized inside the bundle) can't see.
+      // This is the only error-reporting path available during that window:
+      // it goes through the Electron preload bridge (already live by the
+      // time any page script runs) straight to the desktop's local
+      // last-error.json / electron-log, independent of the React app.
+      function reportBootIssue(code, message, details) {
+        var issue = {
+          code: code,
+          message: message,
+          details: details || '',
+          at: new Date().toISOString(),
+        };
+        try {
+          sessionStorage.setItem('chess-alokas-boot-issue', JSON.stringify(issue));
+        } catch (e) {
+          /* ignore */
+        }
+        try {
+          if (window.desktop && window.desktop.reportBootIssue) {
+            window.desktop.reportBootIssue(issue);
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      }
+
+      window.addEventListener('error', function (e) {
+        var err = e.error;
+        reportBootIssue(
+          'RENDERER_JS_ERROR',
+          (e.message || 'Unhandled error').slice(0, 300),
+          (e.filename || '') + ':' + (e.lineno || '') + (err && err.stack ? '\n' + err.stack : ''),
+        );
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var reason = e.reason;
+        var message = reason && reason.message ? reason.message : String(reason);
+        reportBootIssue(
+          'UNHANDLED_REJECTION',
+          String(message).slice(0, 300),
+          reason && reason.stack ? String(reason.stack) : '',
+        );
+      });
+
       (function () {
         var FLAG = 'alokas-sw-cleared';
         if (!('serviceWorker' in navigator)) return;
@@ -68,8 +114,10 @@
       setTimeout(function () {
         var el = document.getElementById('boot-splash-msg');
         if (el) {
-          el.textContent =
+          var msg =
             'Still starting (BOOT_UI_STUCK). Use chess-manager.alokas.com in a browser, or send this code to support.';
+          el.textContent = msg;
+          reportBootIssue('BOOT_UI_STUCK', msg);
         }
       }, 12000);
     </script>

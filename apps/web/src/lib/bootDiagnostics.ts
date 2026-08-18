@@ -12,6 +12,8 @@ export type BootIssueCode =
   | 'WINDOW_SHOW_TIMEOUT'
   | 'MAIN_UNCAUGHT'
   | 'BOOT_UI_STUCK'
+  | 'RENDERER_JS_ERROR'
+  | 'UNHANDLED_REJECTION'
   | 'INDEXEDDB_OPEN_FAILED';
 
 export interface BootIssue {
