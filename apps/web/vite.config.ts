@@ -60,6 +60,30 @@ export default defineConfig(({ mode }) => {
           }
         },
       },
+      // Desktop loads index.html via file:// (mainWindow.loadFile), where there
+      // is no real cross-origin boundary between the HTML and its own built
+      // assets — but Chromium can still compute file:// origins per-file
+      // rather than per-directory. `crossorigin` on Vite's emitted
+      // <script type="module">/<link> tags asks the browser to fetch those
+      // assets in CORS mode, which is unnecessary here and a plausible
+      // contributor to the BOOT_UI_STUCK reports (the module bundle silently
+      // failing to load, so React never mounts). Strip it for the desktop
+      // build only; the hosted web build still needs it for CDN-style serving.
+      isDesktopBuild && {
+        name: 'strip-crossorigin-for-file-protocol',
+        transformIndexHtml: {
+          order: 'post' as const,
+          handler(html: string) {
+            // Only the locally-built ./assets/* tags Vite emits — leave the
+            // hand-written Google Fonts preconnect/stylesheet tags alone,
+            // those are genuinely cross-origin.
+            return html.replace(/<(?:script|link)\b[^>]*>/g, (tag) => {
+              if (!tag.includes('./assets/')) return tag;
+              return tag.replace(/\s+crossorigin(="[^"]*")?/, '');
+            });
+          },
+        },
+      },
       // Emit a self-destroying sw.js so existing installs uninstall themselves.
       // Offline data lives in IndexedDB; a caching SW was intercepting /api (Failed to fetch)
       // while Supabase auth (other origin) still worked.
