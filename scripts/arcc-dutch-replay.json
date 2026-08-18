@@ -1,0 +1,1275 @@
+{
+  "event": "ALoKAS RAPID CHESS CHAMPIONSHIP 2026",
+  "players": 33,
+  "rounds": 5,
+  "method": "For each round, keep historical results 1..N-1 fixed, then re-pair round N with bbpPairings v6 Dutch.",
+  "byRound": [
+    {
+      "round": 1,
+      "scoreGroups": {
+        "0.0": 33
+      },
+      "actualSameScoreRate": 100,
+      "dutchSameScoreRate": 100,
+      "actualPairsMatchingDutch": "16/16",
+      "actualPairsMatchingOldSwiss": "16/16",
+      "actualBye": "YUVESHINI",
+      "dutchBye": "YUVESHINI",
+      "scoreGapsActual": [],
+      "scoreGapsDutch": [],
+      "rematchesPlayed": [],
+      "rematchesAny": [],
+      "leadersActual": [
+        {
+          "player": "LOGITAN",
+          "score": 0,
+          "opponent": "Muhammad (0)",
+          "sameScore": true
+        },
+        {
+          "player": "SHANVATANA",
+          "score": 0,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Aadithiya",
+          "score": 0,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Agilayaavardhini",
+          "score": 0,
+          "opponent": "NETHRANN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Aqshyavardhini",
+          "score": 0,
+          "opponent": "POVIITHAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Ariff",
+          "score": 0,
+          "opponent": "RUTRAKALYANI (0)",
+          "sameScore": true
+        },
+        {
+          "player": "AZRA",
+          "score": 0,
+          "opponent": "Sasheene (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Azrid",
+          "score": 0,
+          "opponent": "SASHVIN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "DEBANATHAN",
+          "score": 0,
+          "opponent": "SESHANAND (0)",
+          "sameScore": true
+        },
+        {
+          "player": "DHARSHINI",
+          "score": 0,
+          "opponent": "TAMILALINII (0)",
+          "sameScore": true
+        },
+        {
+          "player": "JENEEVAN",
+          "score": 0,
+          "opponent": "TAMILHINII (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Jeyendra",
+          "score": 0,
+          "opponent": "THANUJAA (0)",
+          "sameScore": true
+        },
+        {
+          "player": "KAVIDASS",
+          "score": 0,
+          "opponent": "VARSHAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Krishitha",
+          "score": 0,
+          "opponent": "VIJAY (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Michael",
+          "score": 0,
+          "opponent": "VISHNU (0)",
+          "sameScore": true
+        },
+        {
+          "player": "MUHAMMAD",
+          "score": 0,
+          "opponent": "YASHWINI (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Muhammad",
+          "score": 0,
+          "opponent": "LOGITAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "MUHAMMAD",
+          "score": 0,
+          "opponent": "SHANVATANA (0)",
+          "sameScore": true
+        },
+        {
+          "player": "MUHAMMAD",
+          "score": 0,
+          "opponent": "Aadithiya (0)",
+          "sameScore": true
+        },
+        {
+          "player": "NETHRANN",
+          "score": 0,
+          "opponent": "Agilayaavardhini (0)",
+          "sameScore": true
+        },
+        {
+          "player": "POVIITHAN",
+          "score": 0,
+          "opponent": "Aqshyavardhini (0)",
+          "sameScore": true
+        },
+        {
+          "player": "RUTRAKALYANI",
+          "score": 0,
+          "opponent": "Ariff (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Sasheene",
+          "score": 0,
+          "opponent": "AZRA (0)",
+          "sameScore": true
+        },
+        {
+          "player": "SASHVIN",
+          "score": 0,
+          "opponent": "Azrid (0)",
+          "sameScore": true
+        },
+        {
+          "player": "SESHANAND",
+          "score": 0,
+          "opponent": "DEBANATHAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 0,
+          "opponent": "DHARSHINI (0)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILHINII",
+          "score": 0,
+          "opponent": "JENEEVAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "THANUJAA",
+          "score": 0,
+          "opponent": "Jeyendra (0)",
+          "sameScore": true
+        },
+        {
+          "player": "VARSHAN",
+          "score": 0,
+          "opponent": "KAVIDASS (0)",
+          "sameScore": true
+        },
+        {
+          "player": "VIJAY",
+          "score": 0,
+          "opponent": "Krishitha (0)",
+          "sameScore": true
+        },
+        {
+          "player": "VISHNU",
+          "score": 0,
+          "opponent": "Michael (0)",
+          "sameScore": true
+        },
+        {
+          "player": "YASHWINI",
+          "score": 0,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": true
+        },
+        {
+          "player": "YUVESHINI",
+          "score": 0,
+          "opponent": "BYE",
+          "sameScore": false
+        }
+      ],
+      "leadersDutch": [
+        {
+          "player": "LOGITAN",
+          "score": 0,
+          "opponent": "Muhammad (0)",
+          "sameScore": true
+        },
+        {
+          "player": "SHANVATANA",
+          "score": 0,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Aadithiya",
+          "score": 0,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Agilayaavardhini",
+          "score": 0,
+          "opponent": "NETHRANN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Aqshyavardhini",
+          "score": 0,
+          "opponent": "POVIITHAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Ariff",
+          "score": 0,
+          "opponent": "RUTRAKALYANI (0)",
+          "sameScore": true
+        },
+        {
+          "player": "AZRA",
+          "score": 0,
+          "opponent": "Sasheene (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Azrid",
+          "score": 0,
+          "opponent": "SASHVIN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "DEBANATHAN",
+          "score": 0,
+          "opponent": "SESHANAND (0)",
+          "sameScore": true
+        },
+        {
+          "player": "DHARSHINI",
+          "score": 0,
+          "opponent": "TAMILALINII (0)",
+          "sameScore": true
+        },
+        {
+          "player": "JENEEVAN",
+          "score": 0,
+          "opponent": "TAMILHINII (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Jeyendra",
+          "score": 0,
+          "opponent": "THANUJAA (0)",
+          "sameScore": true
+        },
+        {
+          "player": "KAVIDASS",
+          "score": 0,
+          "opponent": "VARSHAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Krishitha",
+          "score": 0,
+          "opponent": "VIJAY (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Michael",
+          "score": 0,
+          "opponent": "VISHNU (0)",
+          "sameScore": true
+        },
+        {
+          "player": "MUHAMMAD",
+          "score": 0,
+          "opponent": "YASHWINI (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Muhammad",
+          "score": 0,
+          "opponent": "LOGITAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "MUHAMMAD",
+          "score": 0,
+          "opponent": "SHANVATANA (0)",
+          "sameScore": true
+        },
+        {
+          "player": "MUHAMMAD",
+          "score": 0,
+          "opponent": "Aadithiya (0)",
+          "sameScore": true
+        },
+        {
+          "player": "NETHRANN",
+          "score": 0,
+          "opponent": "Agilayaavardhini (0)",
+          "sameScore": true
+        },
+        {
+          "player": "POVIITHAN",
+          "score": 0,
+          "opponent": "Aqshyavardhini (0)",
+          "sameScore": true
+        },
+        {
+          "player": "RUTRAKALYANI",
+          "score": 0,
+          "opponent": "Ariff (0)",
+          "sameScore": true
+        },
+        {
+          "player": "Sasheene",
+          "score": 0,
+          "opponent": "AZRA (0)",
+          "sameScore": true
+        },
+        {
+          "player": "SASHVIN",
+          "score": 0,
+          "opponent": "Azrid (0)",
+          "sameScore": true
+        },
+        {
+          "player": "SESHANAND",
+          "score": 0,
+          "opponent": "DEBANATHAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 0,
+          "opponent": "DHARSHINI (0)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILHINII",
+          "score": 0,
+          "opponent": "JENEEVAN (0)",
+          "sameScore": true
+        },
+        {
+          "player": "THANUJAA",
+          "score": 0,
+          "opponent": "Jeyendra (0)",
+          "sameScore": true
+        },
+        {
+          "player": "VARSHAN",
+          "score": 0,
+          "opponent": "KAVIDASS (0)",
+          "sameScore": true
+        },
+        {
+          "player": "VIJAY",
+          "score": 0,
+          "opponent": "Krishitha (0)",
+          "sameScore": true
+        },
+        {
+          "player": "VISHNU",
+          "score": 0,
+          "opponent": "Michael (0)",
+          "sameScore": true
+        },
+        {
+          "player": "YASHWINI",
+          "score": 0,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": true
+        },
+        {
+          "player": "YUVESHINI",
+          "score": 0,
+          "opponent": "BYE",
+          "sameScore": false
+        }
+      ],
+      "r1Style": {
+        "actual": [
+          "1–17",
+          "2–18",
+          "3–19",
+          "4–20",
+          "5–21",
+          "6–22",
+          "7–23",
+          "8–24"
+        ],
+        "dutch": [
+          "1–17",
+          "18–2",
+          "3–19",
+          "20–4",
+          "5–21",
+          "22–6",
+          "7–23",
+          "24–8"
+        ]
+      }
+    },
+    {
+      "round": 2,
+      "scoreGroups": {
+        "1.0": 17,
+        "0.0": 16
+      },
+      "actualSameScoreRate": 69,
+      "dutchSameScoreRate": 94,
+      "actualPairsMatchingDutch": "0/16",
+      "actualPairsMatchingOldSwiss": "5/16",
+      "actualBye": "VISHNU",
+      "dutchBye": "VISHNU",
+      "scoreGapsActual": [
+        {
+          "white": "Aadithiya",
+          "black": "Agilayaavardhini",
+          "whitePts": 1,
+          "blackPts": 0,
+          "gap": 1
+        },
+        {
+          "white": "DEBANATHAN",
+          "black": "DHARSHINI",
+          "whitePts": 1,
+          "blackPts": 0,
+          "gap": 1
+        },
+        {
+          "white": "Michael",
+          "black": "MUHAMMAD",
+          "whitePts": 1,
+          "blackPts": 0,
+          "gap": 1
+        },
+        {
+          "white": "MUHAMMAD",
+          "black": "NETHRANN",
+          "whitePts": 0,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "SESHANAND",
+          "black": "TAMILALINII",
+          "whitePts": 0,
+          "blackPts": 1,
+          "gap": 1
+        }
+      ],
+      "scoreGapsDutch": [
+        {
+          "white": "VIJAY",
+          "black": "Agilayaavardhini",
+          "whitePts": 1,
+          "blackPts": 0,
+          "gap": 1
+        }
+      ],
+      "rematchesPlayed": [],
+      "rematchesAny": [],
+      "leadersActual": [
+        {
+          "player": "LOGITAN",
+          "score": 1,
+          "opponent": "SHANVATANA (1)",
+          "sameScore": true
+        },
+        {
+          "player": "SHANVATANA",
+          "score": 1,
+          "opponent": "LOGITAN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Aadithiya",
+          "score": 1,
+          "opponent": "Agilayaavardhini (0)",
+          "sameScore": false
+        },
+        {
+          "player": "Aqshyavardhini",
+          "score": 1,
+          "opponent": "Ariff (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Ariff",
+          "score": 1,
+          "opponent": "Aqshyavardhini (1)",
+          "sameScore": true
+        },
+        {
+          "player": "DEBANATHAN",
+          "score": 1,
+          "opponent": "DHARSHINI (0)",
+          "sameScore": false
+        },
+        {
+          "player": "JENEEVAN",
+          "score": 1,
+          "opponent": "Jeyendra (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Jeyendra",
+          "score": 1,
+          "opponent": "JENEEVAN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Michael",
+          "score": 1,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": false
+        },
+        {
+          "player": "NETHRANN",
+          "score": 1,
+          "opponent": "MUHAMMAD (0)",
+          "sameScore": false
+        },
+        {
+          "player": "Sasheene",
+          "score": 1,
+          "opponent": "SASHVIN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "SASHVIN",
+          "score": 1,
+          "opponent": "Sasheene (1)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 1,
+          "opponent": "SESHANAND (0)",
+          "sameScore": false
+        },
+        {
+          "player": "VARSHAN",
+          "score": 1,
+          "opponent": "VIJAY (1)",
+          "sameScore": true
+        },
+        {
+          "player": "VIJAY",
+          "score": 1,
+          "opponent": "VARSHAN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "YASHWINI",
+          "score": 1,
+          "opponent": "YUVESHINI (1)",
+          "sameScore": true
+        },
+        {
+          "player": "YUVESHINI",
+          "score": 1,
+          "opponent": "YASHWINI (1)",
+          "sameScore": true
+        }
+      ],
+      "leadersDutch": [
+        {
+          "player": "LOGITAN",
+          "score": 1,
+          "opponent": "NETHRANN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "SHANVATANA",
+          "score": 1,
+          "opponent": "Sasheene (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Aadithiya",
+          "score": 1,
+          "opponent": "SASHVIN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Aqshyavardhini",
+          "score": 1,
+          "opponent": "Michael (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Ariff",
+          "score": 1,
+          "opponent": "TAMILALINII (1)",
+          "sameScore": true
+        },
+        {
+          "player": "DEBANATHAN",
+          "score": 1,
+          "opponent": "VARSHAN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "JENEEVAN",
+          "score": 1,
+          "opponent": "YASHWINI (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Jeyendra",
+          "score": 1,
+          "opponent": "YUVESHINI (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Michael",
+          "score": 1,
+          "opponent": "Aqshyavardhini (1)",
+          "sameScore": true
+        },
+        {
+          "player": "NETHRANN",
+          "score": 1,
+          "opponent": "LOGITAN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "Sasheene",
+          "score": 1,
+          "opponent": "SHANVATANA (1)",
+          "sameScore": true
+        },
+        {
+          "player": "SASHVIN",
+          "score": 1,
+          "opponent": "Aadithiya (1)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 1,
+          "opponent": "Ariff (1)",
+          "sameScore": true
+        },
+        {
+          "player": "VARSHAN",
+          "score": 1,
+          "opponent": "DEBANATHAN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "VIJAY",
+          "score": 1,
+          "opponent": "Agilayaavardhini (0)",
+          "sameScore": false
+        },
+        {
+          "player": "YASHWINI",
+          "score": 1,
+          "opponent": "JENEEVAN (1)",
+          "sameScore": true
+        },
+        {
+          "player": "YUVESHINI",
+          "score": 1,
+          "opponent": "Jeyendra (1)",
+          "sameScore": true
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "scoreGroups": {
+        "2.0": 10,
+        "1.0": 14,
+        "0.0": 9
+      },
+      "actualSameScoreRate": 31,
+      "dutchSameScoreRate": 100,
+      "actualPairsMatchingDutch": "0/16",
+      "actualPairsMatchingOldSwiss": "5/16",
+      "actualBye": "THANUJAA",
+      "dutchBye": "SESHANAND",
+      "scoreGapsActual": [
+        {
+          "white": "Ariff",
+          "black": "AZRA",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "Jeyendra",
+          "black": "KAVIDASS",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "TAMILALINII",
+          "black": "VARSHAN",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "TAMILHINII",
+          "black": "YASHWINI",
+          "whitePts": 1,
+          "blackPts": 2,
+          "gap": 1
+        },
+        {
+          "white": "VIJAY",
+          "black": "SHANVATANA",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "Krishitha",
+          "black": "Michael",
+          "whitePts": 0,
+          "blackPts": 2,
+          "gap": 2
+        },
+        {
+          "white": "NETHRANN",
+          "black": "POVIITHAN",
+          "whitePts": 2,
+          "blackPts": 0,
+          "gap": 2
+        },
+        {
+          "white": "SASHVIN",
+          "black": "SESHANAND",
+          "whitePts": 2,
+          "blackPts": 0,
+          "gap": 2
+        },
+        {
+          "white": "Agilayaavardhini",
+          "black": "Aqshyavardhini",
+          "whitePts": 0,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "Azrid",
+          "black": "DEBANATHAN",
+          "whitePts": 0,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "MUHAMMAD",
+          "black": "MUHAMMAD",
+          "whitePts": 1,
+          "blackPts": 0,
+          "gap": 1
+        }
+      ],
+      "scoreGapsDutch": [],
+      "rematchesPlayed": [],
+      "rematchesAny": [],
+      "leadersActual": [
+        {
+          "player": "LOGITAN",
+          "score": 2,
+          "opponent": "Aadithiya (2)",
+          "sameScore": true
+        },
+        {
+          "player": "Aadithiya",
+          "score": 2,
+          "opponent": "LOGITAN (2)",
+          "sameScore": true
+        },
+        {
+          "player": "Ariff",
+          "score": 2,
+          "opponent": "AZRA (1)",
+          "sameScore": false
+        },
+        {
+          "player": "Jeyendra",
+          "score": 2,
+          "opponent": "KAVIDASS (1)",
+          "sameScore": false
+        },
+        {
+          "player": "Michael",
+          "score": 2,
+          "opponent": "Krishitha (0)",
+          "sameScore": false
+        },
+        {
+          "player": "NETHRANN",
+          "score": 2,
+          "opponent": "POVIITHAN (0)",
+          "sameScore": false
+        },
+        {
+          "player": "SASHVIN",
+          "score": 2,
+          "opponent": "SESHANAND (0)",
+          "sameScore": false
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 2,
+          "opponent": "VARSHAN (1)",
+          "sameScore": false
+        },
+        {
+          "player": "VIJAY",
+          "score": 2,
+          "opponent": "SHANVATANA (1)",
+          "sameScore": false
+        },
+        {
+          "player": "YASHWINI",
+          "score": 2,
+          "opponent": "TAMILHINII (1)",
+          "sameScore": false
+        }
+      ],
+      "leadersDutch": [
+        {
+          "player": "LOGITAN",
+          "score": 2,
+          "opponent": "NETHRANN (2)",
+          "sameScore": true
+        },
+        {
+          "player": "Aadithiya",
+          "score": 2,
+          "opponent": "SASHVIN (2)",
+          "sameScore": true
+        },
+        {
+          "player": "Ariff",
+          "score": 2,
+          "opponent": "TAMILALINII (2)",
+          "sameScore": true
+        },
+        {
+          "player": "Jeyendra",
+          "score": 2,
+          "opponent": "YASHWINI (2)",
+          "sameScore": true
+        },
+        {
+          "player": "Michael",
+          "score": 2,
+          "opponent": "VIJAY (2)",
+          "sameScore": true
+        },
+        {
+          "player": "NETHRANN",
+          "score": 2,
+          "opponent": "LOGITAN (2)",
+          "sameScore": true
+        },
+        {
+          "player": "SASHVIN",
+          "score": 2,
+          "opponent": "Aadithiya (2)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 2,
+          "opponent": "Ariff (2)",
+          "sameScore": true
+        },
+        {
+          "player": "VIJAY",
+          "score": 2,
+          "opponent": "Michael (2)",
+          "sameScore": true
+        },
+        {
+          "player": "YASHWINI",
+          "score": 2,
+          "opponent": "Jeyendra (2)",
+          "sameScore": true
+        }
+      ]
+    },
+    {
+      "round": 4,
+      "scoreGroups": {
+        "3.0": 6,
+        "2.0": 12,
+        "0.0": 6,
+        "1.0": 9
+      },
+      "actualSameScoreRate": 31,
+      "dutchSameScoreRate": 94,
+      "actualPairsMatchingDutch": "0/16",
+      "actualPairsMatchingOldSwiss": "3/16",
+      "actualBye": "SESHANAND",
+      "dutchBye": "SESHANAND",
+      "scoreGapsActual": [
+        {
+          "white": "SHANVATANA",
+          "black": "Michael",
+          "whitePts": 2,
+          "blackPts": 3,
+          "gap": 1
+        },
+        {
+          "white": "DEBANATHAN",
+          "black": "Jeyendra",
+          "whitePts": 1,
+          "blackPts": 3,
+          "gap": 2
+        },
+        {
+          "white": "NETHRANN",
+          "black": "Muhammad",
+          "whitePts": 3,
+          "blackPts": 1,
+          "gap": 2
+        },
+        {
+          "white": "Aqshyavardhini",
+          "black": "Azrid",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "AZRA",
+          "black": "DHARSHINI",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "THANUJAA",
+          "black": "VIJAY",
+          "whitePts": 1,
+          "blackPts": 2,
+          "gap": 1
+        },
+        {
+          "white": "Agilayaavardhini",
+          "black": "LOGITAN",
+          "whitePts": 0,
+          "blackPts": 3,
+          "gap": 3
+        },
+        {
+          "white": "JENEEVAN",
+          "black": "Krishitha",
+          "whitePts": 2,
+          "blackPts": 0,
+          "gap": 2
+        },
+        {
+          "white": "MUHAMMAD",
+          "black": "TAMILHINII",
+          "whitePts": 0,
+          "blackPts": 2,
+          "gap": 2
+        },
+        {
+          "white": "MUHAMMAD",
+          "black": "KAVIDASS",
+          "whitePts": 0,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "POVIITHAN",
+          "black": "VARSHAN",
+          "whitePts": 0,
+          "blackPts": 1,
+          "gap": 1
+        }
+      ],
+      "scoreGapsDutch": [
+        {
+          "white": "VARSHAN",
+          "black": "Agilayaavardhini",
+          "whitePts": 1,
+          "blackPts": 0,
+          "gap": 1
+        }
+      ],
+      "rematchesPlayed": [],
+      "rematchesAny": [],
+      "leadersActual": [
+        {
+          "player": "LOGITAN",
+          "score": 3,
+          "opponent": "Agilayaavardhini (0)",
+          "sameScore": false
+        },
+        {
+          "player": "Jeyendra",
+          "score": 3,
+          "opponent": "DEBANATHAN (1)",
+          "sameScore": false
+        },
+        {
+          "player": "Michael",
+          "score": 3,
+          "opponent": "SHANVATANA (2)",
+          "sameScore": false
+        },
+        {
+          "player": "NETHRANN",
+          "score": 3,
+          "opponent": "Muhammad (1)",
+          "sameScore": false
+        },
+        {
+          "player": "SASHVIN",
+          "score": 3,
+          "opponent": "TAMILALINII (3)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 3,
+          "opponent": "SASHVIN (3)",
+          "sameScore": true
+        }
+      ],
+      "leadersDutch": [
+        {
+          "player": "LOGITAN",
+          "score": 3,
+          "opponent": "NETHRANN (3)",
+          "sameScore": true
+        },
+        {
+          "player": "Jeyendra",
+          "score": 3,
+          "opponent": "SASHVIN (3)",
+          "sameScore": true
+        },
+        {
+          "player": "Michael",
+          "score": 3,
+          "opponent": "TAMILALINII (3)",
+          "sameScore": true
+        },
+        {
+          "player": "NETHRANN",
+          "score": 3,
+          "opponent": "LOGITAN (3)",
+          "sameScore": true
+        },
+        {
+          "player": "SASHVIN",
+          "score": 3,
+          "opponent": "Jeyendra (3)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 3,
+          "opponent": "Michael (3)",
+          "sameScore": true
+        }
+      ]
+    },
+    {
+      "round": 5,
+      "scoreGroups": {
+        "4.0": 3,
+        "3.0": 10,
+        "2.0": 8,
+        "0.0": 5,
+        "1.0": 5,
+        "2.5": 2
+      },
+      "actualSameScoreRate": 38,
+      "dutchSameScoreRate": 75,
+      "actualPairsMatchingDutch": "1/16",
+      "actualPairsMatchingOldSwiss": "1/16",
+      "actualBye": "POVIITHAN",
+      "dutchBye": "MUHAMMAD",
+      "scoreGapsActual": [
+        {
+          "white": "LOGITAN",
+          "black": "Aqshyavardhini",
+          "whitePts": 4,
+          "blackPts": 2,
+          "gap": 2
+        },
+        {
+          "white": "Aadithiya",
+          "black": "AZRA",
+          "whitePts": 2,
+          "blackPts": 3,
+          "gap": 1
+        },
+        {
+          "white": "DHARSHINI",
+          "black": "Michael",
+          "whitePts": 1,
+          "blackPts": 3,
+          "gap": 2
+        },
+        {
+          "white": "THANUJAA",
+          "black": "SHANVATANA",
+          "whitePts": 1,
+          "blackPts": 3,
+          "gap": 2
+        },
+        {
+          "white": "SESHANAND",
+          "black": "VISHNU",
+          "whitePts": 1,
+          "blackPts": 2.5,
+          "gap": 1.5
+        },
+        {
+          "white": "VIJAY",
+          "black": "MUHAMMAD",
+          "whitePts": 3,
+          "blackPts": 0,
+          "gap": 3
+        },
+        {
+          "white": "Sasheene",
+          "black": "Muhammad",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "VARSHAN",
+          "black": "YUVESHINI",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        },
+        {
+          "white": "Agilayaavardhini",
+          "black": "DEBANATHAN",
+          "whitePts": 0,
+          "blackPts": 2,
+          "gap": 2
+        }
+      ],
+      "scoreGapsDutch": [
+        {
+          "white": "TAMILALINII",
+          "black": "Ariff",
+          "whitePts": 4,
+          "blackPts": 3,
+          "gap": 1
+        },
+        {
+          "white": "RUTRAKALYANI",
+          "black": "YUVESHINI",
+          "whitePts": 2,
+          "blackPts": 1,
+          "gap": 1
+        }
+      ],
+      "rematchesPlayed": [],
+      "rematchesAny": [],
+      "leadersActual": [
+        {
+          "player": "LOGITAN",
+          "score": 4,
+          "opponent": "Aqshyavardhini (2)",
+          "sameScore": false
+        },
+        {
+          "player": "NETHRANN",
+          "score": 4,
+          "opponent": "TAMILALINII (4)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 4,
+          "opponent": "NETHRANN (4)",
+          "sameScore": true
+        }
+      ],
+      "leadersDutch": [
+        {
+          "player": "LOGITAN",
+          "score": 4,
+          "opponent": "NETHRANN (4)",
+          "sameScore": true
+        },
+        {
+          "player": "NETHRANN",
+          "score": 4,
+          "opponent": "LOGITAN (4)",
+          "sameScore": true
+        },
+        {
+          "player": "TAMILALINII",
+          "score": 4,
+          "opponent": "Ariff (3)",
+          "sameScore": false
+        }
+      ]
+    }
+  ],
+  "wholeEvent": {
+    "playedRematches": 0,
+    "diagnoseRematchCount": 0,
+    "repeatByes": [],
+    "colorImbalance3plus": [
+      {
+        "name": "LOGITAN",
+        "imbalance": 3
+      },
+      {
+        "name": "DEBANATHAN",
+        "imbalance": 3
+      },
+      {
+        "name": "VISHNU",
+        "imbalance": -3
+      }
+    ]
+  }
+}
