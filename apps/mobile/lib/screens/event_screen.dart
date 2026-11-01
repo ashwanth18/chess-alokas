@@ -135,7 +135,7 @@ class _EventScreenState extends State<EventScreen> {
     final where = [
       event.venueAddress ?? event.locationLabel ?? 'Venue not listed',
       if (distance != null)
-        '${distance.toStringAsFixed(1)} km from ${widget.originCity}',
+        '${formatDistanceKm(distance)} from ${widget.originCity}',
     ].join('\n');
     final format = [
       if (event.style != null) event.style!.toUpperCase(),
@@ -328,7 +328,7 @@ class PaymentBlock extends StatelessWidget {
               style: atype(14, weight: 600, color: p.ink2),
             ),
           const SizedBox(height: 8),
-          if (qr != null) ...[qr, const SizedBox(height: 8)],
+          if (qr != null) ...[Center(child: qr), const SizedBox(height: 8)],
           if (instructions != null)
             SelectableText(
               instructions,

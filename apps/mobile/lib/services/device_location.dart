@@ -53,12 +53,24 @@ Future<DeviceLocationResult> locateDevice() async {
       case LocationPermission.always:
         break;
     }
-    final position = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.low,
-        timeLimit: Duration(seconds: 20),
-      ),
-    );
+    Position? position;
+    try {
+      position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.low,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+    } on Object {
+      // Indoors with no fresh fix: where the phone last was is still useful
+      // for sorting events by distance.
+      position = await Geolocator.getLastKnownPosition();
+    }
+    if (position == null) {
+      return const DeviceLocationProblem(
+        'Could not find your location just now. Try again, or choose a city.',
+      );
+    }
     return DeviceLocationFound(position.latitude, position.longitude);
   } on Object {
     return const DeviceLocationProblem(

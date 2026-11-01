@@ -41,6 +41,9 @@ class DiscoverScreen extends StatefulWidget {
   final Map<String, List<RegistrationRecord>> registrationsByEvent;
   final LocationPreset selectedLocation;
   final ValueChanged<LocationPreset> onLocationChanged;
+
+  /// Leaves "your location" for the city the user last chose.
+  final VoidCallback onBrowseAll;
   final DeviceLocator locateDevice;
   final SettingsOpener openSettings;
   final Future<ApiResult<EventDetail>> Function(String slugOrId)
@@ -73,6 +76,7 @@ class DiscoverScreen extends StatefulWidget {
     required this.registrationsByEvent,
     required this.selectedLocation,
     required this.onLocationChanged,
+    required this.onBrowseAll,
     required this.locateDevice,
     required this.openSettings,
     required this.loadEventDetail,
@@ -91,12 +95,37 @@ class DiscoverScreen extends StatefulWidget {
 }
 
 class _DiscoverScreenState extends State<DiscoverScreen> {
+  /// Further than this, an event isn't "near you".
+  static const double nearbyKm = 150;
+
+  /// The user asked to see far-away events with their true distances.
+  bool _showFarEvents = false;
   double? _selectedRadiusKm; // null = no distance limit
   String _selectedCategoryCode = 'All';
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   bool _locating = false;
   DeviceLocationProblem? _locationProblem;
+
+  @override
+  void didUpdateWidget(DiscoverScreen old) {
+    super.didUpdateWidget(old);
+    if (old.selectedLocation.id != widget.selectedLocation.id) {
+      _showFarEvents = false;
+    }
+  }
+
+  bool get _usingDevice =>
+      widget.selectedLocation.id == LocationPreset.deviceId;
+
+  /// Using the device's position with nothing close, and no choice made yet.
+  bool get _nothingNearby {
+    if (!_usingDevice || _showFarEvents || widget.events.isEmpty) return false;
+    return !widget.events.any((e) {
+      final distance = _distanceTo(e);
+      return distance != null && distance <= nearbyKm;
+    });
+  }
 
   @override
   void dispose() {
@@ -226,8 +255,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     final p = context.pal;
     final events = _filteredEvents;
     final countKnown =
-        widget.events.isNotEmpty ||
-        (!widget.eventsLoading && widget.eventsError == null);
+        !_nothingNearby &&
+        (widget.events.isNotEmpty ||
+            (!widget.eventsLoading && widget.eventsError == null));
     return RefreshIndicator(
       onRefresh: widget.onRefresh,
       child: ListView(
@@ -315,11 +345,14 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           onRetry: widget.onRefresh,
         ),
     ];
+    if (_nothingNearby) return [...notice, _buildNothingNearby()];
     if (events.isEmpty) {
       return [
         ...notice,
         MessageCard(
-          title: 'No tournaments match these filters.',
+          title: _usingDevice && _selectedRadiusKm != null
+              ? 'No tournaments within ${_selectedRadiusKm!.round()} km of you.'
+              : 'No tournaments match these filters.',
           actionLabel: 'Reset Filters',
           onAction: () {
             setState(() {
@@ -333,6 +366,53 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       ];
     }
     return [...notice, ...events.map(_buildEventRow)];
+  }
+
+  /// Far from every event, such as abroad. Says so, names the closest event, and
+  /// leaves the choice to the user rather than showing an empty page.
+  Widget _buildNothingNearby() {
+    final p = context.pal;
+    MobileEventItem? closest;
+    double? closestKm;
+    for (final event in widget.events) {
+      final distance = _distanceTo(event);
+      if (distance != null && (closestKm == null || distance < closestKm)) {
+        closest = event;
+        closestKm = distance;
+      }
+    }
+    return BrandCard(
+      key: const Key('no-events-near-you'),
+      strong: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'No events near you',
+            style: atype(20, weight: 800, color: p.ink, height: 1.2),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            closest == null
+                ? 'None of the ${pluralize(widget.events.length, 'listed event')} gives a location to measure from.'
+                : 'The closest is ${closest.displayName}, ${formatDistanceKm(closestKm!)} away.',
+            style: atype(16, color: p.ink2, height: 1.35),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            key: const Key('browse-all-events'),
+            onPressed: widget.onBrowseAll,
+            child: const Text('Browse all events'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            key: const Key('show-true-distances'),
+            onPressed: () => setState(() => _showFarEvents = true),
+            child: const Text('Show true distances'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildLocation() {
@@ -485,7 +565,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: AlokasBadge(
                   text:
-                      '${distKm.toStringAsFixed(1)} km from ${widget.selectedLocation.city}',
+                      '${formatDistanceKm(distKm)} from ${widget.selectedLocation.city}',
                   tone: ChipTone.go,
                   icon: Icons.near_me,
                 ),

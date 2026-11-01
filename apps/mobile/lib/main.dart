@@ -142,7 +142,10 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     }
     if (!mounted) return;
     for (final preset in locationPresets) {
-      if (preset.id == savedId) _selectedLocation = preset;
+      if (preset.id == savedId) {
+        _selectedLocation = preset;
+        _lastCity = preset;
+      }
     }
     await _showCachedEvents();
     await _fetchEvents();
@@ -163,7 +166,11 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     });
   }
 
+  /// Where "Browse all events" goes back to from the device's position.
+  LocationPreset _lastCity = locationPresets.first;
+
   Future<void> _chooseLocation(LocationPreset location) async {
+    if (location.id != LocationPreset.deviceId) _lastCity = location;
     setState(() => _selectedLocation = location);
     _refreshEvents();
     if (location.id == LocationPreset.deviceId) return;
@@ -706,6 +713,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         registrationsByEvent: _registrationsByEvent,
         selectedLocation: _selectedLocation,
         onLocationChanged: _chooseLocation,
+        onBrowseAll: () => _chooseLocation(_lastCity),
         locateDevice: widget.locateDevice,
         openSettings: widget.openLocationSettings,
         loadEventDetail: _api.fetchEventDetail,

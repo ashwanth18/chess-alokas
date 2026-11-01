@@ -1212,6 +1212,66 @@ void main() {
       expect(query['lng'], '101.65');
     });
 
+    testWidgets('from far away: says so, and both ways out work', (
+      tester,
+    ) async {
+      final backend = FakeBackend(routes());
+      await _pump(
+        tester,
+        backend,
+        // The UK: the fake event is in Malaysia.
+        locator: () async => const DeviceLocationFound(51.5, -0.12),
+      );
+      await _tapKey(tester, 'use-my-location');
+
+      expect(find.byKey(const Key('no-events-near-you')), findsOneWidget);
+      expect(find.text('No events near you'), findsOneWidget);
+      expect(find.textContaining('The closest is Fake Open'), findsOneWidget);
+      expect(find.text('View & Register'), findsNothing);
+
+      await _tapKey(tester, 'show-true-distances');
+      expect(
+        find.textContaining(
+          RegExp(
+            r'^1\d,\d{3} km from your location|^\d,\d{3} km from your location|^\d{2},\d{3} km from your location',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('View & Register'), findsOneWidget);
+
+      // Asking again keeps the choice off until the location changes.
+      await _tapKey(tester, 'city-picker');
+      await tester.tap(find.text('Near: Johor Bahru').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('km from Johor Bahru'), findsOneWidget);
+
+      await _tapKey(tester, 'use-my-location');
+      await _tapKey(tester, 'browse-all-events');
+      expect(find.byKey(const Key('no-events-near-you')), findsNothing);
+      expect(find.text('View & Register'), findsOneWidget);
+      expect(find.textContaining('km from Johor Bahru'), findsOneWidget);
+    });
+
+    testWidgets('near an event, the list shows straight away', (tester) async {
+      final backend = FakeBackend(routes());
+      await _pump(
+        tester,
+        backend,
+        locator: () async => const DeviceLocationFound(3.15, 101.7),
+      );
+      await _tapKey(tester, 'use-my-location');
+
+      expect(find.byKey(const Key('no-events-near-you')), findsNothing);
+      expect(find.text('View & Register'), findsOneWidget);
+    });
+
+    test('distances read naturally', () {
+      expect(formatDistanceKm(1.94), '1.9 km');
+      expect(formatDistanceKm(245.4), '245 km');
+      expect(formatDistanceKm(10812.2), '10,812 km');
+    });
+
     testWidgets('a refusal keeps the city and says what to do', (tester) async {
       final backend = FakeBackend(routes());
       await _pump(

@@ -18,6 +18,17 @@ double haversineDistanceKm(double lat1, double lon1, double lat2, double lon2) {
   return ((earthRadiusKm * c) * 10).roundToDouble() / 10.0;
 }
 
+/// "1.9 km", "245 km", "10,812 km".
+String formatDistanceKm(double km) {
+  if (km < 100) return '${km.toStringAsFixed(1)} km';
+  final whole = km.round().toString();
+  final grouped = whole.replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+$)'),
+    (_) => ',',
+  );
+  return '$grouped km';
+}
+
 final RegExp _uuidPattern = RegExp(
   r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
   caseSensitive: false,
