@@ -40,6 +40,7 @@ import {
   DEFAULT_CERT_SERIAL_PREFIX,
   formatCertificateSerial,
   normalizeExcludedRounds,
+  defaultTournamentOrganization,
   inviteStatus,
   roleRank,
   type AcceptInviteResult,
@@ -85,6 +86,11 @@ export interface SyncPullResult {
   categories: Category[];
   participants: Participant[];
   games: Game[];
+  /**
+   * Tournaments this user lost access to and may still hold on a device, for this user only.
+   * Listed until access returns, so a device that was offline, or restored a backup, still hears.
+   */
+  revokedTournamentIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -351,15 +357,6 @@ function inviteConflict(message: string): Error {
   return Object.assign(new Error(message), { statusCode: 409 });
 }
 
-/** Organization for a tournament that names none: your own before one you were invited to. */
-function pickDefaultOrganization<T extends { memberRole: OrganizationMemberRole }>(
-  orgs: T[],
-): T | null {
-  const manageable = orgs.filter((o) => MANAGER_ROLES.includes(o.memberRole));
-  // sort is stable, so the oldest organization wins within a role.
-  return [...manageable].sort((a, b) => roleRank(b.memberRole) - roleRank(a.memberRole))[0] ?? null;
-}
-
 export interface CreateOrganizationInviteInput {
   id: string;
   organizationId: string;
@@ -563,6 +560,7 @@ export class MemoryStore implements Store {
     }
   >();
   private organizationInvites = new Map<string, OrganizationInvite & { tokenHash: string }>();
+  private accessRevocations = new Set<string>();
   private playerProfiles = new Map<string, PlayerProfile>();
   private certificateIssues = new Map<string, CertificateIssue>();
   private registrations = new Map<string, TournamentRegistration>();
@@ -593,7 +591,7 @@ export class MemoryStore implements Store {
       return this.organizations.get(t.organizationId) ?? null;
     }
     if (t.ownerId) {
-      return pickDefaultOrganization(await this.listUserOrganizations(t.ownerId));
+      return defaultTournamentOrganization(await this.listUserOrganizations(t.ownerId));
     }
     return null;
   }
@@ -1093,6 +1091,11 @@ export class MemoryStore implements Store {
       games: [...this.games.values()].filter((g) =>
         childOk(g.tournamentId, this.games.changedSince(g.id, cursor)),
       ),
+      revokedTournamentIds: ownerId
+        ? [...this.tournaments.values()]
+            .filter((t) => this.accessRevocations.has(`${ownerId}:${t.id}`) && !visible(t))
+            .map((t) => t.id)
+        : [],
     };
   }
 
@@ -1568,6 +1571,9 @@ export class MemoryStore implements Store {
         email,
         accessChangedAt: nowIso,
       });
+      if (MANAGER_ROLES.includes(row.role)) {
+        this.clearAccessRevocations(row.organizationId, input.userId);
+      }
     }
     row.acceptedAt = nowIso;
     row.acceptedBy = input.userId;
@@ -1584,6 +1590,18 @@ export class MemoryStore implements Store {
       .filter((m) => m.organizationId === organizationId && m.role === 'owner' && m.userId !== userId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return owners[0]?.userId ?? null;
+  }
+
+  private recordAccessRevocations(organizationId: string, userId: string): void {
+    for (const t of this.tournaments.values()) {
+      if (t.organizationId === organizationId) this.accessRevocations.add(`${userId}:${t.id}`);
+    }
+  }
+
+  private clearAccessRevocations(organizationId: string, userId: string): void {
+    for (const t of this.tournaments.values()) {
+      if (t.organizationId === organizationId) this.accessRevocations.delete(`${userId}:${t.id}`);
+    }
   }
 
   /** See PostgresStore.handOverOrganizationAccess. */
@@ -1609,7 +1627,12 @@ export class MemoryStore implements Store {
     if (!mem) return null;
     if (mem.role === role) return role;
     if (mem.role === 'owner' && !this.otherOwner(organizationId, userId)) throw lastOwnerError();
-    if (!MANAGER_ROLES.includes(role)) this.handOverOrganizationAccess(organizationId, userId);
+    if (!MANAGER_ROLES.includes(role)) {
+      this.handOverOrganizationAccess(organizationId, userId);
+      this.recordAccessRevocations(organizationId, userId);
+    } else if (!MANAGER_ROLES.includes(mem.role)) {
+      this.clearAccessRevocations(organizationId, userId);
+    }
     mem.role = role;
     mem.accessChangedAt = new Date().toISOString();
     return role;
@@ -1621,6 +1644,7 @@ export class MemoryStore implements Store {
     if (!mem) return false;
     if (mem.role === 'owner' && !this.otherOwner(organizationId, userId)) throw lastOwnerError();
     this.handOverOrganizationAccess(organizationId, userId);
+    this.recordAccessRevocations(organizationId, userId);
     this.organizationMembers.delete(key);
     return true;
   }
@@ -3018,7 +3042,7 @@ export class PostgresStore implements Store {
       return this.getOrganization(t.organizationId, s);
     }
     if (t.ownerId) {
-      return pickDefaultOrganization(await this.listUserOrganizations(t.ownerId, s));
+      return defaultTournamentOrganization(await this.listUserOrganizations(t.ownerId, s));
     }
     return null;
   }
@@ -3835,11 +3859,19 @@ export class PostgresStore implements Store {
             AND (g.server_updated_at > ${cursor}::timestamptz OR ${tournamentChanged})
         `,
       ]);
+      // COALESCE: with no owner and no organization match, the test is NULL rather than false.
+      const revoked = await this.sql<{ id: string }[]>`
+        SELECT t.id::text AS id
+        FROM tournament_access_revocations r
+        INNER JOIN tournaments t ON t.id = r.tournament_id
+        WHERE r.user_id = ${ownerId} AND NOT COALESCE((${manageable}), false)
+      `;
       return {
         tournaments: tournaments.map(rowToTournament),
         categories: categories.map(rowToCategory),
         participants: participants.map(rowToParticipant),
         games: games.map(rowToGame),
+        revokedTournamentIds: revoked.map((r) => r.id),
       };
     }
     const [tournaments, categories, participants, games] = await Promise.all([
@@ -3853,6 +3885,7 @@ export class PostgresStore implements Store {
       categories: categories.map(rowToCategory),
       participants: participants.map(rowToParticipant),
       games: games.map(rowToGame),
+      revokedTournamentIds: [],
     };
   }
 
@@ -4446,6 +4479,9 @@ export class PostgresStore implements Store {
           INSERT INTO organization_members (organization_id, user_id, role, email)
           VALUES (${invite.organizationId}, ${input.userId}, ${invite.role}, ${email})
         `;
+        if (MANAGER_ROLES.includes(invite.role)) {
+          await this.clearAccessRevocations(s, invite.organizationId, input.userId);
+        }
       }
       await s`
         UPDATE organization_invites
@@ -4504,6 +4540,31 @@ export class PostgresStore implements Store {
     `;
   }
 
+  /** Every tournament the organization has now, soft-deleted included: a device may hold any of them. */
+  private async recordAccessRevocations(
+    s: Sql,
+    organizationId: string,
+    userId: string,
+  ): Promise<void> {
+    await s`
+      INSERT INTO tournament_access_revocations (user_id, tournament_id)
+      SELECT ${userId}::uuid, id FROM tournaments WHERE organization_id = ${organizationId}
+      ON CONFLICT (user_id, tournament_id) DO UPDATE SET revoked_at = now()
+    `;
+  }
+
+  private async clearAccessRevocations(
+    s: Sql,
+    organizationId: string,
+    userId: string,
+  ): Promise<void> {
+    await s`
+      DELETE FROM tournament_access_revocations
+      WHERE user_id = ${userId}
+        AND tournament_id IN (SELECT id FROM tournaments WHERE organization_id = ${organizationId})
+    `;
+  }
+
   async updateOrganizationMemberRole(
     organizationId: string,
     userId: string,
@@ -4519,6 +4580,9 @@ export class PostgresStore implements Store {
       }
       if (!MANAGER_ROLES.includes(role)) {
         await this.handOverOrganizationAccess(s, organizationId, userId);
+        await this.recordAccessRevocations(s, organizationId, userId);
+      } else if (!MANAGER_ROLES.includes(current)) {
+        await this.clearAccessRevocations(s, organizationId, userId);
       }
       await s`
         UPDATE organization_members SET role = ${role}, access_changed_at = now()
@@ -4537,6 +4601,7 @@ export class PostgresStore implements Store {
         throw lastOwnerError();
       }
       await this.handOverOrganizationAccess(s, organizationId, userId);
+      await this.recordAccessRevocations(s, organizationId, userId);
       await s`
         DELETE FROM organization_members
         WHERE organization_id = ${organizationId} AND user_id = ${userId}

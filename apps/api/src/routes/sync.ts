@@ -25,7 +25,8 @@ export const syncPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) =
     // Taken before the queries, so a row written while they run is seen by the next pull.
     const serverTime = new Date().toISOString();
     const data = await store.pullSince(since, request.userId ?? null);
-    return { ...data, serverTime };
+    // The client checks this against its own session before removing anything.
+    return { ...data, revokedForUserId: request.userId ?? null, serverTime };
   }
 
   async function handlePush(request: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) {

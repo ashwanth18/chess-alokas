@@ -102,11 +102,43 @@ Chess Alokas supports two complementary workspaces under a single unified Supaba
 - **Invite links** hold a random token. Only its SHA-256 is stored (`organization_invites.token_hash`), so a link can be shown only when issued. Resend and New link each issue a new link and stop the old one working.
 - **Accepting** needs a signed-in user whose confirmed email equals the invite's address. Links work once and expire after 7 days. An existing member keeps their current role.
 - **Access is API-only.** `organization_invites` has RLS on, no policies and no client grants. The token goes in request bodies, not API paths, so it stays out of access logs.
-- **Leaving or dropping to arbiter** hands the person's `owner_id` tournaments, and `organizations.created_by`, to the longest-serving other owner. Both fields grant access in the API and in older RLS policies. Data already on a removed person's device stays there; their later pushes are refused.
+- **Leaving or dropping to arbiter** hands the person's `owner_id` tournaments, and `organizations.created_by`, to the longest-serving other owner. Both fields grant access in the API and in older RLS policies.
 - **Sync**: `organization_members.access_changed_at` makes a pull redeliver an organization's tournaments to someone who just joined or was promoted, because those rows are older than their cursor.
-- **A tournament that names no organization** goes to the highest-role organization the creator can manage, so your own comes before one you were invited to. The web create form does not offer a choice yet.
+- **Choosing an organization**: the create form lists organizations where the person's role can create tournaments, defaults to the highest-role one, shows its plan limits, and hides the choice when there is only one. The API checks membership and role on `POST /tournaments` and on sync. A tournament that names no organization, such as one created offline before the list loaded, goes to the same default.
 - **No seat limits**: the data model has none, so none are enforced. Sending is limited to 30 invites per person per hour, in memory per process.
 - **Email** uses Resend when `RESEND_API_KEY` is set. The API always returns the link, with `emailStatus` of `sent`, `failed`, `not_configured` or `skipped`. `PUBLIC_APP_URL` sets the link's base.
+
+### Removing a tournament from a device after access is lost (`031`)
+
+`tournament_access_revocations` records, per person, the organization's tournaments at the moment they were removed, left, or dropped to arbiter. Being promoted or invited back to a role that runs tournaments clears the rows. `GET /sync/pull` returns `revokedTournamentIds` and `revokedForUserId`. The list comes on every pull until access returns, so a device that was offline still hears. A record is needed because comparing a device's tournaments with what the current user may see can't tell a lost tournament from another account's copy on a shared computer.
+
+The client (`apps/web/src/sync/revocation.ts`, rules in `revocationPlan.ts`) removes a tournament and its rows from Dexie only when:
+
+- the pull succeeded with a complete response
+- `revokedForUserId` equals the signed-in user at both the start of the sync and after the pull
+- the id is on the server's list and is not among the tournaments that same response delivered
+
+So an error, a partial response or an older server removes nothing, and neither does a never-synced tournament, because the server can't list what it has never seen. Older clients ignore the fields.
+
+Pending changes to a removed tournament are dropped and counted in the notice, which names the tournaments and stays until dismissed.
+
+**Shared computer.** The local database is per device, not per account, so:
+
+- After a removal, other accounts' sync cursors on the device are reset, so their own copy comes back at their next sync.
+- If another account has used the device and the tournament has pending changes, nobody can tell whose they are. The tournament stays, the person is told once, and removal waits until those changes are gone. Until then it is still readable here.
+
+**Desktop backups.** No snapshot is taken before removal, because it would keep the data the person just lost access to. Automatic snapshots in `%APPDATA%\Chess Alokas\backups` are rewritten without those tournaments, and a restore leaves them out, from any file. A snapshot that can't be rewritten is counted in the notice. On a shared computer this also removes the tournament from snapshots another account might use. Their copy comes back from the cloud.
+
+**What this cannot do:**
+
+- A device that never syncs again keeps its copy, and that copy stays readable offline.
+- A signed-out or offline person keeps theirs until the next successful sync.
+- Exported backup files, anywhere the person saved them, are out of reach. So are copies made outside the app.
+- A snapshot that failed to rewrite still holds the data. The app tries again at each sync and says so in the notice. A damaged file that isn't readable as a backup is left as it is and not counted. The app can't restore it, but its text may still hold data.
+- A restore on a device that has never heard about the loss, such as a new computer, brings the tournament back until its first sync removes it.
+- Anything already printed, downloaded or copied, such as certificates and CSV files, is untouched.
+
+This limits what the app keeps. It does not guarantee erasure.
 
 ---
 

@@ -61,6 +61,7 @@ export interface DesktopBridge {
   backupExport: (json: string) => Promise<string | null>;
   backupImport: () => Promise<string | null>;
   backupOpenFolder: () => Promise<void>;
+  backupPurgeTournaments: (ids: string[]) => Promise<{ cleaned: number; failed: number }>;
   backupFolder: () => string;
 }
 
@@ -104,6 +105,7 @@ const bridge: DesktopBridge = {
   backupExport: (json) => ipcRenderer.invoke('desktop:backup-export', json),
   backupImport: () => ipcRenderer.invoke('desktop:backup-import'),
   backupOpenFolder: () => ipcRenderer.invoke('desktop:backup-open-folder'),
+  backupPurgeTournaments: (ids) => ipcRenderer.invoke('desktop:backup-purge-tournaments', ids),
   backupFolder: () => ipcRenderer.sendSync('desktop:backup-folder') as string,
   onUpdateStatus: (listener) => {
     const handler = (_event: IpcRendererEvent, status: DesktopUpdateStatus) => listener(status);

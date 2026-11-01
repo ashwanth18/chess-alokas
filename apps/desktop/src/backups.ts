@@ -2,7 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, dialog, shell, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
-import { isSnapshotName, snapshotName, snapshotsToPrune } from './policy.js';
+import {
+  isSnapshotName,
+  snapshotName,
+  snapshotsToPrune,
+  stripTournamentsFromSnapshot,
+  validateTournamentIds,
+} from './policy.js';
 
 /** Tournament snapshots hold personal data, so they stay in the per-user app data folder. */
 const KEEP_SNAPSHOTS = 20;
@@ -54,6 +60,36 @@ export function listSnapshots(): Array<{ name: string; size: number; savedAt: st
 export function readSnapshot(name: unknown): string {
   if (!isSnapshotName(name)) throw new Error('Invalid snapshot name');
   return fs.readFileSync(path.join(backupsDir(), name), 'utf8');
+}
+
+/**
+ * Takes tournaments out of every automatic snapshot here, for someone who lost access to them.
+ * A file it can't read or rewrite stays as it was and is counted, so the app can say so.
+ * Files the person exported elsewhere are out of reach.
+ */
+export async function purgeTournamentsFromSnapshots(
+  rawIds: unknown,
+): Promise<{ cleaned: number; failed: number }> {
+  const ids = validateTournamentIds(rawIds);
+  const result = { cleaned: 0, failed: 0 };
+  if (ids.length === 0) return result;
+  const dir = backupsDir();
+  for (const name of fs.readdirSync(dir).filter(isSnapshotName)) {
+    const dest = path.join(dir, name);
+    const tmp = `${dest}.part`;
+    try {
+      const next = stripTournamentsFromSnapshot(await fs.promises.readFile(dest, 'utf8'), ids);
+      if (next === null) continue;
+      await fs.promises.writeFile(tmp, next, 'utf8');
+      await fs.promises.rename(tmp, dest);
+      result.cleaned += 1;
+    } catch (err) {
+      result.failed += 1;
+      log.warn('Could not clean snapshot', name, err);
+      await fs.promises.rm(tmp, { force: true }).catch(() => undefined);
+    }
+  }
+  return result;
 }
 
 export async function exportToFile(win: BrowserWindow | null, json: unknown): Promise<string | null> {

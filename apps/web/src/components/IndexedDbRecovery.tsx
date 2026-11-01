@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Dexie, { liveQuery } from 'dexie';
 import BootIssueCard from './BootIssueCard';
 import { db, ensureDbOpen } from '../db/local';
+import { deviceRevokedIds, stripTournaments } from '../sync/revocationPlan';
 
 /* ── Desktop local backups ─────────────────────────────────────────────────
  * A backup is a JSON copy of the whole local database. The desktop main process
@@ -83,8 +84,13 @@ function parseBackup(json: string): BackupFile {
   return parsed as BackupFile;
 }
 
-/** Replaces all local data with the backup. A broken store is deleted and rebuilt first. */
-async function restoreBackup(backup: BackupFile, opts: { rebuildStore: boolean }): Promise<void> {
+/**
+ * Replaces all local data with the backup. A broken store is deleted and rebuilt first.
+ * Tournaments an account on this device lost access to stay out, wherever the backup came from.
+ * Returns how many were left out.
+ */
+async function restoreBackup(backup: BackupFile, opts: { rebuildStore: boolean }): Promise<number> {
+  const { tables, removedTournaments } = stripTournaments(backup.tables, deviceRevokedIds());
   if (opts.rebuildStore) {
     db.close();
     await Dexie.delete(db.name);
@@ -96,10 +102,11 @@ async function restoreBackup(backup: BackupFile, opts: { rebuildStore: boolean }
   await db.transaction('rw', db.tables, async () => {
     for (const table of db.tables) {
       await table.clear();
-      const rows = backup.tables[table.name];
+      const rows = tables[table.name];
       if (rows?.length) await table.bulkPut(rows);
     }
   });
+  return removedTournaments;
 }
 
 function formatSize(bytes: number): string {
@@ -149,7 +156,12 @@ function BackupPanel({ storeBroken }: { storeBroken: boolean }) {
         ? `The local database could not open. Restoring deletes it and rebuilds it from ${label}. Anything newer that was not synced is lost. Continue?`
         : `Replace all tournament data on this computer with ${label}? A copy of the current data is saved first. After restoring, Sync may bring back newer changes from the cloud.`;
       if (!window.confirm(warning)) return;
-      await restoreBackup(backup, { rebuildStore: storeBroken });
+      const leftOut = await restoreBackup(backup, { rebuildStore: storeBroken });
+      if (leftOut > 0) {
+        window.alert(
+          `${leftOut} tournament${leftOut === 1 ? ' was' : 's were'} left out because this account no longer has access.`,
+        );
+      }
       window.location.reload();
     });
   }

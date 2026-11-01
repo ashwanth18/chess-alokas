@@ -17,6 +17,20 @@ export function canManageTeam(role: OrganizationMemberRole | null | undefined): 
   return role === 'owner' || role === 'admin';
 }
 
+/** Roles that create and run tournaments, and so may hold player records. */
+export function canRunTournaments(role: OrganizationMemberRole | null | undefined): boolean {
+  return role === 'owner' || role === 'admin' || role === 'director';
+}
+
+/** The organization a new tournament goes to unless told otherwise: your own before one you joined. */
+export function defaultTournamentOrganization<T extends { memberRole: OrganizationMemberRole }>(
+  orgs: T[],
+): T | null {
+  const manageable = orgs.filter((o) => canRunTournaments(o.memberRole));
+  // sort is stable, so the oldest organization wins within a role.
+  return [...manageable].sort((a, b) => ROLE_RANK[b.memberRole] - ROLE_RANK[a.memberRole])[0] ?? null;
+}
+
 /** May someone with `actor` give out `role`, or act on a member or invite holding it? */
 export function canActOnRole(
   actor: OrganizationMemberRole | null | undefined,

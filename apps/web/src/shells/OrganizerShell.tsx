@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import IndexedDbRecovery, { DesktopBackupAgent } from '../components/IndexedDbRecovery';
+import RevocationNotice from '../components/RevocationNotice';
 import { db, ensureDbOpen } from '../db/local';
 import { reportBootIssue } from '../lib/bootDiagnostics';
 import { connectOwnerIdSink } from '../lib/ownerIdSink';
@@ -25,6 +26,7 @@ function DeskReady() {
   return (
     <DeskSyncContext.Provider value={sync}>
       {isDesktop && <DesktopBackupAgent />}
+      <RevocationNotice />
       <Outlet />
     </DeskSyncContext.Provider>
   );

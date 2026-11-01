@@ -212,6 +212,9 @@ export interface SyncPullResponse {
   participants: Participant[];
   games: Game[];
   serverTime: string;
+  /** Absent on an older server, which means nothing may be removed. */
+  revokedTournamentIds?: string[];
+  revokedForUserId?: string | null;
 }
 
 export async function apiSyncPush(body: SyncPushRequest) {

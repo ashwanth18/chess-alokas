@@ -744,6 +744,227 @@ describe.each([
       expect((await call(creator, 'GET', `/organizations/${org.id}/members`)).status).toBe(403);
     });
 
+    describe('choosing an organization for a new tournament', () => {
+      async function inTwoOrgs() {
+        const { org: club } = await orgWithOwner();
+        const person = await newUser();
+        await backend.addMember(club.id, person, 'director');
+        await tick();
+        const own = await verifiedOrg(person);
+        return { person, club, own };
+      }
+
+      it('honours a choice other than the default, through the route and through sync', async () => {
+        const { person, club } = await inTwoOrgs();
+        const created = await call(person, 'POST', '/tournaments', {
+          name: 'For the club',
+          organizationId: club.id,
+        });
+        expect(created.status).toBe(201);
+        expect(created.body.organizationId).toBe(club.id);
+
+        const id = crypto.randomUUID();
+        const pushed = await push(person, [tournamentItem(id, { organizationId: club.id })]);
+        expect(pushed.body.rejected).toEqual([]);
+        expect((await store.getTournament(id))?.organizationId).toBe(club.id);
+      });
+
+      it('refuses another tenant, through the route and through sync', async () => {
+        const { person } = await inTwoOrgs();
+        const { org: elsewhere } = await orgWithOwner();
+        const viaRoute = await call(person, 'POST', '/tournaments', {
+          name: 'Planted',
+          organizationId: elsewhere.id,
+        });
+        expect(viaRoute.status).toBe(403);
+
+        const id = crypto.randomUUID();
+        const pushed = await push(person, [tournamentItem(id, { organizationId: elsewhere.id })]);
+        expect(pushed.body.rejected[0].code).toBe('forbidden_organization');
+        expect(await store.getTournament(id)).toBeNull();
+        const legacy = await legacyPush(person, [
+          tournamentItem(crypto.randomUUID(), { organizationId: elsewhere.id }),
+        ]);
+        expect(legacy.status).toBe(403);
+      });
+
+      it('refuses an organization where the role cannot create, or after losing it', async () => {
+        const { owner, org } = await orgWithOwner();
+        const arbiter = await join(owner, org.id, 'arbiter');
+        const director = await join(owner, org.id, 'director');
+        for (const user of [arbiter]) {
+          expect(
+            (await call(user, 'POST', '/tournaments', { name: 'No', organizationId: org.id })).status,
+          ).toBe(403);
+          const pushed = await push(user, [
+            tournamentItem(crypto.randomUUID(), { organizationId: org.id }),
+          ]);
+          expect(pushed.body.rejected[0].code).toBe('forbidden_organization');
+        }
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${director}`);
+        const late = await push(director, [
+          tournamentItem(crypto.randomUUID(), { organizationId: org.id }),
+        ]);
+        expect(late.body.rejected[0].code).toBe('forbidden_organization');
+      });
+
+      it('sync never moves an existing tournament to the other organization', async () => {
+        const { person, club, own } = await inTwoOrgs();
+        const id = await orgTournament(person, own.id);
+        await tick();
+        const pushed = await push(person, [tournamentItem(id, { organizationId: club.id }, iso())]);
+        expect(pushed.body.accepted).toBe(1);
+        expect((await store.getTournament(id))?.organizationId).toBe(own.id);
+      });
+
+      it('counts a trial tournament against the chosen organization', async () => {
+        const { person, club } = await inTwoOrgs();
+        const owner2 = await newUser();
+        const trial = await makeOrg(owner2);
+        await backend.addMember(trial.id, person, 'director');
+        expect(trial.planTier).toBe('trial');
+        const first = await call(person, 'POST', '/tournaments', {
+          name: 'First',
+          organizationId: trial.id,
+        });
+        expect(first.status).toBe(201);
+        const second = await call(person, 'POST', '/tournaments', {
+          name: 'Second',
+          organizationId: trial.id,
+        });
+        expect(second.status).toBe(403);
+        const elsewhere = await call(person, 'POST', '/tournaments', {
+          name: 'Elsewhere',
+          organizationId: club.id,
+        });
+        expect(elsewhere.status).toBe(201);
+      });
+    });
+
+    describe('telling a device which tournaments it may no longer hold', () => {
+      const revokedFor = async (user: string) => {
+        const res = await call(user, 'GET', since(HOUR));
+        expect(res.status).toBe(200);
+        return res.body.revokedTournamentIds as string[];
+      };
+
+      it('lists nothing for someone who lost nothing, and names the user', async () => {
+        const { owner, org } = await orgWithOwner();
+        await orgTournament(owner, org.id);
+        const director = await join(owner, org.id, 'director');
+        const res = await call(director, 'GET', since(HOUR));
+        expect(res.body.revokedTournamentIds).toEqual([]);
+        expect(res.body.revokedForUserId).toBe(director);
+      });
+
+      it('lists tournaments after removal and after leaving, soft-deleted ones included', async () => {
+        const { owner, org } = await orgWithOwner();
+        const kept = await orgTournament(owner, org.id);
+        const gone = await orgTournament(owner, org.id);
+        await tick();
+        const deleted = { ...tournamentItem(gone, {}, iso()), deletedAt: iso() };
+        expect((await push(owner, [deleted])).body.accepted).toBe(1);
+        const removed = await join(owner, org.id, 'director');
+        const leaver = await join(owner, org.id, 'admin');
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${removed}`);
+        await call(leaver, 'POST', `/organizations/${org.id}/leave`);
+        expect(await revokedFor(removed)).toEqual(expect.arrayContaining([kept, gone]));
+        expect(await revokedFor(leaver)).toEqual(expect.arrayContaining([kept]));
+        expect(await revokedFor(owner)).toEqual([]);
+      });
+
+      it('lists tournaments the removed member created, now handed over', async () => {
+        const { owner, org } = await orgWithOwner();
+        const director = await join(owner, org.id, 'director');
+        const theirs = await orgTournament(director, org.id);
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${director}`);
+        expect(await revokedFor(director)).toEqual([theirs]);
+      });
+
+      it('lists tournaments on dropping to arbiter, and stops on promotion back', async () => {
+        const { owner, org } = await orgWithOwner();
+        const id = await orgTournament(owner, org.id);
+        const member = await join(owner, org.id, 'director');
+        const path = `/organizations/${org.id}/members/${member}`;
+        await call(owner, 'PATCH', path, { role: 'arbiter' });
+        expect(await revokedFor(member)).toEqual([id]);
+        await call(owner, 'PATCH', path, { role: 'director' });
+        expect(await revokedFor(member)).toEqual([]);
+      });
+
+      it('does not list anything for a change between roles that keep access', async () => {
+        const { owner, org } = await orgWithOwner();
+        await orgTournament(owner, org.id);
+        const member = await join(owner, org.id, 'admin');
+        await call(owner, 'PATCH', `/organizations/${org.id}/members/${member}`, { role: 'director' });
+        expect(await revokedFor(member)).toEqual([]);
+      });
+
+      it('stops listing when someone is invited back', async () => {
+        const { owner, org } = await orgWithOwner();
+        await orgTournament(owner, org.id);
+        const member = await join(owner, org.id, 'director');
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${member}`);
+        expect(await revokedFor(member)).toHaveLength(1);
+        const sent = await invite(owner, org.id, emailOf(member), 'director');
+        await call(member, 'POST', '/invites/accept', { token: tokenOf(sent.body.inviteUrl) }, as(member));
+        expect(await revokedFor(member)).toEqual([]);
+      });
+
+      it('keeps listing when someone is invited back as an arbiter', async () => {
+        const { owner, org } = await orgWithOwner();
+        const id = await orgTournament(owner, org.id);
+        const member = await join(owner, org.id, 'director');
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${member}`);
+        const sent = await invite(owner, org.id, emailOf(member), 'arbiter');
+        await call(member, 'POST', '/invites/accept', { token: tokenOf(sent.body.inviteUrl) }, as(member));
+        expect(await revokedFor(member)).toEqual([id]);
+      });
+
+      it('applies to this user only: another member and a stranger are told nothing', async () => {
+        const { owner, org } = await orgWithOwner();
+        await orgTournament(owner, org.id);
+        const removed = await join(owner, org.id, 'director');
+        const colleague = await join(owner, org.id, 'director');
+        const stranger = await newUser();
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${removed}`);
+        expect(await revokedFor(removed)).toHaveLength(1);
+        expect(await revokedFor(colleague)).toEqual([]);
+        expect(await revokedFor(stranger)).toEqual([]);
+      });
+
+      it('leaves out a tournament they can still reach some other way', async () => {
+        const { owner, org } = await orgWithOwner();
+        const id = await orgTournament(owner, org.id);
+        const member = await join(owner, org.id, 'director');
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${member}`);
+        await backend.addMember(org.id, member, 'director');
+        expect(await revokedFor(member)).toEqual([]);
+        expect(id).toBeTruthy();
+      });
+
+      it('does not list tournaments the organization creates afterwards', async () => {
+        const { owner, org } = await orgWithOwner();
+        const before = await orgTournament(owner, org.id);
+        const member = await join(owner, org.id, 'director');
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${member}`);
+        await orgTournament(owner, org.id);
+        expect(await revokedFor(member)).toEqual([before]);
+      });
+
+      it('never lists a personal tournament', async () => {
+        const { owner, org } = await orgWithOwner();
+        const member = await newUser();
+        const personal = crypto.randomUUID();
+        await push(member, [tournamentItem(personal)]);
+        expect((await store.getTournament(personal))?.organizationId ?? null).toBeNull();
+        await backend.addMember(org.id, member, 'director');
+        await call(owner, 'DELETE', `/organizations/${org.id}/members/${member}`);
+        expect(await revokedFor(member)).toEqual([]);
+        expect((await call(member, 'GET', `/tournaments/${personal}`)).status).toBe(200);
+      });
+    });
+
     it('a new tournament goes to your own organization before one you were invited to', async () => {
       const { org: club } = await orgWithOwner();
       const person = await newUser();
@@ -1159,13 +1380,10 @@ describe.each([
 
     it('keeps the response shape older clients read', async () => {
       const res = await call(await newUser(), 'GET', `/sync/pull?since=${encodeURIComponent(iso())}`);
-      expect(Object.keys(res.body).sort()).toEqual([
-        'categories',
-        'games',
-        'participants',
-        'serverTime',
-        'tournaments',
-      ]);
+      // New fields may be added. Older clients ignore them; these must stay.
+      expect(Object.keys(res.body)).toEqual(
+        expect.arrayContaining(['categories', 'games', 'participants', 'serverTime', 'tournaments']),
+      );
     });
 
     it('does not resend rows that have not changed since the cursor', async () => {

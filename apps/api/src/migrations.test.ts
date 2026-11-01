@@ -230,6 +230,15 @@ describe('database migrations', () => {
       ).rejects.toThrow(/check/);
     });
 
+    it('clients can neither read nor write access revocations', async () => {
+      for (const sql of [
+        'select * from public.tournament_access_revocations',
+        `delete from public.tournament_access_revocations`,
+      ]) {
+        await expect(asUser(USER_A, sql)).rejects.toThrow(/permission denied/);
+      }
+    });
+
     it('a member cannot add themselves to the team through the members table', async () => {
       await expect(
         asUser(USER_B, `update public.organization_members set role = 'owner'`),

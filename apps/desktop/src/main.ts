@@ -39,6 +39,7 @@ import {
   importFromFile,
   listSnapshots,
   openBackupsFolder,
+  purgeTournamentsFromSnapshots,
   readSnapshot,
   saveSnapshot,
 } from './backups.js';
@@ -217,6 +218,7 @@ function registerIpc() {
   handle('desktop:backup-export', (json) => exportToFile(mainWindow, json));
   handle('desktop:backup-import', () => importFromFile(mainWindow));
   handle('desktop:backup-open-folder', () => openBackupsFolder());
+  handle('desktop:backup-purge-tournaments', (ids) => purgeTournamentsFromSnapshots(ids));
   onSync('desktop:backup-folder', () => backupsDir());
 }
 

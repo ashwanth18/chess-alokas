@@ -3,6 +3,7 @@ import { apiSyncPush, apiSyncPull } from '../api/client';
 import type { LocalTournament, LocalCategory, LocalParticipant, LocalGame } from '../db/local';
 import { repairInvalidGameCategoryIds, softDeleteOrphanGames } from '../lib/poolCategory';
 import { supabase } from '../lib/supabase';
+import { applyRevocations } from './revocation';
 import type { SyncRejection } from '@chess-alokas/shared';
 
 /** A row the server refused, with a name the organizer will recognise. */
@@ -214,7 +215,10 @@ async function syncOnlineImpl(): Promise<SyncOutcome> {
     if (
       !local ||
       (local.dirty !== 1 &&
-        (remote.updatedAt > local.updatedAt || Boolean(remote.ownerId && !local.ownerId)))
+        (remote.updatedAt > local.updatedAt ||
+          Boolean(remote.ownerId && !local.ownerId) ||
+          // The server assigns an organization when a tournament arrives with none.
+          Boolean(remote.organizationId && !local.organizationId)))
     ) {
       const prev = local;
       await db.tournaments.put({
@@ -288,6 +292,14 @@ async function syncOnlineImpl(): Promise<SyncOutcome> {
       pulled++;
     }
   }
+
+  // After the rows above, so a tournament this same response delivered can't be removed.
+  const droppedRows = await applyRevocations(pullResult.data, currentUserId).catch((err: unknown) => {
+    // Nothing was removed: the transaction rolled back, and the next sync is told again.
+    console.warn('[sync] could not remove revoked tournaments', err);
+    return new Set<string>();
+  });
+  rejected = rejected.filter((r) => !droppedRows.has(r.id));
 
   // Clean empty shell duplicates created by the old dual create (local UUID + POST /tournaments).
   await softDeleteEmptyDuplicateTournaments();

@@ -2,7 +2,7 @@
 
 **Read this first** when context is full or starting a new session on this repo.
 
-Last updated: 2026-11-01 (email-only sign-in and staff invites added; migrations `028`, `029`, `030` written, NOT applied to production)
+Last updated: 2026-11-01 (email-only sign-in and staff invites added; migrations `028` to `031` written, NOT applied to production)
 
 ## What this product is
 
@@ -46,8 +46,8 @@ Offline-first chess tournament manager with **per-manager accounts**:
 
 - **`sample-registrations-*.csv` and `scripts/arcc-*.json` are in a PUBLIC repo** and may hold real minors' data. Founder must confirm; see the founder's decision before pushing anything
 - Do not push until that's resolved: `deploy/SUPABASE_MIGRATION.md` also names VPS details
-- Team invites have run only against MemoryStore, PGlite and a local browser with auth disabled. Web create-tournament has no organization picker for someone in two organizations
-- Production runs the August build. Deploy order: apply `028`, `029`, `030` first (after a backup); count null-owner tournaments; confirm `SUPABASE_URL` and key are set or the API refuses to start; check `certificates` bucket is private; set `TRUST_PROXY_HOPS` if the proxy chain isn't Traefik + nginx
+- Team invites have run only against MemoryStore, PGlite and a local browser with auth disabled. Access-loss removal has the limits listed in `docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md`
+- Production runs the August build. Deploy order: apply `028`, `029`, `030`, `031` first (after a backup); count null-owner tournaments; confirm `SUPABASE_URL` and key are set or the API refuses to start; check `certificates` bucket is private; set `TRUST_PROXY_HOPS` if the proxy chain isn't Traefik + nginx
 - Never tested against real Supabase: sign-in, token refresh, RLS under PostgREST, Storage, real email. Custom SMTP is required before launch, and Confirm email must stay on because invites trust it (`deploy/DOKPLOY.md` section 4)
 - No billing code; Windows installer unsigned; no icon; no privacy policy, terms or parental consent
 - Design overhaul is planned, not started: `docs/design/DESIGN_PLAN.md`, mockups in `docs/design/mockups/`

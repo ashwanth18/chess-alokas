@@ -258,6 +258,52 @@ export function snapshotsToPrune(names: string[], keep: number): string[] {
   return sorted.slice(0, Math.max(0, sorted.length - keep));
 }
 
+// ── Removing tournaments from snapshots ────────────────────────────────────
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_PURGE_IDS = 10_000;
+
+/** Only well-formed ids reach the files on disk. */
+export function validateTournamentIds(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length > MAX_PURGE_IDS) throw new Error('Invalid tournament ids');
+  for (const id of raw) {
+    if (typeof id !== 'string' || !UUID.test(id)) throw new Error('Invalid tournament ids');
+  }
+  return raw as string[];
+}
+
+/**
+ * The snapshot's text without these tournaments and their rows, or null to leave the file alone:
+ * it holds none of them, or it isn't a backup this code understands. Nothing else in it changes.
+ */
+export function stripTournamentsFromSnapshot(json: string, ids: string[]): string | null {
+  let parsed: { format?: unknown; tables?: Record<string, unknown> };
+  try {
+    parsed = JSON.parse(json) as typeof parsed;
+  } catch {
+    return null;
+  }
+  if (parsed?.format !== 'chess-alokas-backup' || !parsed.tables || typeof parsed.tables !== 'object') {
+    return null;
+  }
+  const remove = new Set(ids);
+  let changed = false;
+  for (const [name, rows] of Object.entries(parsed.tables)) {
+    if (!Array.isArray(rows)) continue;
+    const kept = rows.filter((row: unknown) => {
+      if (!row || typeof row !== 'object') return true;
+      const r = row as { id?: unknown; tournamentId?: unknown };
+      const owner = name === 'tournaments' ? r.id : r.tournamentId;
+      return !(typeof owner === 'string' && remove.has(owner));
+    });
+    if (kept.length !== rows.length) {
+      parsed.tables[name] = kept;
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(parsed) : null;
+}
+
 // ── Crash reporting scrubber ───────────────────────────────────────────────
 
 /** Removes paths, emails, tokens and public-link secrets from report text. */

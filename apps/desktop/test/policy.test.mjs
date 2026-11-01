@@ -13,7 +13,9 @@ import {
   scrubReportText,
   snapshotName,
   snapshotsToPrune,
+  stripTournamentsFromSnapshot,
   validateBootIssue,
+  validateTournamentIds,
   validateDutchInput,
 } from '../out/policy.js';
 
@@ -163,4 +165,50 @@ test('error envelope carries no user and is scrubbed', () => {
   const event = JSON.parse(lines[2]);
   assert.equal('user' in event, false);
   assert.doesNotMatch(body, /ana/);
+});
+
+const GONE = '11111111-1111-4111-8111-111111111111';
+const KEPT = '22222222-2222-4222-8222-222222222222';
+const snapshot = () => ({
+  format: 'chess-alokas-backup',
+  formatVersion: 1,
+  dbVersion: 9,
+  tables: {
+    tournaments: [{ id: GONE, name: 'Gone' }, { id: KEPT, name: 'Kept' }],
+    categories: [{ id: 'c1', tournamentId: GONE }, { id: 'c2', tournamentId: KEPT }],
+    participants: [{ id: 'p1', tournamentId: GONE, name: 'Removed Player' }, { id: 'p2', tournamentId: KEPT }],
+    games: [{ id: 'g1', tournamentId: GONE }],
+    certificateTemplates: [{ id: 't1', tournamentId: null }, { id: 't2', tournamentId: GONE }],
+    tournamentTables: [{ id: 'x1', tournamentId: GONE }],
+    meta: [{ key: 'clientId', value: GONE }],
+  },
+});
+
+test('stripTournamentsFromSnapshot removes the tournament and its rows, and nothing else', () => {
+  const out = JSON.parse(stripTournamentsFromSnapshot(JSON.stringify(snapshot()), [GONE]));
+  assert.deepEqual(out.tables.tournaments, [{ id: KEPT, name: 'Kept' }]);
+  assert.deepEqual(out.tables.categories, [{ id: 'c2', tournamentId: KEPT }]);
+  assert.deepEqual(out.tables.participants, [{ id: 'p2', tournamentId: KEPT }]);
+  assert.deepEqual(out.tables.games, []);
+  assert.deepEqual(out.tables.certificateTemplates, [{ id: 't1', tournamentId: null }]);
+  assert.deepEqual(out.tables.tournamentTables, []);
+  assert.deepEqual(out.tables.meta, [{ key: 'clientId', value: GONE }]);
+  assert.equal(out.format, 'chess-alokas-backup');
+  assert.equal(out.dbVersion, 9);
+});
+
+test('stripTournamentsFromSnapshot leaves alone a file with nothing to remove or not a backup', () => {
+  const other = '33333333-3333-4333-8333-333333333333';
+  assert.equal(stripTournamentsFromSnapshot(JSON.stringify(snapshot()), [other]), null);
+  assert.equal(stripTournamentsFromSnapshot('not json', [GONE]), null);
+  assert.equal(stripTournamentsFromSnapshot('{"format":"other","tables":{}}', [GONE]), null);
+  assert.equal(stripTournamentsFromSnapshot('null', [GONE]), null);
+});
+
+test('validateTournamentIds accepts only a list of ids', () => {
+  assert.deepEqual(validateTournamentIds([GONE]), [GONE]);
+  assert.deepEqual(validateTournamentIds([]), []);
+  for (const bad of ['x', null, [1], ['../../secret'], [GONE, '*']]) {
+    assert.throws(() => validateTournamentIds(bad));
+  }
 });
