@@ -118,8 +118,7 @@ class AlokasApiClient {
 
   bool _isExpiring(AuthSession value) {
     final expiresAt = value.expiresAt;
-    return expiresAt != null &&
-        !_now().add(_refreshMargin).isBefore(expiresAt);
+    return expiresAt != null && !_now().add(_refreshMargin).isBefore(expiresAt);
   }
 
   /// Refresh tokens rotate, so concurrent callers share one refresh.
@@ -158,9 +157,9 @@ class AlokasApiClient {
 
   Uri _apiUri(String path, [Map<String, String>? query]) {
     final base = config.apiBaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
-    return Uri.parse('$base$path').replace(
-      queryParameters: query == null || query.isEmpty ? null : query,
-    );
+    return Uri.parse(
+      '$base$path',
+    ).replace(queryParameters: query == null || query.isEmpty ? null : query);
   }
 
   /// Sends a request to the API. With [authed] it attaches a fresh token and
@@ -177,16 +176,16 @@ class AlokasApiClient {
     final encoded = body == null ? null : jsonEncode(body);
 
     Future<http.Response> sendWith(String? token) => _send(
-          method,
-          uri,
-          {
-            'Accept': 'application/json',
-            if (encoded != null) 'Content-Type': 'application/json',
-            if (token != null) 'Authorization': 'Bearer $token',
-          },
-          encoded,
-          timeout,
-        );
+      method,
+      uri,
+      {
+        'Accept': 'application/json',
+        if (encoded != null) 'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      },
+      encoded,
+      timeout,
+    );
 
     try {
       if (!authed) return ApiSuccess(await sendWith(null));
@@ -239,7 +238,12 @@ class AlokasApiClient {
   String _errorText(http.Response response) {
     final body = _decodeMap(response);
     if (body != null) {
-      for (final key in const ['error_description', 'msg', 'message', 'error']) {
+      for (final key in const [
+        'error_description',
+        'msg',
+        'message',
+        'error',
+      ]) {
         final value = body[key];
         if (value is String && value.trim().isNotEmpty) return value.trim();
       }
@@ -263,10 +267,10 @@ class AlokasApiClient {
   }
 
   ApiFailure<T> _failureFrom<T>(http.Response response) => ApiFailure<T>(
-        _errorText(response),
-        statusCode: response.statusCode,
-        fieldErrors: _fieldErrorsFrom(response),
-      );
+    _errorText(response),
+    statusCode: response.statusCode,
+    fieldErrors: _fieldErrorsFrom(response),
+  );
 
   ApiFailure<T> _unexpected<T>() =>
       ApiFailure<T>('The server sent a response the app could not read.');
@@ -299,12 +303,17 @@ class AlokasApiClient {
     String? search,
   }) {
     return _readJson(
-      _request('GET', '/public/events', query: {
-        if (lat != null) 'lat': lat.toString(),
-        if (lng != null) 'lng': lng.toString(),
-        if (radiusKm != null) 'radiusKm': radiusKm.toString(),
-        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
-      }),
+      _request(
+        'GET',
+        '/public/events',
+        query: {
+          if (lat != null) 'lat': lat.toString(),
+          if (lng != null) 'lng': lng.toString(),
+          if (radiusKm != null) 'radiusKm': radiusKm.toString(),
+          if (search != null && search.trim().isNotEmpty)
+            'search': search.trim(),
+        },
+      ),
       (json) {
         final events = json['events'];
         if (events is! List) return null;
@@ -359,17 +368,16 @@ class AlokasApiClient {
   }
 
   Future<ApiResult<List<RegistrationRecord>>> fetchMyRegistrations() {
-    return _readJson(
-      _request('GET', '/player/registrations', authed: true),
-      (json) {
-        final rows = json['registrations'];
-        if (rows is! List) return null;
-        return rows
-            .whereType<Map<String, dynamic>>()
-            .map(RegistrationRecord.fromJson)
-            .toList();
-      },
-    );
+    return _readJson(_request('GET', '/player/registrations', authed: true), (
+      json,
+    ) {
+      final rows = json['registrations'];
+      if (rows is! List) return null;
+      return rows
+          .whereType<Map<String, dynamic>>()
+          .map(RegistrationRecord.fromJson)
+          .toList();
+    });
   }
 
   /// Adds a receipt to a registration that has none. The API does not have

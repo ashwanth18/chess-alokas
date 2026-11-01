@@ -109,9 +109,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (id != null && record.isActive) _submitted[id] = record;
     }
     for (final profile in widget.profiles) {
-      _categories[profile.id] = profile
-          .suggestCategory(_event.categories)
-          ?.id;
+      _categories[profile.id] = profile.suggestCategory(_event.categories)?.id;
     }
     final draft = widget.draft;
     if (draft != null) {
@@ -393,7 +391,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Container(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: p.ink, width: 2)),
+            border: Border(bottom: BorderSide(color: p.accent, width: 1.5)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -410,13 +408,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     child: Text(
                       titles[_step]!,
                       key: const Key('step-title'),
-                      style: atype(20, weight: 800, width: 108, color: p.ink),
+                      style: atype(20, weight: 800, color: p.ink),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Text(
                     'Step ${index + 1} of ${steps.length}',
-                    style: atype(14, color: p.ink2, tabular: true),
+                    style: atype(
+                      14,
+                      weight: 600,
+                      color: p.accent,
+                      tabular: true,
+                    ),
                   ),
                 ],
               ),
@@ -478,9 +481,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   key: const Key('register-next'),
                   onPressed: _goNext,
                   child: Text(
-                    _step == _Step.pay
-                        ? "I've paid, add receipt"
-                        : 'Continue',
+                    _step == _Step.pay ? "I've paid, add receipt" : 'Continue',
                   ),
                 ),
               const SizedBox(height: 4),
@@ -726,7 +727,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           OutlinedButton(
             key: const Key('choose-receipt-button'),
             onPressed: _chooseReceipt,
-            child: Text(receipt == null ? 'Choose file' : 'Choose a different one'),
+            child: Text(
+              receipt == null ? 'Choose file' : 'Choose a different one',
+            ),
           ),
           if (receipt != null)
             TextButton(
@@ -786,7 +789,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       children: [
         Text(
           organizer == null ? 'Sent to the organizer' : 'Sent to $organizer',
-          style: atype(32, weight: 800, width: 108, color: p.ink, height: 1.12),
+          style: atype(32, weight: 800, color: p.accent, height: 1.12),
         ),
         const SizedBox(height: 8),
         Text(

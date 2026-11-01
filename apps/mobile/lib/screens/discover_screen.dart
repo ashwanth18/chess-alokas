@@ -182,9 +182,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           onSubmit: (selections, receipt) =>
               widget.onRegister(event, selections, receipt),
           onGoToAccount: widget.onGoToAccount,
-          draft: widget.drafts
-              .where((d) => d.eventId == event.id)
-              .firstOrNull,
+          draft: widget.drafts.where((d) => d.eventId == event.id).firstOrNull,
           draftStore: widget.draftStore,
           accountKey: widget.accountKey,
           onDraftsChanged: widget.onDraftsChanged,
@@ -461,82 +459,86 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       evt.feeLabel(),
     ];
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: p.rule)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            evt.displayName,
-            style: atype(20, weight: 800, color: p.ink, height: 1.2),
-          ),
-          const SizedBox(height: 4),
-          if (evt.organizationName != null)
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: BrandCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (distKm != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: AlokasBadge(
+                  text:
+                      '${distKm.toStringAsFixed(1)} km from ${widget.selectedLocation.city}',
+                  tone: ChipTone.go,
+                  icon: Icons.near_me,
+                ),
+              ),
             Text(
-              evt.organizationName!,
-              style: atype(16, weight: 600, color: p.ink),
+              evt.displayName,
+              style: atype(20, weight: 800, color: p.ink, height: 1.2),
             ),
-          Text(
-            evt.locationLabel ?? 'Venue not listed',
-            style: atype(14, color: p.ink2, height: 1.3),
-          ),
-          if (distKm != null)
+            const SizedBox(height: 4),
+            if (evt.organizationName != null)
+              Text(
+                evt.organizationName!,
+                style: atype(16, weight: 600, color: p.accent),
+              ),
             Text(
-              '${distKm.toStringAsFixed(1)} km from ${widget.selectedLocation.city}',
-              style: atype(14, color: p.ink2, tabular: true),
+              evt.locationLabel ?? 'Venue not listed',
+              style: atype(14, color: p.ink2, height: 1.3),
             ),
-          const SizedBox(height: 4),
-          Text(
-            facts.join(' · '),
-            style: atype(14, weight: 600, color: p.ink, tabular: true),
-          ),
-          if (evt.categories.isNotEmpty)
+            const SizedBox(height: 4),
             Text(
-              evt.categories.map((c) => c.name).join(' · '),
-              style: atype(14, color: p.ink2),
+              facts.join(' · '),
+              style: atype(14, weight: 600, color: p.ink, tabular: true),
             ),
-          const SizedBox(height: 8),
-          if (closed != null)
-            AlokasBadge(
-              key: const Key('event-closed-badge'),
-              text: closed,
-              tone: ChipTone.wait,
-            )
-          else if (evt.isFull)
-            const AlokasBadge(
-              text: 'Full: new entries are waitlisted',
-              tone: ChipTone.wait,
-            )
-          else if (deadline != null)
-            Text('Register by $deadline', style: atype(14, color: p.ink2)),
-          for (final record in records)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: AlokasBadge(
-                text: _recordBadgeText(record),
-                tone: record.isWaitlisted || !record.isActive
-                    ? ChipTone.wait
-                    : ChipTone.pen,
+            if (evt.categories.isNotEmpty)
+              Text(
+                evt.categories.map((c) => c.name).join(' · '),
+                style: atype(14, color: p.ink2),
+              ),
+            const SizedBox(height: 8),
+            if (closed != null)
+              AlokasBadge(
+                key: const Key('event-closed-badge'),
+                text: closed,
+                tone: ChipTone.wait,
+              )
+            else if (evt.isFull)
+              const AlokasBadge(
+                text: 'Full: new entries are waitlisted',
+                tone: ChipTone.wait,
+              )
+            else if (deadline != null)
+              Text('Register by $deadline', style: atype(14, color: p.ink2)),
+            for (final record in records)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: AlokasBadge(
+                  text: _recordBadgeText(record),
+                  tone: record.isWaitlisted || !record.isActive
+                      ? ChipTone.wait
+                      : ChipTone.pen,
+                ),
+              ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => _openEvent(evt),
+                child: Text(
+                  closed != null
+                      ? 'View Details (Registration Closed)'
+                      : evt.isFull
+                      ? 'View & Join Waitlist'
+                      : 'View & Register',
+                ),
               ),
             ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => _openEvent(evt),
-              child: Text(
-                closed != null
-                    ? 'View Details (Registration Closed)'
-                    : evt.isFull
-                    ? 'View & Join Waitlist'
-                    : 'View & Register',
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -554,7 +556,11 @@ class _DraftBanner extends StatelessWidget {
     return Container(
       key: Key('draft-${draft.eventId}'),
       padding: const EdgeInsets.all(12),
-      color: p.waitWash,
+      decoration: BoxDecoration(
+        color: p.waitWash,
+        borderRadius: BorderRadius.circular(AlokasTheme.radius),
+        border: Border.all(color: p.wait),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -576,7 +582,7 @@ class _DraftBanner extends StatelessWidget {
             style: atype(16, weight: 700, color: p.ink, height: 1.25),
           ),
           const SizedBox(height: 8),
-          OutlinedButton(
+          ElevatedButton(
             key: const Key('resume-draft'),
             onPressed: onTap,
             child: const Text('Continue registration'),

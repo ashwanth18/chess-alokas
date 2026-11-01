@@ -220,8 +220,7 @@ class LiveSnapshot {
     return null;
   }
 
-  List<int> get rounds =>
-      games.map((g) => g.round).toSet().toList()..sort();
+  List<int> get rounds => games.map((g) => g.round).toSet().toList()..sort();
 
   /// Boards of a round in board order, across all sections.
   List<LiveGame> pairings(int round) {

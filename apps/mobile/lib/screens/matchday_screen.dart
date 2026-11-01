@@ -82,7 +82,7 @@ class MatchdayScreen extends StatelessWidget {
                 onSelect: onSelectProfile,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
           ]
         : const <Widget>[];
 
@@ -205,7 +205,12 @@ class MatchdayScreen extends StatelessWidget {
           padding: const EdgeInsets.only(top: 4, bottom: 8),
           child: Text(
             match.tournamentName ?? 'Unnamed tournament',
-            style: atype(18, weight: 700, color: context.pal.ink, height: 1.2),
+            style: atype(
+              18,
+              weight: 800,
+              color: context.pal.accent,
+              height: 1.2,
+            ),
           ),
         ),
       ),
@@ -215,10 +220,9 @@ class MatchdayScreen extends StatelessWidget {
         playerName: profile?.fullName,
         roundLabel: _roundLabel(match, live),
       ),
-      _gutter(
-        _WhereWeStand(match: match, live: live, liveAt: liveAt),
-      ),
-      if (live != null && me != null) _gutter(_EarlierRounds(live: live, me: me)),
+      _gutter(_WhereWeStand(match: match, live: live, liveAt: liveAt)),
+      if (live != null && me != null)
+        _gutter(_EarlierRounds(live: live, me: me)),
       const SizedBox(height: 16),
       _gutter(
         Wrap(
@@ -226,20 +230,18 @@ class MatchdayScreen extends StatelessWidget {
           runSpacing: 8,
           children: [
             if (token != null) ...[
-              OutlinedButton(
+              ElevatedButton(
                 key: const Key('open-pairings'),
                 onPressed: () => openLive(1),
                 child: const Text('All pairings'),
               ),
-              OutlinedButton(
+              ElevatedButton(
                 key: const Key('open-standings'),
                 onPressed: () => openLive(0),
                 child: const Text('Full standings'),
               ),
             ],
-            if (me != null &&
-                match.tournamentId != null &&
-                profile != null)
+            if (me != null && match.tournamentId != null && profile != null)
               OutlinedButton(
                 key: const Key('open-checkin-pass'),
                 onPressed: () {
@@ -294,8 +296,9 @@ class _FreshLine extends StatelessWidget {
   }
 }
 
-/// The parent's answer: the block is literally the colour the child plays,
-/// white with black text or black with white text, in every theme.
+/// The parent's answer in one card: round, score, board, colour, opponent. The
+/// inner block is a true white or true black, the colour the child plays, with
+/// the very large board number on it.
 class MatchHero extends StatelessWidget {
   final PlayerLiveMatch match;
   final LiveSnapshot? live;
@@ -309,6 +312,57 @@ class MatchHero extends StatelessWidget {
     this.playerName,
     required this.roundLabel,
   });
+
+  Widget _topRow(BuildContext context) {
+    final p = context.pal;
+    final score = match.currentScore;
+    return Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: AlokasBadge(text: roundLabel, icon: Icons.sensors),
+          ),
+        ),
+        if (score != null) ...[
+          const SizedBox(width: 8),
+          Text.rich(
+            key: const Key('hero-score'),
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: 'Score ',
+                  style: atype(14, weight: 600, color: p.ink2),
+                ),
+                TextSpan(
+                  text: formatPoints(score),
+                  style: atype(24, weight: 800, color: p.accent, tabular: true),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _who(BuildContext context) {
+    final name = playerName;
+    if (name == null) return const SizedBox.shrink();
+    final me = match.participantId;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: PlayerName(
+        name,
+        key: const Key('hero-player'),
+        size: 20,
+        weight: 700,
+        color: context.pal.ink,
+        number: live?.player(me)?.seed,
+        section: live?.sectionOf(me),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -337,139 +391,143 @@ class MatchHero extends StatelessWidget {
     }
 
     final white = match.isWhite;
-    final background = white ? AlokasTokens.pieceWhite : AlokasTokens.pieceBlack;
-    final foreground = white ? AlokasTokens.pieceBlack : AlokasTokens.pieceWhite;
-    final me = match.participantId;
+    final background = white
+        ? AlokasTokens.pieceWhite
+        : AlokasTokens.pieceBlack;
+    final foreground = white
+        ? AlokasTokens.pieceBlack
+        : AlokasTokens.pieceWhite;
     final finished = match.hasResult;
-
-    final parts = playerName == null ? null : splitPlayerName(playerName!);
     final colourWord = white ? 'White' : 'Black';
-    final subject = parts?.given;
 
-    return Container(
-      key: Key(white ? 'hero-white' : 'hero-black'),
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-      decoration: BoxDecoration(
-        color: background,
-        border: Border.symmetric(
-          horizontal: BorderSide(
-            // A black block would melt into a dark page without an edge.
-            color: white ? AlokasTokens.pieceBlack : p.ruleStrong,
-            width: 3,
-          ),
-        ),
-      ),
-      child: DefaultTextStyle.merge(
-        style: TextStyle(color: foreground),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: BrandCard(
+        key: const Key('hero-card'),
+        strong: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              spacing: 12,
-              children: [
-                Text(
-                  roundLabel,
-                  style: atype(16, weight: 700, color: foreground),
-                ),
-                Text(
-                  finished ? 'Result' : 'Playing now',
-                  style: atype(16, weight: 600, color: foreground),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (finished) ...[
-              Text(
-                'Board ${match.board}',
-                style: atype(20, weight: 700, color: foreground, tabular: true),
-              ),
-              Text(
-                formatResult(match.result!),
-                style: atype(
-                  64,
-                  weight: 800,
-                  width: 112,
-                  color: foreground,
-                  tabular: true,
-                  height: 1.1,
-                ),
-              ),
-              Text(
-                [
-                  match.outcomeWord ?? 'Result in',
-                  'playing $colourWord',
-                ].join(', '),
-                style: atype(24, weight: 800, color: foreground, height: 1.2),
-              ),
-            ] else ...[
-              Text(
-                'Board',
-                style: atype(20, weight: 700, color: foreground),
-              ),
-              Text(
-                match.board == null ? 'Not listed' : '${match.board}',
-                key: const Key('hero-board'),
-                style: atype(
-                  96,
-                  weight: 800,
-                  width: 112,
-                  color: foreground,
-                  tabular: true,
-                  height: 1,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                subject == null ? 'Plays $colourWord' : '$subject plays $colourWord',
-                key: const Key('hero-colour'),
-                style: atype(24, weight: 800, color: foreground, height: 1.2),
-              ),
-            ],
+            _topRow(context),
+            _who(context),
             const SizedBox(height: 12),
             Container(
+              key: Key(white ? 'hero-white' : 'hero-black'),
               width: double.infinity,
-              padding: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: foreground)),
+                color: background,
+                borderRadius: BorderRadius.circular(AlokasTheme.radius),
+                border: Border.all(color: p.accent),
               ),
-              child: _opponent(foreground, me),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          match.board == null
+                              ? 'Board not listed'
+                              : finished
+                              ? 'Board ${match.board}'
+                              : 'Board',
+                          style: atype(20, weight: 700, color: foreground),
+                        ),
+                      ),
+                      Text(
+                        finished ? 'Result' : 'Playing now',
+                        style: atype(14, weight: 600, color: foreground),
+                      ),
+                    ],
+                  ),
+                  if (finished)
+                    Text(
+                      formatResult(match.result!),
+                      style: atype(
+                        64,
+                        weight: 800,
+                        width: 112,
+                        color: foreground,
+                        tabular: true,
+                        height: 1.15,
+                      ),
+                    )
+                  else if (match.board != null)
+                    Text(
+                      '${match.board}',
+                      key: const Key('hero-board'),
+                      style: atype(
+                        96,
+                        weight: 800,
+                        width: 112,
+                        color: foreground,
+                        tabular: true,
+                        height: 1.05,
+                      ),
+                    ),
+                  Text(
+                    finished
+                        ? '${match.outcomeWord ?? 'Result in'}, playing $colourWord'
+                        : 'Plays $colourWord',
+                    key: const Key('hero-colour'),
+                    style: atype(
+                      24,
+                      weight: 800,
+                      color: foreground,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(height: 12),
+            _opponent(context),
           ],
         ),
       ),
     );
   }
 
-  Widget _opponent(Color foreground, String? me) {
+  Widget _opponent(BuildContext context) {
+    final p = context.pal;
     final name = match.opponentName;
     final rating = match.opponentRating;
     final opponentId = match.opponentId;
     if (name == null) {
       return Text(
         'Opponent not listed',
-        style: atype(18, weight: 600, color: foreground),
+        style: atype(18, weight: 600, color: p.ink),
       );
     }
-    return Column(
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Against', style: atype(14, weight: 600, color: foreground)),
-        const SizedBox(height: 2),
-        PlayerName(
-          name,
-          size: 20,
-          weight: 700,
-          color: foreground,
-          number: live?.player(opponentId)?.seed,
-          section: live?.sectionOf(opponentId),
-        ),
-        if (rating != null)
-          Text(
-            'Rating $rating',
-            style: atype(14, color: foreground, tabular: true),
+        Icon(Icons.person_pin, color: p.accent, size: 28),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Against', style: atype(14, weight: 600, color: p.accent)),
+              const SizedBox(height: 2),
+              PlayerName(
+                name,
+                size: 18,
+                weight: 700,
+                color: p.ink,
+                number: live?.player(opponentId)?.seed,
+                section: live?.sectionOf(opponentId),
+              ),
+              if (rating != null)
+                Text(
+                  'Rating $rating',
+                  style: atype(14, color: p.ink2, tabular: true),
+                ),
+            ],
           ),
+        ),
       ],
     );
   }
@@ -480,30 +538,27 @@ class MatchHero extends StatelessWidget {
     String? message,
   }) {
     final p = context.pal;
-    return Container(
-      key: const Key('hero-neutral'),
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-      decoration: BoxDecoration(
-        color: p.paper2,
-        border: Border.symmetric(
-          horizontal: BorderSide(color: p.ink, width: 3),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(roundLabel, style: atype(16, weight: 700, color: p.ink)),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            style: atype(32, weight: 800, width: 108, color: p.ink, height: 1.15),
-          ),
-          if (message != null) ...[
-            const SizedBox(height: 8),
-            Text(message, style: atype(16, color: p.ink, height: 1.35)),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: BrandCard(
+        key: const Key('hero-neutral'),
+        strong: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _topRow(context),
+            _who(context),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: atype(28, weight: 800, color: p.ink, height: 1.15),
+            ),
+            if (message != null) ...[
+              const SizedBox(height: 8),
+              Text(message, style: atype(16, color: p.ink2, height: 1.35)),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -528,72 +583,77 @@ class _WhereWeStand extends StatelessWidget {
 
     final near = <StandingRow>[];
     if (index >= 0) {
-      final from = (index - 2).clamp(0, (rows.length - 5).clamp(0, rows.length));
+      final from = (index - 2).clamp(
+        0,
+        (rows.length - 5).clamp(0, rows.length),
+      );
       near.addAll(rows.skip(from).take(5));
     }
 
     return Padding(
       padding: const EdgeInsets.only(top: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SheetHeading('Where we stand'),
-          const SizedBox(height: 8),
-          if (score != null)
-            Text.rich(
-              key: const Key('current-score'),
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: formatPoints(score),
-                    style: atype(
-                      44,
-                      weight: 800,
-                      width: 112,
-                      color: p.ink,
-                      tabular: true,
+      child: BrandCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SheetHeading('Where we stand'),
+            const SizedBox(height: 8),
+            if (score != null)
+              Text.rich(
+                key: const Key('current-score'),
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: formatPoints(score),
+                      style: atype(
+                        44,
+                        weight: 800,
+                        width: 112,
+                        color: p.accent,
+                        tabular: true,
+                      ),
                     ),
-                  ),
-                  TextSpan(
-                    text: score == 1 ? ' point' : ' points',
-                    style: atype(16, color: p.ink2),
-                  ),
-                ],
+                    TextSpan(
+                      text: score == 1 ? ' point' : ' points',
+                      style: atype(16, color: p.ink2),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          if (snapshot == null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                match.publicToken == null
-                    ? 'The organizer has not turned on the live page, so rank '
-                          'and other boards are not available.'
-                    : 'Rank will appear when the standings load.',
-                style: atype(14, color: p.ink2),
-              ),
-            ),
-          if (index >= 0) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 8),
-              child: Text(
-                'Rank ${rows[index].rankLabel} of ${rows.length}'
-                '${snapshot!.sectionOf(me) == null ? '' : ' in ${snapshot.sectionOf(me)}'}',
-                style: atype(16, weight: 600, color: p.ink),
-              ),
-            ),
-            for (final row in near)
-              StandingLine(row: row, snapshot: snapshot, me: me),
-            if (liveAt != null)
+            if (snapshot == null)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'By points. Tied players share a rank; the arbiter applies '
-                  'tie-breaks. As of ${asOfLabel(liveAt!)}.',
+                  match.publicToken == null
+                      ? 'The organizer has not turned on the live page, so rank '
+                            'and other boards are not available.'
+                      : 'Rank will appear when the standings load.',
                   style: atype(14, color: p.ink2),
                 ),
               ),
+            if (index >= 0) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 8),
+                child: Text(
+                  'Rank ${rows[index].rankLabel} of ${rows.length}'
+                  '${snapshot!.sectionOf(me) == null ? '' : ' in ${snapshot.sectionOf(me)}'}',
+                  style: atype(16, weight: 600, color: p.ink),
+                ),
+              ),
+              for (final row in near)
+                StandingLine(row: row, snapshot: snapshot, me: me),
+              if (liveAt != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'By points. Tied players share a rank; the arbiter applies '
+                    'tie-breaks. As of ${asOfLabel(liveAt!)}.',
+                    style: atype(14, color: p.ink2),
+                  ),
+                ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -629,7 +689,12 @@ class _EarlierRounds extends StatelessWidget {
                     width: 28,
                     child: Text(
                       '${round.round}',
-                      style: atype(16, weight: 800, color: p.ink, tabular: true),
+                      style: atype(
+                        16,
+                        weight: 800,
+                        color: p.ink,
+                        tabular: true,
+                      ),
                     ),
                   ),
                   if (round.playedWhite != null) ...[

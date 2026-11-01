@@ -108,7 +108,8 @@ class PlayerName extends StatelessWidget {
         textScaler: scaler,
         maxLines: 1,
       )..layout();
-      final fits = painter.width <= maxWidth;
+      // A margin: measured and painted widths can differ slightly on a device.
+      final fits = painter.width * 1.08 <= maxWidth;
       painter.dispose();
       if (fits) return step;
     }

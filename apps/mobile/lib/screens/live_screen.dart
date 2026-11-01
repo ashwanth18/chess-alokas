@@ -26,9 +26,11 @@ class StandingLine extends StatelessWidget {
     final p = context.pal;
     final isMe = row.player.id == me;
     return Container(
-      color: isMe ? p.penWash : null,
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-      decoration: null,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: isMe ? p.accentWash : null,
+        borderRadius: BorderRadius.circular(AlokasTheme.radius - 4),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -36,7 +38,7 @@ class StandingLine extends StatelessWidget {
             width: 44,
             child: Text(
               row.rankLabel,
-              style: atype(16, weight: 800, color: p.ink, tabular: true),
+              style: atype(16, weight: 800, color: p.accent, tabular: true),
             ),
           ),
           Expanded(
@@ -213,7 +215,8 @@ class _LiveScreenState extends State<LiveScreen> {
   List<Widget> _standings(LiveSnapshot snapshot, String? me) {
     final p = context.pal;
     if (!_categoryChosen) {
-      _categoryId = snapshot.sectionIdOf(me) ??
+      _categoryId =
+          snapshot.sectionIdOf(me) ??
           (snapshot.categories.isEmpty ? null : snapshot.categories.first.id);
       _categoryChosen = true;
     }
@@ -330,10 +333,12 @@ class _PairingRow extends StatelessWidget {
     final mine = me != null && game.involves(me!);
     final resultText = formatResult(game.result, isBye: game.isByeGame);
     return Container(
-      color: mine ? p.penWash : null,
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-      foregroundDecoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: p.rule)),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: mine ? p.accentWash : p.paper3,
+        borderRadius: BorderRadius.circular(AlokasTheme.radius),
+        border: Border.all(color: mine ? p.accent : p.rule),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -342,7 +347,7 @@ class _PairingRow extends StatelessWidget {
             width: 44,
             child: Text(
               game.board == null || game.board == 0 ? '' : '${game.board}',
-              style: atype(20, weight: 800, color: p.ink, tabular: true),
+              style: atype(20, weight: 800, color: p.accent, tabular: true),
             ),
           ),
           Expanded(

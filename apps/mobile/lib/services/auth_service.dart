@@ -218,7 +218,12 @@ class AuthService {
         return 'New accounts are not being accepted right now.';
     }
     if (body != null) {
-      for (final key in const ['error_description', 'msg', 'message', 'error']) {
+      for (final key in const [
+        'error_description',
+        'msg',
+        'message',
+        'error',
+      ]) {
         final value = body[key];
         if (value is String && value.trim().isNotEmpty) return value.trim();
       }
@@ -288,7 +293,10 @@ class AuthService {
 
   Future<ApiResult<void>> resendConfirmation(String email) async {
     if (!isConfigured) return const ApiFailure(notConfiguredMessage);
-    return _sendEmail(_uri('resend'), {'type': 'signup', 'email': email.trim()});
+    return _sendEmail(_uri('resend'), {
+      'type': 'signup',
+      'email': email.trim(),
+    });
   }
 
   /// The provider answers the same whether or not the account exists.
@@ -327,7 +335,10 @@ class AuthService {
           ? null
           : AuthSession.tryFromTokenResponse(decoded, _now());
       if (next != null) {
-        return RefreshResult(RefreshOutcome.refreshed, next.mergedWith(current));
+        return RefreshResult(
+          RefreshOutcome.refreshed,
+          next.mergedWith(current),
+        );
       }
     }
     if (response.statusCode >= 400 &&

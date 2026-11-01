@@ -1125,7 +1125,7 @@ void main() {
       expect(find.text('Round 2'), findsOneWidget);
       expect(find.text('9'), findsOneWidget);
       expect(find.byKey(const Key('hero-black')), findsOneWidget);
-      expect(find.text('Test Player One plays Black'), findsOneWidget);
+      expect(find.text('Plays Black'), findsOneWidget);
       expect(find.text('Test Opponent'), findsOneWidget);
       expect(find.text('Playing now'), findsOneWidget);
     });

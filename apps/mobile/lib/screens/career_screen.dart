@@ -129,13 +129,17 @@ class CareerScreen extends StatelessWidget {
         onSelect: onSelectProfile,
       ),
       const SizedBox(height: 16),
-      _buildRatings(context, profile),
-      const SizedBox(height: 24),
-      _buildPerformance(context, current?.stats),
-      const SizedBox(height: 24),
-      _buildCertificates(context, current?.certificates ?? const []),
-      const SizedBox(height: 24),
-      _buildTournaments(context, current?.tournaments ?? const []),
+      BrandCard(child: _buildRatings(context, profile)),
+      const SizedBox(height: 14),
+      BrandCard(child: _buildPerformance(context, current?.stats)),
+      const SizedBox(height: 14),
+      BrandCard(
+        child: _buildCertificates(context, current?.certificates ?? const []),
+      ),
+      const SizedBox(height: 14),
+      BrandCard(
+        child: _buildTournaments(context, current?.tournaments ?? const []),
+      ),
       const SizedBox(height: 16),
       Text(
         'Rating history charts are not available yet.',
@@ -161,14 +165,13 @@ class CareerScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(label, style: atype(16, weight: 600, color: p.ink)),
-                if (note != null)
-                  Text(note, style: atype(14, color: p.ink2)),
+                if (note != null) Text(note, style: atype(14, color: p.ink2)),
               ],
             ),
           ),
           Text(
             value,
-            style: atype(24, weight: 800, color: p.ink, tabular: true),
+            style: atype(24, weight: 800, color: p.accent, tabular: true),
           ),
         ],
       ),
@@ -199,7 +202,7 @@ class CareerScreen extends StatelessWidget {
       children: [
         Text(
           value,
-          style: atype(24, weight: 800, color: p.ink, tabular: true),
+          style: atype(24, weight: 800, color: p.accent, tabular: true),
         ),
         Text(label, style: atype(13, color: p.ink2)),
       ],
@@ -292,7 +295,7 @@ class CareerScreen extends StatelessWidget {
                   style: atype(14, color: p.ink2),
                 ),
                 const SizedBox(height: 8),
-                OutlinedButton(
+                ElevatedButton(
                   onPressed: () => _download(context, cert),
                   child: const Text('Download PDF'),
                 ),
@@ -336,7 +339,12 @@ class CareerScreen extends StatelessWidget {
                     children: [
                       Text(
                         t.tournamentName ?? 'Unnamed tournament',
-                        style: atype(16, weight: 600, color: p.ink, height: 1.25),
+                        style: atype(
+                          16,
+                          weight: 600,
+                          color: p.ink,
+                          height: 1.25,
+                        ),
                       ),
                       Text(
                         formatDateForPeople(t.tournamentDate) ??

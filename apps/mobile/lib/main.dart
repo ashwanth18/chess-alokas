@@ -17,7 +17,6 @@ import 'services/local_store.dart';
 import 'services/preferences.dart';
 import 'theme/alokas_theme.dart';
 import 'widgets/message_card.dart';
-import 'widgets/player_name.dart';
 
 void main() {
   runApp(const ChessAlokasMobileApp());
@@ -62,7 +61,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
   late final OfflineCache _cache;
   late final DraftStore _drafts;
   int _currentTabIndex = 0;
-  AlokasThemeChoice _theme = AlokasThemeChoice.system;
+  AlokasThemeChoice _theme = AlokasThemeChoice.forest;
   bool _inForeground = true;
   Timer? _pollTimer;
 
@@ -690,8 +689,6 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
   Widget build(BuildContext context) {
     final session = _api.session.value;
     final signedIn = session != null;
-    final selected = _profiles.where((p) => p.id == _selectedProfileId);
-    final activeProfile = selected.isEmpty ? null : selected.first;
 
     final pages = <Widget>[
       DiscoverScreen(
@@ -784,11 +781,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     return MaterialApp(
       title: 'Chess Alokas',
       debugShowCheckedModeBanner: false,
-      theme: AlokasTheme.of(_theme, Brightness.light),
-      darkTheme: AlokasTheme.of(_theme, Brightness.dark),
-      themeMode: _theme == AlokasThemeChoice.system
-          ? ThemeMode.system
-          : ThemeMode.light,
+      theme: AlokasTheme.of(_theme),
       themeAnimationDuration: Duration.zero,
       home: Builder(
         builder: (context) {
@@ -809,12 +802,8 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
                           style: atype(18, weight: 800, color: p.ink),
                         ),
                         Text(
-                          !signedIn
-                              ? 'Not signed in'
-                              : activeProfile == null
-                              ? 'Signed in'
-                              : splitPlayerName(activeProfile.fullName).given,
-                          style: atype(13, weight: 600, color: p.ink2),
+                          signedIn ? 'Signed in' : 'Not signed in',
+                          style: atype(13, weight: 600, color: p.accent),
                         ),
                       ],
                     ),
@@ -825,26 +814,30 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
             body: pages[_currentTabIndex],
             bottomNavigationBar: DecoratedBox(
               decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: p.rule)),
+                boxShadow: [BoxShadow(color: p.shadow, blurRadius: 12)],
               ),
               child: NavigationBar(
                 selectedIndex: _currentTabIndex,
                 onDestinationSelected: _selectTab,
                 destinations: const [
                   NavigationDestination(
-                    icon: Icon(Icons.search),
+                    icon: Icon(Icons.explore_outlined),
+                    selectedIcon: Icon(Icons.explore),
                     label: 'Discover',
                   ),
                   NavigationDestination(
-                    icon: Icon(Icons.grid_view),
+                    icon: Icon(Icons.sports_esports_outlined),
+                    selectedIcon: Icon(Icons.sports_esports),
                     label: 'Matchday',
                   ),
                   NavigationDestination(
-                    icon: Icon(Icons.history),
+                    icon: Icon(Icons.workspace_premium_outlined),
+                    selectedIcon: Icon(Icons.workspace_premium),
                     label: 'Career',
                   ),
                   NavigationDestination(
-                    icon: Icon(Icons.person_outline),
+                    icon: Icon(Icons.people_outline),
+                    selectedIcon: Icon(Icons.people),
                     label: 'Account',
                   ),
                 ],

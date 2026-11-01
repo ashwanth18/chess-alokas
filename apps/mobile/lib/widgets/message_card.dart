@@ -28,7 +28,10 @@ class StaleNotice extends StatelessWidget {
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-      color: p.waitWash,
+      decoration: BoxDecoration(
+        color: p.waitWash,
+        borderRadius: BorderRadius.circular(AlokasTheme.radius),
+      ),
       child: Row(
         children: [
           StatusSquare(color: p.wait, hollow: true),
@@ -106,31 +109,28 @@ class PieceSquare extends StatelessWidget {
   }
 }
 
-/// The brand mark: a split square, half white and half black.
+/// The logo: a gold rounded square with a trophy.
 class BrandMark extends StatelessWidget {
   final double size;
 
-  const BrandMark({super.key, this.size = 24});
+  const BrandMark({super.key, this.size = 34});
 
   @override
   Widget build(BuildContext context) {
+    final p = context.pal;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        border: Border.all(color: context.pal.ink, width: 2),
+        color: p.accent,
+        borderRadius: BorderRadius.circular(AlokasTheme.radius - 2),
       ),
-      child: const Row(
-        children: [
-          Expanded(child: ColoredBox(color: AlokasTokens.pieceWhite)),
-          Expanded(child: ColoredBox(color: AlokasTokens.pieceBlack)),
-        ],
-      ),
+      child: Icon(Icons.emoji_events, size: size * 0.62, color: p.onAccent),
     );
   }
 }
 
-/// A small heading above a section, with a heavy rule like a pairing sheet.
+/// A gold label above a section.
 class SheetHeading extends StatelessWidget {
   final String text;
   final Widget? trailing;
@@ -140,23 +140,61 @@ class SheetHeading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.pal;
-    return Container(
+    return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: p.ink, width: 2)),
-      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
-            child: Text(
-              text,
-              style: atype(20, weight: 800, width: 108, color: p.ink),
-            ),
+            child: Text(text, style: atype(18, weight: 800, color: p.accent)),
           ),
           ?trailing,
         ],
       ),
+    );
+  }
+}
+
+/// The app's raised surface: a soft gradient, rounded, with a gold edge when it
+/// matters most.
+class BrandCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets padding;
+  final bool strong;
+
+  const BrandCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.strong = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pal;
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [p.gradientStart, p.gradientEnd],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(AlokasTheme.cardRadius),
+        border: Border.all(
+          color: strong ? p.accent : p.rule,
+          width: strong ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: p.shadow,
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 }
@@ -199,18 +237,18 @@ class ChoiceBox extends StatelessWidget {
     final foreground = onTap == null
         ? p.ink3
         : selected
-        ? p.onInk
+        ? p.onAccent
         : p.ink;
     return Semantics(
       button: true,
       selected: selected,
       enabled: onTap != null,
       child: Material(
-        color: selected ? p.ink : p.paper,
+        color: selected ? p.accent : p.paper3,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AlokasTheme.radius),
           side: BorderSide(
-            color: selected ? p.ink : p.ruleStrong,
+            color: selected ? p.accent : p.ruleStrong,
             width: 1.5,
           ),
         ),
@@ -235,8 +273,8 @@ class ChoiceBox extends StatelessWidget {
   }
 }
 
-/// Chooses which player a screen is about. Full names always, with enough
-/// detail to tell two similar children apart.
+/// Chooses which player a screen is about. One row with the full name and
+/// enough detail to tell two similar children apart; tapping it lists the rest.
 class PlayerPicker extends StatelessWidget {
   final List<MobilePlayerProfile> profiles;
   final String? selectedId;
@@ -249,26 +287,81 @@ class PlayerPicker extends StatelessWidget {
     required this.onSelect,
   });
 
+  void _open(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SheetHeading('Choose a player'),
+              const SizedBox(height: 4),
+              for (final profile in profiles)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ChoiceBox(
+                    key: Key('player-${profile.id}'),
+                    selected: profile.id == selectedId,
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      onSelect(profile.id);
+                    },
+                    builder: (foreground) => PlayerName(
+                      profile.fullName,
+                      detail: profile.disambiguator,
+                      color: foreground,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final profile in profiles)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: ChoiceBox(
-              key: Key('player-${profile.id}'),
-              selected: profile.id == selectedId,
-              onTap: () => onSelect(profile.id),
-              builder: (foreground) => PlayerName(
-                profile.fullName,
-                detail: profile.disambiguator,
-                color: foreground,
-              ),
+    final p = context.pal;
+    final current = profiles.where((x) => x.id == selectedId);
+    final selected = current.isEmpty ? null : current.first;
+    return Material(
+      color: p.paper3,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AlokasTheme.radius),
+        side: BorderSide(color: p.rule),
+      ),
+      child: InkWell(
+        key: const Key('open-player-picker'),
+        borderRadius: BorderRadius.circular(AlokasTheme.radius),
+        onTap: () => _open(context),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+            child: Row(
+              children: [
+                Icon(Icons.people, color: p.accent, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: selected == null
+                      ? Text('Choose a player', style: atype(16, color: p.ink))
+                      : PlayerName(
+                          selected.fullName,
+                          detail: selected.disambiguator,
+                          color: p.ink,
+                        ),
+                ),
+                Icon(Icons.expand_more, color: p.accent),
+              ],
             ),
           ),
-      ],
+        ),
+      ),
     );
   }
 }
@@ -308,12 +401,11 @@ class MessageCard extends StatelessWidget {
     final p = context.pal;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isProblem ? p.flagWash : p.paper2,
-        border: Border(
-          left: BorderSide(color: isProblem ? p.flag : p.ink, width: 3),
-        ),
+        color: isProblem ? p.flagWash : p.paper3,
+        borderRadius: BorderRadius.circular(AlokasTheme.cardRadius),
+        border: Border.all(color: isProblem ? p.flag : p.rule),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -331,12 +423,16 @@ class MessageCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               message!,
-              style: atype(16, color: isProblem ? p.flag : p.ink2, height: 1.35),
+              style: atype(
+                16,
+                color: isProblem ? p.flag : p.ink2,
+                height: 1.35,
+              ),
             ),
           ],
           if (actionLabel != null && onAction != null) ...[
             const SizedBox(height: 12),
-            OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
+            ElevatedButton(onPressed: onAction, child: Text(actionLabel!)),
           ],
         ],
       ),

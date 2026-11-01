@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:chess_alokas_mobile/main.dart';
@@ -48,7 +49,10 @@ Map<String, dynamic> _eventDetail(
   List<Map<String, dynamic>> questions = const [],
   String? paymentInstructions,
 }) {
-  final detail = fakeEventDetail(event, paymentInstructions: paymentInstructions);
+  final detail = fakeEventDetail(
+    event,
+    paymentInstructions: paymentInstructions,
+  );
   (detail['event'] as Map<String, dynamic>)['registrationFormSchema'] = {
     'customQuestions': questions,
   };
@@ -86,16 +90,64 @@ Map<String, dynamic> _liveSnapshot() => {
     {'id': 'u12', 'name': 'Under 12'},
   ],
   'players': [
-    {'id': 'p1', 'name': 'Test Player One', 'seed': 12, 'categoryIds': ['u12']},
-    {'id': 'p2', 'name': 'Tan Zwischen Zug', 'seed': 7, 'categoryIds': ['u12']},
-    {'id': 'p3', 'name': 'Lim Gambit Ling', 'seed': 3, 'categoryIds': ['u12']},
-    {'id': 'p4', 'name': 'Goh En Passant', 'seed': 4, 'categoryIds': ['u12']},
+    {
+      'id': 'p1',
+      'name': 'Test Player One',
+      'seed': 12,
+      'categoryIds': ['u12'],
+    },
+    {
+      'id': 'p2',
+      'name': 'Tan Zwischen Zug',
+      'seed': 7,
+      'categoryIds': ['u12'],
+    },
+    {
+      'id': 'p3',
+      'name': 'Lim Gambit Ling',
+      'seed': 3,
+      'categoryIds': ['u12'],
+    },
+    {
+      'id': 'p4',
+      'name': 'Goh En Passant',
+      'seed': 4,
+      'categoryIds': ['u12'],
+    },
   ],
   'games': [
-    {'round': 1, 'board': 1, 'whiteId': 'p1', 'blackId': 'p3', 'result': '1-0', 'isBye': false},
-    {'round': 1, 'board': 2, 'whiteId': 'p2', 'blackId': 'p4', 'result': '1-0', 'isBye': false},
-    {'round': 2, 'board': 14, 'whiteId': 'p1', 'blackId': 'p2', 'result': 'pending', 'isBye': false},
-    {'round': 2, 'board': 15, 'whiteId': 'p3', 'blackId': 'p4', 'result': '1/2-1/2', 'isBye': false},
+    {
+      'round': 1,
+      'board': 1,
+      'whiteId': 'p1',
+      'blackId': 'p3',
+      'result': '1-0',
+      'isBye': false,
+    },
+    {
+      'round': 1,
+      'board': 2,
+      'whiteId': 'p2',
+      'blackId': 'p4',
+      'result': '1-0',
+      'isBye': false,
+    },
+    {
+      'round': 2,
+      'board': 14,
+      'whiteId': 'p1',
+      'blackId': 'p2',
+      'result': 'pending',
+      'isBye': false,
+    },
+    {
+      'round': 2,
+      'board': 15,
+      'whiteId': 'p3',
+      'blackId': 'p4',
+      'result': '1/2-1/2',
+      'isBye': false,
+    },
   ],
 };
 
@@ -151,9 +203,11 @@ Future<void> _startRegistering(WidgetTester tester) async {
 }
 
 Widget _themed(Widget child, {double width = 320}) => MaterialApp(
-  theme: AlokasTheme.build(AlokasPalette.light, Brightness.light),
+  theme: AlokasTheme.build(AlokasPalette.forest, Brightness.dark),
   home: Scaffold(
-    body: Center(child: SizedBox(width: width, child: child)),
+    body: Center(
+      child: SizedBox(width: width, child: child),
+    ),
   ),
 );
 
@@ -167,7 +221,11 @@ void main() {
   group('PlayerName', () {
     test('splits at bin, binti, a/l and a/p, whatever the case', () {
       for (final (raw, given, rest) in const [
-        ('Puteri Alekhine Damia binti Queen Gambit', 'Puteri Alekhine Damia', 'binti Queen Gambit'),
+        (
+          'Puteri Alekhine Damia binti Queen Gambit',
+          'Puteri Alekhine Damia',
+          'binti Queen Gambit',
+        ),
         ('Goh Bin Caro Kann', 'Goh', 'Bin Caro Kann'),
         ('Ravi Sicilian a/l Najdorf', 'Ravi Sicilian', 'a/l Najdorf'),
         ('Devi Nimzo a/p Indian', 'Devi Nimzo', 'a/p Indian'),
@@ -190,7 +248,10 @@ void main() {
         'Siti Aminah binti Queen Gambit',
       );
       expect(displayPlayerName('RAVI A/L NAJDORF'), 'Ravi a/l Najdorf');
-      expect(displayPlayerName('McDonald van der Berg'), 'McDonald van der Berg');
+      expect(
+        displayPlayerName('McDonald van der Berg'),
+        'McDonald van der Berg',
+      );
     });
 
     testWidgets('never truncates, even in a very narrow space', (tester) async {
@@ -258,46 +319,98 @@ void main() {
   });
 
   group('Pairing Sheet design', () {
-    test('lib/ has no raw colours outside the theme, and no emoji or chess glyphs', () {
-      final glyphs = RegExp(
-        r'[♔-♟\u{1F300}-\u{1FAFF}☀-➿]',
-        unicode: true,
-      );
-      final raw = RegExp(r'\bColor\(0x|\bColors\.|AlokasColors|Color\.from');
-      final truncation = RegExp(r'TextOverflow\.(ellipsis|fade)');
-      final sources = Directory('lib')
-          .listSync(recursive: true)
-          .whereType<File>()
-          .where((f) => f.path.endsWith('.dart'));
-      for (final file in sources) {
-        final text = file.readAsStringSync();
-        final path = file.path.replaceAll(r'\', '/');
-        expect(glyphs.hasMatch(text), isFalse, reason: 'glyph in $path');
-        expect(truncation.hasMatch(text), isFalse, reason: 'cut text in $path');
-        if (!path.contains('lib/theme/')) {
-          expect(raw.hasMatch(text), isFalse, reason: 'raw colour in $path');
+    test(
+      'lib/ has no raw colours outside the theme, and no emoji or chess glyphs',
+      () {
+        final glyphs = RegExp(r'[♔-♟\u{1F300}-\u{1FAFF}☀-➿]', unicode: true);
+        final raw = RegExp(r'\bColor\(0x|\bColors\.|AlokasColors|Color\.from');
+        final truncation = RegExp(r'TextOverflow\.(ellipsis|fade)');
+        final sources = Directory('lib')
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.dart'));
+        for (final file in sources) {
+          final text = file.readAsStringSync();
+          final path = file.path.replaceAll(r'\', '/');
+          expect(glyphs.hasMatch(text), isFalse, reason: 'glyph in $path');
+          expect(
+            truncation.hasMatch(text),
+            isFalse,
+            reason: 'cut text in $path',
+          );
+          if (!path.contains('lib/theme/')) {
+            expect(raw.hasMatch(text), isFalse, reason: 'raw colour in $path');
+          }
         }
+      },
+    );
+
+    test(
+      'green by default, whatever the phone says; Sunlight is an option',
+      () {
+        final forest = AlokasTheme.of(AlokasThemeChoice.forest);
+        expect(forest.scaffoldBackgroundColor, AlokasTokens.forestPaper);
+        expect(forest.colorScheme.primary, AlokasTokens.forestAccent);
+        expect(forest.colorScheme.onPrimary, AlokasTokens.forestOnAccent);
+        expect(AlokasThemeChoice.fromName(null), AlokasThemeChoice.forest);
+        expect(AlokasThemeChoice.fromName('dark'), AlokasThemeChoice.forest);
+
+        final sun = AlokasTheme.of(AlokasThemeChoice.sun);
+        expect(sun.scaffoldBackgroundColor, AlokasTokens.sunPaper);
+      },
+    );
+
+    test('every text pair meets WCAG AA on every surface', () {
+      double lin(double c) => c <= 0.03928
+          ? c / 12.92
+          : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
+      double lum(Color c) =>
+          0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+      double ratio(Color a, Color b) {
+        final (x, y) = (lum(a), lum(b));
+        return (math.max(x, y) + 0.05) / (math.min(x, y) + 0.05);
       }
-    });
 
-    test('every theme maps the design tokens', () {
-      final light = AlokasTheme.of(AlokasThemeChoice.light, Brightness.dark);
-      expect(light.scaffoldBackgroundColor, AlokasTokens.lightPaper);
-      expect(light.colorScheme.primary, AlokasTokens.lightInk);
-      expect(light.colorScheme.onPrimary, AlokasTokens.lightOnInk);
-      expect(light.colorScheme.error, AlokasTokens.lightFlag);
-      expect(light.dividerColor, AlokasTokens.lightRule);
-
-      final dark = AlokasTheme.of(AlokasThemeChoice.dark, Brightness.light);
-      expect(dark.scaffoldBackgroundColor, AlokasTokens.darkPaper);
-      expect(dark.brightness, Brightness.dark);
-
-      final sun = AlokasTheme.of(AlokasThemeChoice.sun, Brightness.dark);
-      expect(sun.scaffoldBackgroundColor, AlokasTokens.sunPaper);
-      expect(sun.colorScheme.primary, AlokasTokens.sunInk);
-
-      final auto = AlokasTheme.of(AlokasThemeChoice.system, Brightness.dark);
-      expect(auto.scaffoldBackgroundColor, AlokasTokens.darkPaper);
+      for (final p in const [AlokasPalette.forest, AlokasPalette.sun]) {
+        final surfaces = [
+          p.paper,
+          p.paper2,
+          p.paper3,
+          p.elevated,
+          p.gradientStart,
+          p.gradientEnd,
+        ];
+        for (final surface in surfaces) {
+          for (final text in [
+            p.ink,
+            p.ink2,
+            p.ink3,
+            p.accent,
+            p.pen,
+            p.flag,
+            p.go,
+            p.wait,
+          ]) {
+            expect(
+              ratio(text, surface),
+              greaterThanOrEqualTo(4.5),
+              reason: '$text on $surface',
+            );
+          }
+          expect(ratio(p.ruleStrong, surface), greaterThanOrEqualTo(3));
+        }
+        expect(ratio(p.onAccent, p.accent), greaterThanOrEqualTo(4.5));
+        expect(ratio(p.ink, p.accentWash), greaterThanOrEqualTo(4.5));
+        expect(ratio(p.accent, p.accentWash), greaterThanOrEqualTo(4.5));
+        expect(ratio(p.flag, p.flagWash), greaterThanOrEqualTo(4.5));
+        expect(ratio(p.go, p.goWash), greaterThanOrEqualTo(4.5));
+        expect(ratio(p.wait, p.waitWash), greaterThanOrEqualTo(4.5));
+        expect(ratio(p.pen, p.penWash), greaterThanOrEqualTo(4.5));
+      }
+      expect(
+        ratio(AlokasTokens.pieceWhite, AlokasTokens.pieceBlack),
+        greaterThanOrEqualTo(21),
+      );
     });
 
     test('Archivo is in the bundle with tabular figures', () {
@@ -327,7 +440,8 @@ void main() {
           ...emptyDashboard(),
           'liveMatches': [match],
         }),
-        'GET /api/public/live/$_liveToken': (_) => jsonResponse(_liveSnapshot()),
+        'GET /api/public/live/$_liveToken': (_) =>
+            jsonResponse(_liveSnapshot()),
       });
       await _pump(tester, backend, storage: _signedIn());
       await tester.tap(find.text('Matchday'));
@@ -335,7 +449,8 @@ void main() {
 
       expect(heroColor('hero-white'), AlokasTokens.pieceWhite);
       expect(find.text('14'), findsOneWidget);
-      expect(find.text('Test Player One plays White'), findsOneWidget);
+      expect(find.text('Plays White'), findsOneWidget);
+      expect(find.byKey(const Key('hero-card')), findsOneWidget);
 
       match = _liveMatch(color: 'black');
       await tester.tap(find.text('Career'));
@@ -397,10 +512,11 @@ void main() {
                 .first,
           )
           .color!;
-      await _tapKey(tester, 'theme-dark');
-      expect(page(), AlokasTokens.darkPaper);
+      expect(page(), AlokasTokens.forestPaper);
       await _tapKey(tester, 'theme-sun');
       expect(page(), AlokasTokens.sunPaper);
+      await _tapKey(tester, 'theme-forest');
+      expect(page(), AlokasTokens.forestPaper);
     });
 
     testWidgets('controls on the main screens are at least 44 px', (
@@ -417,7 +533,8 @@ void main() {
             'liveMatches': [_liveMatch()],
           },
         ),
-        'GET /api/public/live/$_liveToken': (_) => jsonResponse(_liveSnapshot()),
+        'GET /api/public/live/$_liveToken': (_) =>
+            jsonResponse(_liveSnapshot()),
       });
       await _pump(tester, backend, storage: _signedIn());
 
@@ -471,10 +588,8 @@ void main() {
     ) async {
       final backend = FakeBackend({
         ...noEvents(),
-        'POST /auth/v1/signup': (_) => jsonResponse({
-          'id': fakeUserId,
-          'email': 'new@example.test',
-        }),
+        'POST /auth/v1/signup': (_) =>
+            jsonResponse({'id': fakeUserId, 'email': 'new@example.test'}),
         'POST /auth/v1/resend': (_) => jsonResponse(const {}),
       });
       final storage = InMemorySessionStorage();
@@ -493,7 +608,9 @@ void main() {
 
       expect(find.byKey(const Key('check-email-message')), findsOneWidget);
       expect(storage.value, isNull, reason: 'no session without confirmation');
-      final sent = jsonDecode(backend.sent('POST', '/auth/v1/signup').single.body);
+      final sent = jsonDecode(
+        backend.sent('POST', '/auth/v1/signup').single.body,
+      );
       expect(sent['email'], 'new@example.test');
 
       await _tapKey(tester, 'resend-confirmation');
@@ -501,7 +618,9 @@ void main() {
       expect(find.byKey(const Key('sign-in-notice')), findsOneWidget);
     });
 
-    testWidgets('sign-up with no confirmation signs straight in', (tester) async {
+    testWidgets('sign-up with no confirmation signs straight in', (
+      tester,
+    ) async {
       final backend = FakeBackend({
         ...noEvents(),
         ..._account(),
@@ -536,7 +655,10 @@ void main() {
         find.byKey(const Key('sign-in-email')),
         'new@example.test',
       );
-      await tester.enterText(find.byKey(const Key('sign-in-password')), 'short');
+      await tester.enterText(
+        find.byKey(const Key('sign-in-password')),
+        'short',
+      );
       await _tapKey(tester, 'sign-up-submit');
 
       expect(find.byKey(const Key('sign-in-error')), findsOneWidget);
@@ -603,8 +725,19 @@ void main() {
 
   group('Registration flow and drafts', () {
     final questions = <Map<String, dynamic>>[
-      {'id': 'tshirt', 'label': 'T-shirt size', 'type': 'select', 'required': true, 'options': ['S', 'M']},
-      {'id': 'note', 'label': 'Anything we should know?', 'type': 'text', 'required': false},
+      {
+        'id': 'tshirt',
+        'label': 'T-shirt size',
+        'type': 'select',
+        'required': true,
+        'options': ['S', 'M'],
+      },
+      {
+        'id': 'note',
+        'label': 'Anything we should know?',
+        'type': 'text',
+        'required': false,
+      },
     ];
 
     FakeBackend backendFor(
@@ -819,45 +952,47 @@ void main() {
   });
 
   group('Offline', () {
-    testWidgets('a cold start with no server shows the last matchday and time', (
-      tester,
-    ) async {
-      final store = InMemoryLocalStore();
-      final online = FakeBackend({
-        'GET $_eventsPath': (_) => jsonResponse({
-          'events': [fakeEvent()],
-        }),
-        ..._account(
-          dashboard: {
-            ...emptyDashboard(),
-            'liveMatches': [_liveMatch()],
-          },
-        ),
-        'GET /api/public/live/$_liveToken': (_) => jsonResponse(_liveSnapshot()),
-      });
-      await _pump(tester, online, storage: _signedIn(), store: store);
-      await tester.tap(find.text('Matchday'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('hero-white')), findsOneWidget);
-      expect(find.byKey(const Key('fresh-line')), findsOneWidget);
+    testWidgets(
+      'a cold start with no server shows the last matchday and time',
+      (tester) async {
+        final store = InMemoryLocalStore();
+        final online = FakeBackend({
+          'GET $_eventsPath': (_) => jsonResponse({
+            'events': [fakeEvent()],
+          }),
+          ..._account(
+            dashboard: {
+              ...emptyDashboard(),
+              'liveMatches': [_liveMatch()],
+            },
+          ),
+          'GET /api/public/live/$_liveToken': (_) =>
+              jsonResponse(_liveSnapshot()),
+        });
+        await _pump(tester, online, storage: _signedIn(), store: store);
+        await tester.tap(find.text('Matchday'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('hero-white')), findsOneWidget);
+        expect(find.byKey(const Key('fresh-line')), findsOneWidget);
 
-      // The server goes away and the app starts from nothing.
-      await _pump(
-        tester,
-        FakeBackend({}),
-        storage: _signedIn(),
-        store: store,
-      );
-      expect(find.text('Fake Open Test Event'), findsOneWidget);
-      await tester.tap(find.text('Matchday'));
-      await tester.pumpAndSettle();
+        // The server goes away and the app starts from nothing.
+        await _pump(
+          tester,
+          FakeBackend({}),
+          storage: _signedIn(),
+          store: store,
+        );
+        expect(find.text('Fake Open Test Event'), findsOneWidget);
+        await tester.tap(find.text('Matchday'));
+        await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('hero-white')), findsOneWidget);
-      expect(find.text('14'), findsOneWidget);
-      expect(find.byKey(const Key('stale-notice')), findsOneWidget);
-      expect(find.textContaining('as of'), findsWidgets);
-      expect(find.text('#7 · Under 12'), findsWidgets);
-    });
+        expect(find.byKey(const Key('hero-white')), findsOneWidget);
+        expect(find.text('14'), findsOneWidget);
+        expect(find.byKey(const Key('stale-notice')), findsOneWidget);
+        expect(find.textContaining('as of'), findsWidgets);
+        expect(find.text('#7 · Under 12'), findsWidgets);
+      },
+    );
 
     testWidgets('open Matchday polls for news', (tester) async {
       var requests = 0;
@@ -903,8 +1038,18 @@ void main() {
 
     test('byes and forfeits score as on the server', () {
       const bye = LiveGame(round: 1, whiteId: 'a', result: 'bye', isBye: true);
-      const forfeit = LiveGame(round: 1, whiteId: 'a', blackId: 'b', result: '0-1F');
-      const none = LiveGame(round: 1, whiteId: 'a', blackId: 'b', result: '0-0');
+      const forfeit = LiveGame(
+        round: 1,
+        whiteId: 'a',
+        blackId: 'b',
+        result: '0-1F',
+      );
+      const none = LiveGame(
+        round: 1,
+        whiteId: 'a',
+        blackId: 'b',
+        result: '0-0',
+      );
       expect(bye.pointsFor('a'), 1);
       expect(forfeit.pointsFor('a'), 0);
       expect(forfeit.pointsFor('b'), 1);
@@ -930,7 +1075,8 @@ void main() {
             'liveMatches': [_liveMatch()],
           },
         ),
-        'GET /api/public/live/$_liveToken': (_) => jsonResponse(_liveSnapshot()),
+        'GET /api/public/live/$_liveToken': (_) =>
+            jsonResponse(_liveSnapshot()),
       });
       await _pump(tester, backend, storage: _signedIn());
       await tester.tap(find.text('Matchday'));
@@ -967,7 +1113,10 @@ void main() {
       await tester.tap(find.text('Matchday'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('has not turned on the live page'), findsOneWidget);
+      expect(
+        find.textContaining('has not turned on the live page'),
+        findsOneWidget,
+      );
       expect(find.textContaining('Rank '), findsNothing);
       expect(find.byKey(const Key('open-standings')), findsNothing);
     });
@@ -975,13 +1124,12 @@ void main() {
 
   group('Check-in pass', () {
     test('the code names the entry and nothing about the child', () {
-      expect(
-        checkInPayload('t-1', 'p-2'),
-        'alokas-checkin:v1:t-1:p-2',
-      );
+      expect(checkInPayload('t-1', 'p-2'), 'alokas-checkin:v1:t-1:p-2');
     });
 
-    testWidgets('says plainly that it does not check anyone in', (tester) async {
+    testWidgets('says plainly that it does not check anyone in', (
+      tester,
+    ) async {
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
         ..._account(
@@ -990,7 +1138,8 @@ void main() {
             'liveMatches': [_liveMatch()],
           },
         ),
-        'GET /api/public/live/$_liveToken': (_) => jsonResponse(_liveSnapshot()),
+        'GET /api/public/live/$_liveToken': (_) =>
+            jsonResponse(_liveSnapshot()),
       });
       await _pump(tester, backend, storage: _signedIn());
       await tester.tap(find.text('Matchday'));
@@ -1033,9 +1182,8 @@ void main() {
       await _pump(
         tester,
         backend,
-        locator: () async => const DeviceLocationProblem(
-          'No permission to use your location.',
-        ),
+        locator: () async =>
+            const DeviceLocationProblem('No permission to use your location.'),
       );
       await _tapKey(tester, 'use-my-location');
 

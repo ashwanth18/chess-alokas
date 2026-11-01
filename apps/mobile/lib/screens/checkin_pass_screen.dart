@@ -56,7 +56,8 @@ class CheckInPassScreen extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AlokasTokens.pieceWhite,
-                border: Border.all(color: AlokasTokens.pieceBlack, width: 1.5),
+                borderRadius: BorderRadius.circular(AlokasTheme.radius),
+                border: Border.all(color: p.accent, width: 1.5),
               ),
               child: QrImageView(
                 key: const Key('checkin-qr'),
@@ -84,7 +85,10 @@ class CheckInPassScreen extends StatelessWidget {
           Container(
             key: const Key('checkin-not-confirmed'),
             padding: const EdgeInsets.all(12),
-            color: p.waitWash,
+            decoration: BoxDecoration(
+              color: p.waitWash,
+              borderRadius: BorderRadius.circular(AlokasTheme.radius),
+            ),
             child: Text(
               'This pass does not check the player in. The desk cannot scan the '
               'code yet, and the app is not told when a player is marked '

@@ -491,10 +491,7 @@ class MobilePlayerProfile {
   /// Enough to tell two similar names apart, such as "Born 2015 \u00B7 Child".
   String get disambiguator {
     final born = yearOfBirth;
-    return [
-      if (born != null) 'Born $born',
-      relationshipLabel,
-    ].join(' \u00B7 ');
+    return [if (born != null) 'Born $born', relationshipLabel].join(' \u00B7 ');
   }
 
   String get relationshipLabel {

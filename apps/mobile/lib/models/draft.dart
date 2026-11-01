@@ -69,8 +69,7 @@ class RegistrationDraft {
           json['categoryByProfile'] as Map? ?? const {},
         ),
         answers: {
-          for (final entry
-              in (json['answers'] as Map? ?? const {}).entries)
+          for (final entry in (json['answers'] as Map? ?? const {}).entries)
             entry.key as String: Map<String, String>.from(entry.value as Map),
         },
         receiptName: json['receiptName'] as String?,

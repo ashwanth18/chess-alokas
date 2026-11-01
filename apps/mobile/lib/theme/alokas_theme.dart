@@ -2,22 +2,24 @@ import 'package:flutter/material.dart';
 
 import 'alokas_tokens.dart';
 
-/// Which of the Pairing Sheet themes the user asked for.
+/// The looks on offer: Alokas green always, whatever the phone's light or dark
+/// setting, or high-contrast Sunlight for outdoors.
 enum AlokasThemeChoice {
-  system('Auto'),
-  light('Light'),
-  dark('Dark'),
+  forest('Alokas green'),
   sun('Sunlight');
 
   final String label;
   const AlokasThemeChoice(this.label);
 
-  static AlokasThemeChoice fromName(String? name) => AlokasThemeChoice.values
-      .firstWhere((c) => c.name == name, orElse: () => AlokasThemeChoice.system);
+  static AlokasThemeChoice fromName(String? name) =>
+      AlokasThemeChoice.values.firstWhere(
+        (c) => c.name == name,
+        orElse: () => AlokasThemeChoice.forest,
+      );
 }
 
-/// The design's semantic colours. Ink is fact, pen is what was just entered,
-/// flag needs a person, go is delivered, wait is on this device.
+/// The app's semantic colours. Every colour in the app comes from here, so the
+/// look can change in one place.
 @immutable
 class AlokasPalette extends ThemeExtension<AlokasPalette> {
   final Color paper, paper2, paper3;
@@ -27,6 +29,10 @@ class AlokasPalette extends ThemeExtension<AlokasPalette> {
   final Color flag, flagWash;
   final Color go, goWash;
   final Color wait, waitWash;
+
+  /// Primary buttons, active nav, key labels.
+  final Color accent, onAccent, accentWash;
+  final Color elevated, gradientStart, gradientEnd, shadow;
 
   const AlokasPalette({
     required this.paper,
@@ -46,46 +52,40 @@ class AlokasPalette extends ThemeExtension<AlokasPalette> {
     required this.goWash,
     required this.wait,
     required this.waitWash,
+    required this.accent,
+    required this.onAccent,
+    required this.accentWash,
+    required this.elevated,
+    required this.gradientStart,
+    required this.gradientEnd,
+    required this.shadow,
   });
 
-  static const light = AlokasPalette(
-    paper: AlokasTokens.lightPaper,
-    paper2: AlokasTokens.lightPaper2,
-    paper3: AlokasTokens.lightPaper3,
-    ink: AlokasTokens.lightInk,
-    ink2: AlokasTokens.lightInk2,
-    ink3: AlokasTokens.lightInk3,
-    onInk: AlokasTokens.lightOnInk,
-    rule: AlokasTokens.lightRule,
-    ruleStrong: AlokasTokens.lightRuleStrong,
-    pen: AlokasTokens.lightPen,
-    penWash: AlokasTokens.lightPenWash,
-    flag: AlokasTokens.lightFlag,
-    flagWash: AlokasTokens.lightFlagWash,
-    go: AlokasTokens.lightGo,
-    goWash: AlokasTokens.lightGoWash,
-    wait: AlokasTokens.lightWait,
-    waitWash: AlokasTokens.lightWaitWash,
-  );
-
-  static const dark = AlokasPalette(
-    paper: AlokasTokens.darkPaper,
-    paper2: AlokasTokens.darkPaper2,
-    paper3: AlokasTokens.darkPaper3,
-    ink: AlokasTokens.darkInk,
-    ink2: AlokasTokens.darkInk2,
-    ink3: AlokasTokens.darkInk3,
-    onInk: AlokasTokens.darkOnInk,
-    rule: AlokasTokens.darkRule,
-    ruleStrong: AlokasTokens.darkRuleStrong,
-    pen: AlokasTokens.darkPen,
-    penWash: AlokasTokens.darkPenWash,
-    flag: AlokasTokens.darkFlag,
-    flagWash: AlokasTokens.darkFlagWash,
-    go: AlokasTokens.darkGo,
-    goWash: AlokasTokens.darkGoWash,
-    wait: AlokasTokens.darkWait,
-    waitWash: AlokasTokens.darkWaitWash,
+  static const forest = AlokasPalette(
+    paper: AlokasTokens.forestPaper,
+    paper2: AlokasTokens.forestPaper2,
+    paper3: AlokasTokens.forestPaper3,
+    ink: AlokasTokens.forestInk,
+    ink2: AlokasTokens.forestInk2,
+    ink3: AlokasTokens.forestInk3,
+    onInk: AlokasTokens.forestPaper,
+    rule: AlokasTokens.forestRule,
+    ruleStrong: AlokasTokens.forestRuleStrong,
+    pen: AlokasTokens.forestPen,
+    penWash: AlokasTokens.forestPenWash,
+    flag: AlokasTokens.forestFlag,
+    flagWash: AlokasTokens.forestFlagWash,
+    go: AlokasTokens.forestGo,
+    goWash: AlokasTokens.forestGoWash,
+    wait: AlokasTokens.forestWait,
+    waitWash: AlokasTokens.forestWaitWash,
+    accent: AlokasTokens.forestAccent,
+    onAccent: AlokasTokens.forestOnAccent,
+    accentWash: AlokasTokens.forestAccentWash,
+    elevated: AlokasTokens.forestElevated,
+    gradientStart: AlokasTokens.forestElevated,
+    gradientEnd: AlokasTokens.forestPaper3,
+    shadow: AlokasTokens.forestShadow,
   );
 
   static const sun = AlokasPalette(
@@ -106,6 +106,13 @@ class AlokasPalette extends ThemeExtension<AlokasPalette> {
     goWash: AlokasTokens.sunGoWash,
     wait: AlokasTokens.sunWait,
     waitWash: AlokasTokens.sunWaitWash,
+    accent: AlokasTokens.sunInk,
+    onAccent: AlokasTokens.sunOnInk,
+    accentWash: AlokasTokens.sunPenWash,
+    elevated: AlokasTokens.sunPaper2,
+    gradientStart: AlokasTokens.sunPaper,
+    gradientEnd: AlokasTokens.sunPaper,
+    shadow: AlokasTokens.sunShadow,
   );
 
   @override
@@ -121,7 +128,7 @@ extension AlokasContext on BuildContext {
   AlokasPalette get pal => Theme.of(this).extension<AlokasPalette>()!;
 }
 
-/// The design's type scale. Variable fonts ignore [FontWeight] unless the wght
+/// The app's type scale. Variable fonts ignore [FontWeight] unless the wght
 /// axis is set too, so every style in the app goes through [atype].
 TextStyle atype(
   double size, {
@@ -155,23 +162,14 @@ class AlokasTheme {
 
   /// Then the system fonts, which carry Chinese and Tamil.
   static const List<String> fontFallback = ['ArchivoExt'];
-  static const double radius = 3;
+  static const double radius = 12;
+  static const double cardRadius = 16;
   static const double minTarget = 48;
 
-  static ThemeData of(AlokasThemeChoice choice, Brightness platform) {
-    switch (choice) {
-      case AlokasThemeChoice.light:
-        return build(AlokasPalette.light, Brightness.light);
-      case AlokasThemeChoice.dark:
-        return build(AlokasPalette.dark, Brightness.dark);
-      case AlokasThemeChoice.sun:
-        return build(AlokasPalette.sun, Brightness.light);
-      case AlokasThemeChoice.system:
-        return platform == Brightness.dark
-            ? build(AlokasPalette.dark, Brightness.dark)
-            : build(AlokasPalette.light, Brightness.light);
-    }
-  }
+  static ThemeData of(AlokasThemeChoice choice) => switch (choice) {
+    AlokasThemeChoice.forest => build(AlokasPalette.forest, Brightness.dark),
+    AlokasThemeChoice.sun => build(AlokasPalette.sun, Brightness.light),
+  };
 
   static ThemeData build(AlokasPalette p, Brightness brightness) {
     final shape = RoundedRectangleBorder(
@@ -179,8 +177,8 @@ class AlokasTheme {
     );
     final scheme = ColorScheme(
       brightness: brightness,
-      primary: p.ink,
-      onPrimary: p.onInk,
+      primary: p.accent,
+      onPrimary: p.onAccent,
       secondary: p.pen,
       onSecondary: p.paper,
       surface: p.paper,
@@ -196,7 +194,7 @@ class AlokasTheme {
       onError: p.paper,
       outline: p.ruleStrong,
       outlineVariant: p.rule,
-      shadow: p.ink,
+      shadow: p.shadow,
     );
 
     OutlineInputBorder border(Color color, [double width = 1.5]) =>
@@ -239,33 +237,34 @@ class AlokasTheme {
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: atype(18, weight: 700, color: p.ink),
-        shape: Border(bottom: BorderSide(color: p.rule)),
       ),
       cardTheme: CardThemeData(
-        color: p.paper,
-        elevation: 0,
+        color: p.paper3,
+        surfaceTintColor: p.paper3,
+        shadowColor: p.shadow,
+        elevation: 2,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(radius),
+          borderRadius: BorderRadius.circular(cardRadius),
           side: BorderSide(color: p.rule),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: p.paper,
-        surfaceTintColor: p.paper,
-        indicatorColor: p.paper3,
+        backgroundColor: p.paper2,
+        surfaceTintColor: p.paper2,
+        indicatorColor: p.accentWash,
         indicatorShape: shape,
         elevation: 0,
         height: 64,
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             size: 22,
-            color: states.contains(WidgetState.selected) ? p.ink : p.ink3,
+            color: states.contains(WidgetState.selected) ? p.accent : p.ink3,
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected)
-              ? atype(13, weight: 700, color: p.ink)
+              ? atype(13, weight: 700, color: p.accent)
               : atype(13, weight: 500, color: p.ink3),
         ),
       ),
@@ -273,7 +272,7 @@ class AlokasTheme {
         filled: false,
         hintStyle: atype(16, color: p.ink3),
         labelStyle: atype(16, color: p.ink2),
-        floatingLabelStyle: atype(14, weight: 600, color: p.ink),
+        floatingLabelStyle: atype(14, weight: 600, color: p.accent),
         helperStyle: atype(14, color: p.ink2),
         errorStyle: atype(14, weight: 600, color: p.flag),
         prefixIconColor: p.ink2,
@@ -284,16 +283,16 @@ class AlokasTheme {
         ),
         border: border(p.ruleStrong),
         enabledBorder: border(p.ruleStrong),
-        focusedBorder: border(p.pen, 2),
+        focusedBorder: border(p.accent, 2),
         errorBorder: border(p.flag),
         focusedErrorBorder: border(p.flag, 2),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          elevation: 0,
-          shadowColor: p.paper,
-          backgroundColor: p.ink,
-          foregroundColor: p.onInk,
+          elevation: 2,
+          shadowColor: p.shadow,
+          backgroundColor: p.accent,
+          foregroundColor: p.onAccent,
           disabledBackgroundColor: p.paper3,
           disabledForegroundColor: p.ink2,
           textStyle: atype(16, weight: 700),
@@ -304,9 +303,9 @@ class AlokasTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: p.ink,
+          foregroundColor: p.accent,
           disabledForegroundColor: p.ink3,
-          side: BorderSide(color: p.ruleStrong, width: 1.5),
+          side: BorderSide(color: p.accent, width: 1.5),
           textStyle: atype(16, weight: 600),
           minimumSize: const Size(minTarget, minTarget),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -330,31 +329,33 @@ class AlokasTheme {
         ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: p.paper,
-        surfaceTintColor: p.paper,
+        backgroundColor: p.paper2,
+        surfaceTintColor: p.paper2,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(radius),
+          borderRadius: BorderRadius.circular(cardRadius),
           side: BorderSide(color: p.ruleStrong),
         ),
         titleTextStyle: atype(20, weight: 800, color: p.ink),
         contentTextStyle: atype(16, color: p.ink, height: 1.35),
       ),
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: p.paper,
-        surfaceTintColor: p.paper,
+        backgroundColor: p.paper2,
+        surfaceTintColor: p.paper2,
         elevation: 0,
-        shape: Border(top: BorderSide(color: p.ink, width: 2)),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(cardRadius)),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: p.ink,
-        contentTextStyle: atype(16, color: p.onInk),
-        actionTextColor: p.onInk,
+        backgroundColor: p.elevated,
+        contentTextStyle: atype(16, color: p.ink),
+        actionTextColor: p.accent,
         elevation: 0,
         shape: shape,
         behavior: SnackBarBehavior.floating,
       ),
-      progressIndicatorTheme: ProgressIndicatorThemeData(color: p.ink),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: p.accent),
       dividerTheme: DividerThemeData(color: p.rule, thickness: 1, space: 1),
       dropdownMenuTheme: DropdownMenuThemeData(
         textStyle: atype(16, color: p.ink),
@@ -370,32 +371,45 @@ enum ChipTone { neutral, pen, flag, go, wait }
 class AlokasBadge extends StatelessWidget {
   final String text;
   final ChipTone tone;
+  final IconData? icon;
 
   const AlokasBadge({
     super.key,
     required this.text,
     this.tone = ChipTone.neutral,
+    this.icon,
   });
 
   @override
   Widget build(BuildContext context) {
     final p = context.pal;
     final (background, foreground) = switch (tone) {
-      ChipTone.neutral => (p.paper2, p.ink),
+      ChipTone.neutral => (p.accentWash, p.accent),
       ChipTone.pen => (p.penWash, p.pen),
       ChipTone.flag => (p.flagWash, p.flag),
       ChipTone.go => (p.goWash, p.go),
       ChipTone.wait => (p.waitWash, p.wait),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(AlokasTheme.radius),
+        borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(
-        text,
-        style: atype(14, weight: 600, color: foreground, height: 1.25),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 15, color: foreground),
+            const SizedBox(width: 5),
+          ],
+          Flexible(
+            child: Text(
+              text,
+              style: atype(14, weight: 600, color: foreground, height: 1.25),
+            ),
+          ),
+        ],
       ),
     );
   }

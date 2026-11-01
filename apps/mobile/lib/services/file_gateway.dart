@@ -8,10 +8,8 @@ import '../models/models.dart';
 typedef ReceiptPicker = Future<PickedReceipt?> Function();
 
 /// Returns whether the file was saved; false means the user cancelled.
-typedef CertificateSaver = Future<bool> Function(
-  String fileName,
-  Uint8List bytes,
-);
+typedef CertificateSaver =
+    Future<bool> Function(String fileName, Uint8List bytes);
 
 Future<PickedReceipt?> pickReceiptFile() async {
   final file = await FilePicker.pickFile(

@@ -1,46 +1,37 @@
-// Colour tokens of the Pairing Sheet design, generated from
-// docs/design/mockups/tools/tokens.mjs. Only lib/theme/ may hold raw colours.
+// Colour tokens: the Alokas green and gold brand, plus Sunlight for outdoors.
+// Only lib/theme/ may hold raw colours.
 import 'package:flutter/material.dart';
+
 class AlokasTokens {
   // Piece colours are physical: the same in every theme.
   static const pieceWhite = Color(0xFFFFFFFF);
   static const pieceBlack = Color(0xFF000000);
 
-  static const lightPaper = Color(0xFFF7F5EF);
-  static const lightPaper2 = Color(0xFFEEEBE2);
-  static const lightPaper3 = Color(0xFFE2DED2);
-  static const lightInk = Color(0xFF161513);
-  static const lightInk2 = Color(0xFF47443E);
-  static const lightInk3 = Color(0xFF68645C);
-  static const lightRule = Color(0xFFD3CEC1);
-  static const lightRuleStrong = Color(0xFF827D72);
-  static const lightPen = Color(0xFF1746B8);
-  static const lightPenWash = Color(0xFFE2E8F7);
-  static const lightFlag = Color(0xFFB3261E);
-  static const lightFlagWash = Color(0xFFFAE5E1);
-  static const lightGo = Color(0xFF17653A);
-  static const lightGoWash = Color(0xFFDEEFE3);
-  static const lightWait = Color(0xFF7D5200);
-  static const lightWaitWash = Color(0xFFF8EBCB);
-  static const lightOnInk = Color(0xFFF7F5EF);
-
-  static const darkPaper = Color(0xFF141412);
-  static const darkPaper2 = Color(0xFF1F1E1B);
-  static const darkPaper3 = Color(0xFF2B2A26);
-  static const darkInk = Color(0xFFEFEBE1);
-  static const darkInk2 = Color(0xFFC0BBAF);
-  static const darkInk3 = Color(0xFF9B978C);
-  static const darkRule = Color(0xFF393731);
-  static const darkRuleStrong = Color(0xFF7F7B71);
-  static const darkPen = Color(0xFF94B6FF);
-  static const darkPenWash = Color(0xFF1B2946);
-  static const darkFlag = Color(0xFFFF9583);
-  static const darkFlagWash = Color(0xFF3B1A15);
-  static const darkGo = Color(0xFF70D096);
-  static const darkGoWash = Color(0xFF14301F);
-  static const darkWait = Color(0xFFEABB50);
-  static const darkWaitWash = Color(0xFF32260B);
-  static const darkOnInk = Color(0xFF141412);
+  // Alokas brand: forest green surfaces, gold accent, cream text. The default
+  // look of the app. Every text pair is checked against WCAG AA in
+  // test/design_and_flows_test.dart.
+  static const forestPaper = Color(0xFF071F17);
+  static const forestPaper2 = Color(0xFF0C2B20);
+  static const forestPaper3 = Color(0xFF11382A);
+  static const forestElevated = Color(0xFF174936);
+  static const forestInk = Color(0xFFF5EFE6);
+  static const forestInk2 = Color(0xFFD3DCD5);
+  static const forestInk3 = Color(0xFFB4C4BB);
+  static const forestRule = Color(0xFF2B5A47);
+  static const forestRuleStrong = Color(0xFFB39E76);
+  static const forestAccent = Color(0xFFD4B98A);
+  static const forestAccentBright = Color(0xFFE6C994);
+  static const forestOnAccent = Color(0xFF071F17);
+  static const forestAccentWash = Color(0xFF3A4A2C);
+  static const forestPen = Color(0xFFE6C994);
+  static const forestPenWash = Color(0xFF3A4A2C);
+  static const forestFlag = Color(0xFFFFB4AB);
+  static const forestFlagWash = Color(0xFF4A1F1C);
+  static const forestGo = Color(0xFF6EE7B7);
+  static const forestGoWash = Color(0xFF123F2E);
+  static const forestWait = Color(0xFFFBCB5A);
+  static const forestWaitWash = Color(0xFF3A3010);
+  static const forestShadow = Color(0x66000000);
 
   static const sunPaper = Color(0xFFFFFFFF);
   static const sunPaper2 = Color(0xFFF2F2F2);
@@ -59,5 +50,5 @@ class AlokasTokens {
   static const sunWait = Color(0xFF5C3C00);
   static const sunWaitWash = Color(0xFFFFEDB8);
   static const sunOnInk = Color(0xFFFFFFFF);
-
+  static const sunShadow = Color(0x00000000);
 }

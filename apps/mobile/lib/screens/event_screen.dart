@@ -150,7 +150,7 @@ class _EventScreenState extends State<EventScreen> {
         children: [
           SizedBox(
             width: 88,
-            child: Text(label, style: atype(16, color: p.ink2)),
+            child: Text(label, style: atype(16, weight: 600, color: p.accent)),
           ),
           Expanded(
             child: Text(
@@ -167,7 +167,7 @@ class _EventScreenState extends State<EventScreen> {
       children: [
         Text(
           event.organizationName ?? 'Organizer not listed',
-          style: atype(16, weight: 600, color: p.ink),
+          style: atype(16, weight: 600, color: p.accent),
         ),
         const SizedBox(height: 8),
         Text(
@@ -175,7 +175,7 @@ class _EventScreenState extends State<EventScreen> {
           style: atype(32, weight: 800, width: 108, color: p.ink, height: 1.12),
         ),
         const SizedBox(height: 12),
-        Divider(color: p.ink, thickness: 2, height: 2),
+        Divider(color: p.accent, thickness: 1.5, height: 2),
         const SizedBox(height: 6),
         fact('When', formatDateForPeople(event.date) ?? 'Date not listed'),
         fact('Where', where),
@@ -185,7 +185,10 @@ class _EventScreenState extends State<EventScreen> {
           fact('Closes', event.registrationDeadlineLabel!),
         if (event.descriptionMd != null) ...[
           const SizedBox(height: 12),
-          Text(event.descriptionMd!, style: atype(16, color: p.ink, height: 1.4)),
+          Text(
+            event.descriptionMd!,
+            style: atype(16, color: p.ink, height: 1.4),
+          ),
         ],
         if (detail?.rulesMd != null) ...[
           const SizedBox(height: 12),
@@ -302,36 +305,45 @@ class PaymentBlock extends StatelessWidget {
     final p = context.pal;
     final instructions = detail.paymentInstructions;
     final qr = _qrImage(context, detail.paymentQrUrl);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Amount', style: atype(14, weight: 600, color: p.ink2)),
-        Text(
-          event.feeLabel(players: players),
-          key: const Key('payment-amount'),
-          style: atype(44, weight: 800, width: 112, color: p.ink, tabular: true),
-        ),
-        if (players > 1)
+    return BrandCard(
+      strong: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Amount', style: atype(14, weight: 600, color: p.accent)),
           Text(
-            'For $players players',
-            style: atype(14, weight: 600, color: p.ink2),
+            event.feeLabel(players: players),
+            key: const Key('payment-amount'),
+            style: atype(
+              44,
+              weight: 800,
+              width: 112,
+              color: p.accent,
+              tabular: true,
+            ),
           ),
-        const SizedBox(height: 8),
-        if (qr != null) ...[qr, const SizedBox(height: 8)],
-        if (instructions != null)
-          SelectableText(
-            instructions,
-            key: const Key('payment-instructions'),
-            style: atype(16, color: p.ink, height: 1.4),
-          ),
-        if (instructions == null && qr == null)
-          Text(
-            'The organizer has not published payment instructions. Please '
-            'contact the organizer before paying.',
-            key: const Key('payment-contact-organizer'),
-            style: atype(16, weight: 600, color: p.wait, height: 1.35),
-          ),
-      ],
+          if (players > 1)
+            Text(
+              'For $players players',
+              style: atype(14, weight: 600, color: p.ink2),
+            ),
+          const SizedBox(height: 8),
+          if (qr != null) ...[qr, const SizedBox(height: 8)],
+          if (instructions != null)
+            SelectableText(
+              instructions,
+              key: const Key('payment-instructions'),
+              style: atype(16, color: p.ink, height: 1.4),
+            ),
+          if (instructions == null && qr == null)
+            Text(
+              'The organizer has not published payment instructions. Please '
+              'contact the organizer before paying.',
+              key: const Key('payment-contact-organizer'),
+              style: atype(16, weight: 600, color: p.wait, height: 1.35),
+            ),
+        ],
+      ),
     );
   }
 

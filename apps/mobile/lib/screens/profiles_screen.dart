@@ -180,7 +180,9 @@ class ProfilesScreen extends StatelessWidget {
     try {
       picked = await receiptPicker();
     } on Object {
-      if (context.mounted) _say(context, 'The file picker could not be opened.');
+      if (context.mounted) {
+        _say(context, 'The file picker could not be opened.');
+      }
       return;
     }
     if (picked == null || !context.mounted) return;
@@ -227,7 +229,7 @@ class ProfilesScreen extends StatelessWidget {
           const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton(
+            child: ElevatedButton(
               key: const Key('open-add-profile-button'),
               onPressed: () => _openProfileDialog(context),
               child: const Text('Add a player'),
@@ -268,38 +270,41 @@ class ProfilesScreen extends StatelessWidget {
 
   Widget _buildAccount(BuildContext context) {
     final p = context.pal;
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AlokasBadge(
-                text: _signedIn ? 'Signed in' : 'Not signed in',
-                tone: _signedIn ? ChipTone.go : ChipTone.wait,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                signedInEmail ?? 'Browsing events only',
-                style: atype(16, weight: 700, color: p.ink, height: 1.25),
-              ),
-            ],
+    return BrandCard(
+      strong: true,
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AlokasBadge(
+                  text: _signedIn ? 'Signed in' : 'Not signed in',
+                  tone: _signedIn ? ChipTone.go : ChipTone.wait,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  signedInEmail ?? 'Browsing events only',
+                  style: atype(16, weight: 700, color: p.ink, height: 1.25),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
-        if (_signedIn)
-          OutlinedButton(
-            key: const Key('sign-out-button'),
-            onPressed: onSignOut,
-            child: const Text('Sign Out'),
-          )
-        else
-          OutlinedButton(
-            key: const Key('open-sign-in-button'),
-            onPressed: () => _openSignInSheet(context),
-            child: const Text('Sign In'),
-          ),
-      ],
+          const SizedBox(width: 8),
+          if (_signedIn)
+            OutlinedButton(
+              key: const Key('sign-out-button'),
+              onPressed: onSignOut,
+              child: const Text('Sign Out'),
+            )
+          else
+            ElevatedButton(
+              key: const Key('open-sign-in-button'),
+              onPressed: () => _openSignInSheet(context),
+              child: const Text('Sign In'),
+            ),
+        ],
+      ),
     );
   }
 
@@ -308,7 +313,7 @@ class ProfilesScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Display', style: atype(14, weight: 600, color: p.ink2)),
+        Text('Display', style: atype(14, weight: 600, color: p.accent)),
         const SizedBox(height: 4),
         Wrap(
           spacing: 8,
@@ -356,7 +361,7 @@ class ProfilesScreen extends StatelessWidget {
               ),
               if (record.needsReceipt && record.id != null) ...[
                 const SizedBox(height: 8),
-                OutlinedButton(
+                ElevatedButton(
                   key: Key('add-receipt-${record.id}'),
                   onPressed: () => _addLateReceipt(context, record),
                   child: const Text('Add receipt'),
@@ -384,55 +389,54 @@ class ProfilesScreen extends StatelessWidget {
       if (prof.fideStandard != null) 'FIDE Std ${prof.fideStandard}',
     ];
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: p.rule)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          PlayerName(
-            prof.fullName,
-            size: 18,
-            weight: 700,
-            color: p.ink,
-            detail: prof.relationshipLabel,
-          ),
-          if (prof.username != null)
-            Text('@${prof.username}', style: atype(14, color: p.ink2)),
-          const SizedBox(height: 4),
-          Text(details, style: atype(14, color: p.ink2, height: 1.3)),
-          if (affiliation != null)
-            Text(affiliation, style: atype(14, color: p.ink2, height: 1.3)),
-          if (ratings.isNotEmpty)
-            Text(
-              ratings.join(' · '),
-              style: atype(14, weight: 600, color: p.ink, tabular: true),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: BrandCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            PlayerName(
+              prof.fullName,
+              size: 18,
+              weight: 700,
+              color: p.ink,
+              detail: prof.relationshipLabel,
             ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              OutlinedButton(
-                key: Key('claim-${prof.id}'),
-                onPressed: () => _claim(context, prof),
-                child: const Text('Claim Past Tournaments'),
+            if (prof.username != null)
+              Text('@${prof.username}', style: atype(14, color: p.ink2)),
+            const SizedBox(height: 4),
+            Text(details, style: atype(14, color: p.ink2, height: 1.3)),
+            if (affiliation != null)
+              Text(affiliation, style: atype(14, color: p.ink2, height: 1.3)),
+            if (ratings.isNotEmpty)
+              Text(
+                ratings.join(' · '),
+                style: atype(14, weight: 600, color: p.ink, tabular: true),
               ),
-              TextButton(
-                key: Key('edit-${prof.id}'),
-                onPressed: () => _openProfileDialog(context, existing: prof),
-                child: const Text('Edit'),
-              ),
-              TextButton(
-                key: Key('delete-${prof.id}'),
-                onPressed: () => _confirmDelete(context, prof),
-                child: const Text('Delete'),
-              ),
-            ],
-          ),
-        ],
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                OutlinedButton(
+                  key: Key('claim-${prof.id}'),
+                  onPressed: () => _claim(context, prof),
+                  child: const Text('Claim Past Tournaments'),
+                ),
+                TextButton(
+                  key: Key('edit-${prof.id}'),
+                  onPressed: () => _openProfileDialog(context, existing: prof),
+                  child: const Text('Edit'),
+                ),
+                TextButton(
+                  key: Key('delete-${prof.id}'),
+                  onPressed: () => _confirmDelete(context, prof),
+                  child: const Text('Delete'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -605,9 +609,7 @@ class _AuthSheetState extends State<_AuthSheet> {
     key: const Key('sign-in-password'),
     controller: _password,
     obscureText: true,
-    autofillHints: [
-      isNew ? AutofillHints.newPassword : AutofillHints.password,
-    ],
+    autofillHints: [isNew ? AutofillHints.newPassword : AutofillHints.password],
     decoration: InputDecoration(
       labelText: 'Password',
       helperText: isNew ? 'At least $minPasswordLength characters' : null,
@@ -800,7 +802,7 @@ class _AuthSheetState extends State<_AuthSheet> {
           Text(
             widget.isAuthConfigured ? titles[_mode]! : 'Sign In',
             key: const Key('auth-title'),
-            style: atype(24, weight: 800, width: 108, color: p.ink),
+            style: atype(24, weight: 800, color: p.accent),
           ),
           const SizedBox(height: 12),
           if (!widget.isAuthConfigured)
@@ -1181,7 +1183,12 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
             Text(
               _error!,
               key: const Key('profile-form-error'),
-              style: atype(16, weight: 600, color: context.pal.flag, height: 1.3),
+              style: atype(
+                16,
+                weight: 600,
+                color: context.pal.flag,
+                height: 1.3,
+              ),
             ),
           ],
         ],
