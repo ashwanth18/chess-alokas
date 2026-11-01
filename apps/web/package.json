@@ -9,7 +9,8 @@
     "build:desktop": "cross-env VITE_DESKTOP=1 vite build --mode desktop",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@chess-alokas/certificates": "workspace:*",

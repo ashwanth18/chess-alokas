@@ -5407,8 +5407,8 @@ button.live-duel-side:not(:disabled):hover {
 /* The top bar never pushes the page sideways: it wraps. Sign out stays on screen at every width. */
 @media (max-width: 1500px) {
   /* One row on a 1366 laptop: Account is already in the nav. */
-  .brand-name { display: none; }
-  .user-chip { display: none; }
+  .topbar .brand-name { display: none; }
+  .topbar .user-chip { display: none; }
 }
 .topbar { height: auto; min-height: 60px; flex-wrap: wrap; row-gap: 0.25rem; }
 .topnav { min-width: 0; flex-wrap: wrap; }
