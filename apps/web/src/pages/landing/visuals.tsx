@@ -1,11 +1,12 @@
+import { Bishop, Crown, Knight, Pawn } from './pieces';
+
 /**
- * Product illustrations for the landing page, built in HTML and CSS so they stay sharp, small and
- * themeable. Every name and event here is invented: never use sample-registrations-*.csv or
+ * Product illustrations for the landing page, built in HTML and CSS so they stay sharp and small. Every name and event here is invented: never use sample-registrations-*.csv or
  * scripts/arcc-*.json.
  */
 
 function Piece({ side }: { side: 'w' | 'b' }) {
-  return <i className={`lp-sq lp-sq-${side}`} aria-hidden="true" />;
+  return <Pawn className="lp-pawn" side={side} />;
 }
 
 /** Given name in full weight, patronym quieter. Never truncated; long names wrap at the patronym. */
@@ -35,6 +36,10 @@ export function PairingSheet() {
   const open = SHEET.filter((b) => !b.res).length;
   return (
     <figure className="lp-sheet">
+      <div className="lp-shelf" aria-hidden="true">
+        <Knight className="lp-shelf-knight" />
+        <Bishop className="lp-shelf-bishop" />
+      </div>
       <div className="lp-sheet-head">
         <strong>Piala Zugzwang Rapid</strong>
         <span>Round 4, Under 18</span>
@@ -366,12 +371,6 @@ export function CertificateVisual() {
   );
 }
 
-/** The split-square mark from the design plan. */
 export function Mark() {
-  return (
-    <svg className="lp-mark-sq" viewBox="0 0 20 20" aria-hidden="true">
-      <rect x="1" y="1" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" />
-      <path d="M2 2h8v16H2z" fill="currentColor" />
-    </svg>
-  );
+  return <Crown className="lp-mark-sq" />;
 }

@@ -2,9 +2,11 @@ import { useEffect, type MouseEvent } from 'react';
 import { preload } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import archivoUrl from '../design/fonts/archivo-latin-wdth-normal.woff2?url';
+import frauncesUrl from '../design/fonts/fraunces-latin-opsz-normal.woff2?url';
+import sourceSansUrl from '../design/fonts/source-sans-3-latin-wght-normal.woff2?url';
 import { trackPageView } from '../lib/pageAnalytics';
 import Downloads from './landing/Downloads';
+import { BishopLine, KingLine, Knight, PawnLine } from './landing/pieces';
 import {
   CertificateVisual,
   FloorVisual,
@@ -48,16 +50,19 @@ const NAV = [
 
 const ROLES = [
   {
+    Icon: KingLine,
     who: 'Organizers and academies',
     body: 'Set up categories, take entries, pair rounds and finish with standings and certificates, from one desk. Your staff join your academy on their own accounts.',
     items: ['CSV and Excel import', 'Online registration', 'Roll call', 'Certificates'],
   },
   {
+    Icon: BishopLine,
     who: 'Arbiters',
     body: 'Scan the sticker on the table, enter the round PIN and score from your phone. Cover one board or a whole zone, and call the chief when something needs a decision.',
     items: ['No account needed', 'One PIN per round', 'Zone view', 'Keeps results if Wi-Fi drops'],
   },
   {
+    Icon: PawnLine,
     who: 'Parents and players',
     body: 'Open the link from the organizer and search for your child. Board, colour, opponent and standings are on the phone you already have.',
     items: ['No app to install', 'No account for the live page', 'Family profiles if you want them'],
@@ -202,7 +207,8 @@ function closeMenu(e: MouseEvent<HTMLElement>) {
 
 export default function LandingPage() {
   const auth = useAuth();
-  preload(archivoUrl, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
+  preload(frauncesUrl, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
+  preload(sourceSansUrl, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
 
   useEffect(() => {
     trackPageView({ routeKey: 'landing', path: '/' });
@@ -273,9 +279,11 @@ export default function LandingPage() {
       <main id="lp-main">
         <section className="lp-hero" aria-labelledby="lp-h1">
           <div className="lp-wrap">
-            <h1 id="lp-h1">Run the whole hall from a folding table.</h1>
             <div className="lp-hero-grid">
               <div className="lp-hero-copy">
+                <h1 id="lp-h1">
+                  Run the whole hall <span className="lp-gold">from a folding table.</span>
+                </h1>
                 <p className="lp-hero-sub">
                   Chess Alokas is tournament software for organizers, arbiters and parents. Pair
                   rounds, take results from the floor on phones, put the sheet on the venue TV, and
@@ -308,7 +316,10 @@ export default function LandingPage() {
             <div className="lp-roles">
               {ROLES.map((r) => (
                 <article key={r.who} className="lp-role">
-                  <h3>{r.who}</h3>
+                  <h3>
+                    <r.Icon className="lp-role-icon" />
+                    {r.who}
+                  </h3>
                   <p>{r.body}</p>
                   <ul>
                     {r.items.map((i) => (
@@ -623,6 +634,7 @@ export default function LandingPage() {
         </section>
 
         <section className="lp-band lp-invert lp-final" aria-labelledby="lp-h-final">
+          <Knight className="lp-final-knight" />
           <div className="lp-wrap">
             <h2 id="lp-h-final">Run your next event from the sheet, not a spreadsheet.</h2>
             <div className="lp-cta">

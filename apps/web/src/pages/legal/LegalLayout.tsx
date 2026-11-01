@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Surface } from '../../ui/Surface';
+import { Crown } from '../landing/pieces';
 import {
   LEGAL_BM_VERSION_URL,
   LEGAL_CONTACT_EMAIL,
@@ -107,10 +108,7 @@ export default function LegalLayout({
         <header className="lg-top">
           <div className="lg-wrap lg-top-in">
             <Link className="lg-mark" to="/">
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <rect x="1" y="1" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" />
-                <path d="M2 2h8v16H2z" fill="currentColor" />
-              </svg>
+              <Crown />
               Chess Alokas
             </Link>
             <nav aria-label="Legal pages">
