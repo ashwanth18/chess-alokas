@@ -852,6 +852,41 @@ void main() {
       expect(store.texts.keys.where((k) => k.startsWith('draft_')), isEmpty);
     });
 
+    testWidgets(
+      'a draft is discarded even if the event came back with a new id',
+      (tester) async {
+        final event = fakeEvent();
+        final store = InMemoryLocalStore();
+        await _pump(
+          tester,
+          backendFor(event),
+          storage: _signedIn(),
+          store: store,
+        );
+        await _startRegistering(tester);
+        expect(
+          store.texts.keys.where((k) => k.startsWith('draft_')),
+          hasLength(1),
+        );
+
+        // The next launch finds the same slug under a different id.
+        final moved = fakeEvent(
+          overrides: const {'id': '00000000-0000-4000-8000-00000000e999'},
+        );
+        await _pump(
+          tester,
+          backendFor(moved),
+          storage: _signedIn(),
+          store: store,
+        );
+        await _tapKey(tester, 'resume-draft');
+        await _tapKey(tester, 'discard-draft');
+
+        expect(store.texts.keys.where((k) => k.startsWith('draft_')), isEmpty);
+        expect(find.byKey(const Key('resume-draft')), findsNothing);
+      },
+    );
+
     testWidgets('a damaged draft is ignored', (tester) async {
       expect(RegistrationDraft.tryDecode('not json'), isNull);
       expect(RegistrationDraft.tryDecode('{"eventId": 3}'), isNull);

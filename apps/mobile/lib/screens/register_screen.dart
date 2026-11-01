@@ -90,6 +90,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   MobileEventItem get _event => _detail.event;
 
+  /// The draft stays filed under the id it started with, even if a reload of
+  /// the event returns a different one.
+  late final String _draftKey = widget.draft?.eventId ?? widget.detail.event.id;
+
+  /// Set once the draft is gone, so a late write can't bring it back.
+  bool _draftClosed = false;
+
   List<_Step> get _steps => [
     _Step.who,
     if (_detail.questions.isNotEmpty) _Step.questions,
@@ -166,11 +173,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _persist() async {
     final account = widget.accountKey;
-    if (account == null) return;
+    if (account == null || _draftClosed) return;
     await widget.draftStore.save(
       RegistrationDraft(
         accountKey: account,
-        eventId: _event.id,
+        eventId: _draftKey,
         slugOrId: _event.slugOrId,
         eventName: _event.displayName,
         step: _stepIndex,
@@ -187,9 +194,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _discard() async {
+    _draftClosed = true;
     final account = widget.accountKey;
     if (account != null) {
-      await widget.draftStore.delete(account, _event.id);
+      await widget.draftStore.delete(account, _draftKey);
       widget.onDraftsChanged();
     }
     if (mounted) Navigator.of(context).pop();
@@ -275,7 +283,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
     final account = widget.accountKey;
     if (receipt != null && account != null) {
-      await widget.draftStore.saveReceipt(account, _event.id, receipt.bytes);
+      await widget.draftStore.saveReceipt(account, _draftKey, receipt.bytes);
       _persist();
     }
   }
@@ -284,7 +292,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _receipt = null);
     final account = widget.accountKey;
     if (account != null) {
-      widget.draftStore.deleteReceipt(account, _event.id);
+      widget.draftStore.deleteReceipt(account, _draftKey);
     }
     _persist();
   }
@@ -328,9 +336,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               result.value.hasReceipt == false;
         });
     if (allAccepted && !missingReceipt) {
+      _draftClosed = true;
       final account = widget.accountKey;
       if (account != null) {
-        await widget.draftStore.delete(account, _event.id);
+        await widget.draftStore.delete(account, _draftKey);
         widget.onDraftsChanged();
       }
       if (!mounted) return;
