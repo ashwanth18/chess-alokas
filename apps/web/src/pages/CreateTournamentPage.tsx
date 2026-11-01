@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { STYLE_META } from '@chess-alokas/pairing-engine';
 import {
@@ -11,6 +11,13 @@ import {
 import type { FilterGroup, FilterOp, TournamentStyle } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
+import { apiListOrganizations, type UserOrganization } from '../api/client';
+import {
+  creatableOrganizations,
+  defaultTournamentOrganization,
+  organizationCreateBlock,
+  planLimitsSummary,
+} from '../lib/organizationPicker';
 import {
   DEFAULT_PRIZE_PLACES,
   MAX_PRIZE_PLACES,
@@ -86,6 +93,29 @@ export default function CreateTournamentPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [organizationsFailed, setOrganizationsFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiListOrganizations().then((res) => {
+      if (cancelled) return;
+      if (!res.ok) {
+        // The form still works offline. The server then picks the same default when this syncs.
+        setOrganizationsFailed(true);
+        return;
+      }
+      const usable = creatableOrganizations(res.data.organizations);
+      setOrganizations(usable);
+      setOrganizationId(defaultTournamentOrganization(usable)?.id ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const chosenOrganization = organizations.find((o) => o.id === organizationId) ?? null;
 
   function addCategory() {
     setCategories((cs) => [...cs, newCategory()]);
@@ -187,6 +217,12 @@ export default function CreateTournamentPage() {
       return;
     }
 
+    const blocked = chosenOrganization && organizationCreateBlock(chosenOrganization);
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
+
     submittingRef.current = true;
     setSaving(true);
     setError(null);
@@ -212,6 +248,7 @@ export default function CreateTournamentPage() {
         tiebreakOrder,
         sharedPlaces,
         ownerId: auth.user?.id ?? null,
+        organizationId,
         publicToken: null,
         publicEnabled: false,
         certEmailSubject: DEFAULT_CERT_EMAIL_SUBJECT,
@@ -258,6 +295,36 @@ export default function CreateTournamentPage() {
 
       <form className="form-card" onSubmit={handleSubmit}>
         {error && <div className="form-error">{error}</div>}
+
+        {organizations.length > 1 && (
+          <div className="form-group">
+            <label htmlFor="organization">Organization</label>
+            <select
+              id="organization"
+              className="input"
+              value={organizationId ?? ''}
+              onChange={(e) => setOrganizationId(e.target.value)}
+            >
+              {organizations.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {chosenOrganization && (
+          <p className="form-hint" data-testid="plan-limits">
+            {organizations.length === 1 ? `${chosenOrganization.name}: ` : ''}
+            {planLimitsSummary(chosenOrganization)}
+          </p>
+        )}
+        {organizationsFailed && (
+          <p className="form-hint" role="status">
+            Couldn't load your organizations. This tournament will go to your default organization
+            when it syncs.
+          </p>
+        )}
 
         <div className="form-group">
           <label htmlFor="name">Tournament Name</label>
