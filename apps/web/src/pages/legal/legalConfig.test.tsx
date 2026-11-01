@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
+import { GuardianConsentNotice, RosterConsentNotice } from '../../components/LegalLinks';
 import { LegalContact } from './LegalLayout';
 import { PRIVACY_NOTICE_VERSION } from '@chess-alokas/shared';
 import {
@@ -19,6 +20,18 @@ const render = (node: React.ReactNode) =>
   renderToStaticMarkup(<MemoryRouter>{node}</MemoryRouter>);
 
 const EMPTY_LOCATIONS = { supabase: '', hostinger: '', resend: '', sentry: '', github: '' };
+
+describe('consent notices', () => {
+  it('say what submitting means, and link to the policy', () => {
+    const notice = render(<GuardianConsentNotice />).replace(/\s+/g, ' ');
+    expect(notice).toContain('By submitting, you confirm you’re the parent or guardian, or have their permission, and agree to our');
+    expect(notice).toContain('href="/privacy"');
+    expect(notice).not.toContain('type="checkbox"');
+    const roster = render(<RosterConsentNotice />).replace(/\s+/g, ' ');
+    expect(roster).toContain('By importing, you confirm');
+    expect(roster).not.toContain('type="checkbox"');
+  });
+});
 
 describe('notice version', () => {
   it('stays equal to the date on the page, so a consent says which notice applied', () => {

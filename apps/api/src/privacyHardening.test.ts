@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 
 const NOW = new Date('2026-11-01T00:00:00Z');
 
-describe('who needs guardian consent', () => {
+describe('who would need guardian consent, kept for the stricter rules', () => {
   it('reads age from a date of birth exactly', () => {
     expect(isUnder18({ dateOfBirth: '2008-11-02' }, NOW)).toBe(true);
     expect(isUnder18({ dateOfBirth: '2008-11-01' }, NOW)).toBe(false);
@@ -178,21 +178,20 @@ describe('roster import', () => {
   }
   const mapping = JSON.stringify({ name: 'Name', age: 'Age' });
 
-  it('refuses without the organizer’s confirmation and imports nothing', async () => {
+  it('imports without the field and records nothing', async () => {
     const { app, id } = await build();
     const res = await app.inject({
       method: 'POST',
       url: `/tournaments/${id}/import`,
       ...form({ mapping }),
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().code).toBe('roster_consent_required');
-    expect(await store.listParticipants(id)).toEqual([]);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(await store.listParticipants(id)).toHaveLength(1);
     expect(await store.listRosterConsents(id)).toEqual([]);
     await app.close();
   });
 
-  it('imports with it, and records who confirmed, when and against which notice', async () => {
+  it('with the field, records who saw the notice, when and which version', async () => {
     const { app, id } = await build();
     const res = await app.inject({
       method: 'POST',

@@ -33,29 +33,21 @@ export function SignupAgreement() {
   );
 }
 
-/** The required tick for a player who is, or may be, under 18. The server enforces it too. */
-export function GuardianConsentField({
-  checked,
-  onChange,
-  ageKnown,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  /** False when no age was given, so the box applies only if the player is in fact under 18. */
-  ageKnown: boolean;
-}) {
+/** Shown by the submit button. Submitting is the acceptance, which the server records. */
+export function GuardianConsentNotice() {
   return (
-    <label className="late-confirm" data-testid="guardian-consent">
-      <input
-        type="checkbox"
-        required
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />{' '}
-      <span>
-        {ageKnown ? '' : 'If this player is under 18: '}I am the parent or guardian, or have their
-        permission, and consent to these details being used as described in the <PrivacyLink />.
-      </span>
-    </label>
+    <p className="form-hint" data-testid="guardian-consent-notice">
+      By submitting, you confirm you’re the parent or guardian, or have their permission, and agree to
+      our <PrivacyLink />.
+    </p>
+  );
+}
+
+export function RosterConsentNotice() {
+  return (
+    <p className="form-hint" data-testid="roster-consent-notice">
+      By importing, you confirm you have permission to upload these players’ details, including a
+      parent or guardian’s consent for anyone under 18, and agree to our <PrivacyLink />.
+    </p>
   );
 }

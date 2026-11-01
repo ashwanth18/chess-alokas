@@ -14,7 +14,7 @@ import {
   apiDownloadCertificatePdf,
 } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { GuardianConsentField } from '../components/LegalLinks';
+import { GuardianConsentNotice } from '../components/LegalLinks';
 import { guardianConsentRequired } from '@chess-alokas/shared';
 
 const RELATIONSHIP_LABELS: Record<PlayerRelationship, string> = {
@@ -40,7 +40,6 @@ export default function PlayerPortalPage() {
   const [username, setUsername] = useState('');
   const [relationship, setRelationship] = useState<PlayerRelationship>('self');
   const [yearOfBirth, setYearOfBirth] = useState('');
-  const [guardianConsent, setGuardianConsent] = useState(false);
   const [gender, setGender] = useState('');
   const [fideId, setFideId] = useState('');
   const [fideStandard, setFideStandard] = useState('');
@@ -78,8 +77,8 @@ export default function PlayerPortalPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Already recorded on this profile means it isn't asked again; the server decides the same way.
-  const needsGuardianConsent =
+  // An adult's own profile has no one to answer for, and one already accepted needn't repeat it.
+  const showsConsentNotice =
     !editingProfile?.guardianConsentAt &&
     guardianConsentRequired({
       relationship,
@@ -88,7 +87,6 @@ export default function PlayerPortalPage() {
     });
 
   function openCreateModal(defaultRel: PlayerRelationship = 'child') {
-    setGuardianConsent(false);
     setEditingProfile(null);
     const hasProfiles = (dashboard?.profiles.length ?? 0) > 0;
     const rel = hasProfiles ? defaultRel : 'self';
@@ -111,7 +109,6 @@ export default function PlayerPortalPage() {
   }
 
   function openEditModal(profile: PlayerProfile) {
-    setGuardianConsent(false);
     setEditingProfile(profile);
     setRelationship(profile.relationship);
     setFullName(profile.fullName);
@@ -141,7 +138,7 @@ export default function PlayerPortalPage() {
     setModalError(null);
 
     const payload = {
-      ...(needsGuardianConsent ? { guardianConsent } : {}),
+      ...(showsConsentNotice ? { guardianConsent: true } : {}),
       fullName: fullName.trim(),
       username: username.trim().replace(/^@/, '') || null,
       relationship,
@@ -821,15 +818,9 @@ export default function PlayerPortalPage() {
                 </label>
               </div>
 
-              {needsGuardianConsent && (
-                <GuardianConsentField
-                  checked={guardianConsent}
-                  onChange={setGuardianConsent}
-                  ageKnown={relationship === 'child' || Boolean(yearOfBirth.trim())}
-                />
-              )}
-
               {modalError && <div className="form-error">{modalError}</div>}
+
+              {showsConsentNotice && <GuardianConsentNotice />}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                 <button

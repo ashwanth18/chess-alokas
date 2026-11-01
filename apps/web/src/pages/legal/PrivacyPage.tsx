@@ -69,19 +69,20 @@ const SECTIONS: LegalSection[] = [
           the child&apos;s behalf.
         </p>
         <p>
-          <strong>What we record.</strong> A registration for someone under 18, or with no age given,
-          and a child&apos;s profile need a tick confirming you are the parent or guardian, or have
-          their permission. We record when that happened and which version of this page applied. An
-          organizer importing a roster must confirm they have permission, and we record who confirmed
-          and when.
+          <strong>What we record.</strong> The registration form and the form for a child&apos;s
+          profile say that by submitting, you confirm you are the parent or guardian, or have their
+          permission, and agree to this page. When you submit from our website, we record when that
+          happened and which version of this page applied. The roster import in the organizer desk has
+          a similar notice, and we record who imported and when, once it syncs.
         </p>
         <div className="lg-note">
           <p>
-            <strong>What this doesn&apos;t do.</strong> We don&apos;t check anyone&apos;s age or
-            identity, or that the person ticking really is a parent or guardian. Ages are what people
-            enter. On a roster import, the organizer confirms for the whole list, and no parent takes
-            part in Chess Alokas. A roster typed in by hand, or a registration approved by an organizer,
-            has no separate confirmation step.
+            <strong>What this doesn&apos;t do.</strong> This is a notice, not a separate consent
+            step: there is no box to tick, and we don&apos;t refuse a registration or profile over it.
+            We don&apos;t check anyone&apos;s age or identity, or that the person submitting really is
+            a parent or guardian. Ages are what people enter. The current mobile app doesn&apos;t show
+            this notice yet, so nothing is recorded for what it submits. On a roster import, no parent
+            takes part in Chess Alokas. A roster typed in by hand has no notice.
           </p>
         </div>
         <p>

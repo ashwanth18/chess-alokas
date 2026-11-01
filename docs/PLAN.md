@@ -172,6 +172,32 @@ Android in the Play Store is wanted but isn't a gate, because parents can use we
 - [ ] Windows signing certificate. Get quotes; I expect a few hundred US dollars a year (estimate)
 - [ ] Play Store account, US$25 one-time per a secondary source [4]. Choose organization (needs a registered entity, no tester rule) or personal (recruit 12 testers). Keep the upload key out of the repo
 
+## Later: stricter privacy
+
+A founder decision on 2026-11-01: keep the rules relaxed now, and keep anything users don't feel. These are switched on when a trigger below arrives, or sooner on the lawyer's advice. Some of this may turn out to be a legal duty rather than a choice, which is the first question for the lawyer.
+
+**Already on, and staying on:** account deletion and its 30-day purge, redaction in logs and error reports, private receipts, access checks, email confirmation. The notices record acceptance when a current client submits.
+
+| What to turn on | When | Starting point |
+|---|---|---|
+| Explicit parental consent: a required tick and server refusal | Lawyer's advice, or public launch at the latest. First school if the contract asks | `guardianConsentRequired`, the error codes and the consent columns are already in place. Mobile must send `guardianConsent` first, or older builds start failing |
+| Required import confirmation | First paying school, since a school roster is mostly minors | `POST /tournaments/:id/import` and the import page. Sync has no way to refuse a roster yet, so decide how far to enforce it |
+| Retention periods | Public launch, or a school asking how long data is kept | Only deleted accounts have a schedule today. `runPrivacyPurge` is the place to extend |
+| Data export tool | First access request we can't handle by hand, or public launch | Requests are handled by hand today |
+| Per-player opt-out from public pages | First parent asking, first paying school, or public launch | Names on live pages have no per-player setting |
+| Bahasa Malaysia notice | Lawyer's advice, or before marketing widely in Malaysia | `LEGAL_BM_VERSION_URL` in `legalConfig.ts` is ready for the link |
+| DPO appointment and registration questions | Lawyer's advice, ideally before the first paying school | Ask whether Chess Alokas must appoint a DPO or register, given children's data |
+| Breach runbook | Before the first paying school | None exists. Needs who decides, who is told and how fast |
+| NRIC and age proof retention | Before the form builder ships NRIC, and before anyone collects age proof | Decide how long each is kept and who can see it. `national_id` stays optional |
+
+**Triggers:**
+
+- **First paying school:** required import confirmation, breach runbook, and whatever its contract asks.
+- **Public launch:** explicit parental consent, retention periods, export, opt-out.
+- **Lawyer's advice:** overrides this table, in either direction.
+
+When a row turns on, update `PrivacyPage.tsx` in the same commit, and change `PRIVACY_NOTICE_VERSION` with the page's date.
+
 ## Sources
 
 Fees and legal points come from these pages on 2026-11-01. Legal items are secondary sources for the lawyer to confirm, not legal advice.

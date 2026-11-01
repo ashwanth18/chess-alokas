@@ -1,10 +1,5 @@
 import type { FastifyPluginAsync, FastifyPluginOptions } from 'fastify';
-import {
-  GUARDIAN_CONSENT_ERROR_CODE,
-  PRIVACY_NOTICE_VERSION,
-  guardianConsentRequired,
-  type PlayerProfile,
-} from '@chess-alokas/shared';
+import { PRIVACY_NOTICE_VERSION } from '@chess-alokas/shared';
 import { z } from 'zod';
 import {
   DEFAULT_REGISTRATION_FORM_CONFIG,
@@ -320,7 +315,6 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       }
       const userId = request.userId ?? null;
       let linkedProfileId: string | null = null;
-      let linkedProfile: PlayerProfile | null = null;
 
       let snapshot: Partial<RegistrationPlayerSnapshot> = {
         name: input.name?.trim() || '',
@@ -352,7 +346,6 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
           });
         }
         linkedProfileId = profile.id;
-        linkedProfile = profile;
         const bestRating =
           input.rating ??
           profile.fideStandard ??
@@ -391,19 +384,9 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         return reply.code(400).send({ error: 'Player full name is required.' });
       }
 
-      // Asked at every registration, even with a saved profile: this entry goes to a new organizer.
-      const needsGuardianConsent = guardianConsentRequired({
-        relationship: linkedProfile?.relationship ?? null,
-        age: snapshot.age ?? null,
-        yearOfBirth: snapshot.yearOfBirth ?? null,
-        dateOfBirth: linkedProfile?.dateOfBirth ?? null,
-      });
-      if (needsGuardianConsent && input.guardianConsent !== true) {
-        return reply.code(400).send({
-          error: 'A parent or guardian must confirm their consent for a player under 18.',
-          code: GUARDIAN_CONSENT_ERROR_CODE,
-        });
-      }
+      // A current client sends this because its form shows the notice. An older one doesn't, and
+      // is still welcome: it just leaves no record of acceptance.
+      const acceptedNotice = input.guardianConsent === true;
 
       const feeCents = tournament.entryFeeCents ?? 0;
       const receiptInput = input.receiptDataUrl?.trim() || null;
@@ -459,9 +442,9 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         reviewerNote: null,
         reviewedAt: null,
         participantId: null,
-        guardianConsentAt: needsGuardianConsent ? nowIso : null,
-        guardianConsentNoticeVersion: needsGuardianConsent ? PRIVACY_NOTICE_VERSION : null,
-        guardianConsentByUserId: needsGuardianConsent ? userId : null,
+        guardianConsentAt: acceptedNotice ? nowIso : null,
+        guardianConsentNoticeVersion: acceptedNotice ? PRIVACY_NOTICE_VERSION : null,
+        guardianConsentByUserId: acceptedNotice ? userId : null,
         createdAt: nowIso,
         updatedAt: nowIso,
       };

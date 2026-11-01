@@ -389,7 +389,7 @@ describe.each([
     return updated!;
   }
 
-  describe('guardian consent', () => {
+  describe('consent notice acceptance', () => {
     async function openEvent() {
       const owner = await newUser();
       const t = await seedTournament(owner, { registrationOpen: true });
@@ -399,31 +399,23 @@ describe.each([
     const registerUrl = (id: string) => `/public/events/${id}/register`;
     const THIS_YEAR = new Date().getFullYear();
 
-    it('refuses a registration under 18, or with no age, without consent', async () => {
+    it('takes a registration from an older client, under 18 or not, and records no acceptance', async () => {
       const t = await openEvent();
       for (const body of [
         { name: 'Young', yearOfBirth: THIS_YEAR - 10 },
         { name: 'Young', age: 12 },
         { name: 'No age given' },
-        { name: 'Young', age: 12, guardianConsent: false },
+        { name: 'Sent false', age: 12, guardianConsent: false },
       ]) {
         const res = await call(null, 'POST', registerUrl(t.id), body);
-        expect(res.status, JSON.stringify(body)).toBe(400);
-        expect(res.body.code).toBe('guardian_consent_required');
+        expect(res.status, JSON.stringify(body)).toBe(201);
       }
-      expect(await store.listTournamentRegistrations(t.id)).toEqual([]);
-    });
-
-    it('takes an adult with no consent and records none', async () => {
-      const t = await openEvent();
-      const res = await call(null, 'POST', registerUrl(t.id), {
-        name: 'Adult',
-        yearOfBirth: THIS_YEAR - 40,
-      });
-      expect(res.status).toBe(201);
-      const [saved] = await store.listTournamentRegistrations(t.id);
-      expect(saved?.guardianConsentAt).toBeNull();
-      expect(saved?.guardianConsentNoticeVersion).toBeNull();
+      const rows = await store.listTournamentRegistrations(t.id);
+      expect(rows).toHaveLength(4);
+      for (const row of rows) {
+        expect(row.guardianConsentAt).toBeNull();
+        expect(row.guardianConsentNoticeVersion).toBeNull();
+      }
     });
 
     it('records the time and notice version itself, ignoring what a client claims', async () => {
@@ -444,35 +436,18 @@ describe.each([
       expect(saved?.guardianConsentByUserId).toBe(user);
     });
 
-    it('asks again when registering a saved child profile', async () => {
-      const t = await openEvent();
+    it('takes a child profile from an older client and records no acceptance', async () => {
       const parent = await newUser();
-      const child = await call(parent, 'POST', '/player/profiles', {
-        guardianConsent: true,
+      const res = await call(parent, 'POST', '/player/profiles', {
         fullName: 'Kid',
         relationship: 'child',
       });
-      const id = child.body.profile.id;
-      const refused = await call(parent, 'POST', registerUrl(t.id), { playerProfileId: id });
-      expect(refused.status).toBe(400);
-      const ok = await call(parent, 'POST', registerUrl(t.id), {
-        playerProfileId: id,
-        guardianConsent: true,
-      });
-      expect(ok.status).toBe(201);
+      expect(res.status).toBe(201);
+      expect(res.body.profile.guardianConsentAt).toBeNull();
     });
 
-    it('requires it for a child profile, whatever the age says', async () => {
+    it('records acceptance on a child profile from a current client', async () => {
       const parent = await newUser();
-      const refused = await call(parent, 'POST', '/player/profiles', {
-        fullName: 'Kid',
-        relationship: 'child',
-        yearOfBirth: THIS_YEAR - 40,
-      });
-      expect(refused.status).toBe(400);
-      expect(refused.body.code).toBe('guardian_consent_required');
-      expect(await store.listPlayerProfiles(parent)).toEqual([]);
-
       const ok = await call(parent, 'POST', '/player/profiles', {
         fullName: 'Kid',
         relationship: 'child',
@@ -485,45 +460,31 @@ describe.each([
       expect(stored?.guardianConsentAt).toBeTruthy();
     });
 
-    it('lets sign-up make a name-only profile of your own, but not one saying you are under 18', async () => {
-      const adult = await newUser();
-      expect(
-        (await call(adult, 'POST', '/player/profiles', { fullName: 'Me', relationship: 'self' })).status,
-      ).toBe(201);
-      const teen = await newUser();
-      const res = await call(teen, 'POST', '/player/profiles', {
-        fullName: 'Teen',
-        relationship: 'self',
-        yearOfBirth: THIS_YEAR - 14,
-      });
-      expect(res.status).toBe(400);
-    });
-
-    it('asks when an edit makes a profile need it, and only then', async () => {
+    it('an edit never refuses, records acceptance once, and keeps the first record', async () => {
       const user = await newUser();
       const created = await call(user, 'POST', '/player/profiles', {
         fullName: 'Me',
         relationship: 'self',
       });
       const url = `/player/profiles/${created.body.profile.id}`;
-      expect((await call(user, 'PATCH', url, { school: 'A' })).status).toBe(200);
-      const refused = await call(user, 'PATCH', url, { yearOfBirth: THIS_YEAR - 10 });
-      expect(refused.status).toBe(400);
-      const ok = await call(user, 'PATCH', url, { yearOfBirth: THIS_YEAR - 10, guardianConsent: true });
-      expect(ok.status).toBe(200);
-      const at = ok.body.profile.guardianConsentAt;
+      const plain = await call(user, 'PATCH', url, { yearOfBirth: THIS_YEAR - 10 });
+      expect(plain.status).toBe(200);
+      expect(plain.body.profile.guardianConsentAt).toBeNull();
+      const accepted = await call(user, 'PATCH', url, { guardianConsent: true });
+      const at = accepted.body.profile.guardianConsentAt;
       expect(at).toBeTruthy();
-      const later = await call(user, 'PATCH', url, { school: 'B' });
-      expect(later.status).toBe(200);
+      await tick();
+      const again = await call(user, 'PATCH', url, { guardianConsent: true, school: 'B' });
+      expect(again.body.profile.guardianConsentAt).toBe(at);
+      const later = await call(user, 'PATCH', url, { school: 'C' });
       expect(later.body.profile.guardianConsentAt).toBe(at);
     });
 
-    it('does not let a stranger probe or edit a profile', async () => {
+    it('does not let a stranger edit a profile', async () => {
       const owner = await newUser();
       const created = await call(owner, 'POST', '/player/profiles', {
         fullName: 'Kid',
         relationship: 'child',
-        guardianConsent: true,
       });
       const res = await call(await newUser(), 'PATCH', `/player/profiles/${created.body.profile.id}`, {
         school: 'X',
@@ -531,7 +492,7 @@ describe.each([
       expect(res.status).toBe(404);
     });
 
-    it('records an offline roster confirmation from sync, once', async () => {
+    it('records an offline roster notice from sync, once', async () => {
       const owner = await newUser();
       const org = await verifiedOrg(owner);
       const id = crypto.randomUUID();

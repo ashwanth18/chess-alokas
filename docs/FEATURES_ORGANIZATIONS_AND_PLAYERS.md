@@ -140,19 +140,17 @@ Pending changes to a removed tournament are dropped and counted in the notice, w
 
 This limits what the app keeps. It does not guarantee erasure.
 
-### Guardian consent (`032`)
+### Consent notices (`032`)
 
-`POST /public/events/:slugOrId/register`, `POST /player/profiles` and `PATCH /player/profiles/:id` take `guardianConsent: true`. Without it, where it is needed, they answer 400 with `code: "guardian_consent_required"`. The rule is `guardianConsentRequired` in `packages/shared/src/guardianConsent.ts`:
+A founder decision: relaxed now, stricter later. See "Later: stricter privacy" in `docs/PLAN.md`.
 
-- A child profile always needs it.
-- A profile of your own needs it only if it says you are under 18. Sign-up creates one with only a name.
-- Anything else needs it unless the age shows an adult, so leaving the age out doesn't avoid it. A birth year alone counts someone turning 18 this year as under 18.
+The registration form and child-profile form show one line by the submit button, and submitting is the acceptance. Nothing is ticked and the API refuses nothing.
 
-The server stamps `guardian_consent_at`, `guardian_consent_notice_version` (`PRIVACY_NOTICE_VERSION`) and `guardian_consent_by_user_id`, and ignores anything a client sends for them. A registration asks every time, even with a saved profile, because it goes to a new organizer.
+`POST /public/events/:slugOrId/register`, `POST /player/profiles` and `PATCH /player/profiles/:id` take an optional `guardianConsent: true`. When it arrives, the server stamps `guardian_consent_at`, `guardian_consent_notice_version` (`PRIVACY_NOTICE_VERSION`) and `guardian_consent_by_user_id`, and ignores anything a client sends for them. Without it the request works as usual and no acceptance is recorded, which is how older mobile builds behave. On a profile, the first acceptance stands.
 
-**Roster import:** `POST /tournaments/:id/import` needs a `consentConfirmed=true` field, or answers 400 with `code: "roster_consent_required"`. The web app imports on the device, so it has its own required tick, and sends `rosterConsentConfirmedAt` with the tournament at the next sync. Both end up in `roster_consent_confirmations`, once per confirmation. Sync can't refuse a roster for lacking one, because hand-typed players and older clients arrive the same way, so this records a confirmation rather than enforcing one on every path.
+Web shows the profile notice where `guardianConsentRequired` says so: a child, or anyone not shown to be an adult, but not an adult's or name-only profile of their own. The helper and the error codes stay in `packages/shared/src/guardianConsent.ts` for later. No route refuses on them.
 
-Ages are self-reported and nobody's identity is checked.
+**Roster import:** the web app shows a similar line and sends `rosterConsentConfirmedAt` with the tournament at the next sync. `POST /tournaments/:id/import` takes an optional `consentConfirmed=true` and imports either way. A confirmation lands in `roster_consent_confirmations`, once each.
 
 ### Account deletion (`DELETE /me`)
 

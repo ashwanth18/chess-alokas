@@ -6,7 +6,10 @@ import type { PlayerRelationship } from './types.js';
  */
 export const PRIVACY_NOTICE_VERSION = '2026-11-01';
 
-/** Sent back with a 400 so a client can show the checkbox instead of a generic error. */
+/**
+ * Not enforced today: the forms show a notice and the API takes every request. These and
+ * guardianConsentRequired stay for the stricter rules in docs/PLAN.md, "Later: stricter privacy".
+ */
 export const GUARDIAN_CONSENT_ERROR_CODE = 'guardian_consent_required';
 export const ROSTER_CONSENT_ERROR_CODE = 'roster_consent_required';
 
@@ -36,7 +39,8 @@ export function isUnder18(facts: PlayerAgeFacts, now: Date = new Date()): boolea
 }
 
 /**
- * Whether a parent or guardian's consent is needed before saving this player.
+ * Whether a parent or guardian's consent would be needed before saving this player. Web uses it
+ * to decide which profiles show the notice. The API does not refuse on it.
  * - A child profile always needs it.
  * - A person's own profile needs it only if it says they are under 18: sign-up creates one with
  *   only a name, and asking every adult would make the question meaningless.
