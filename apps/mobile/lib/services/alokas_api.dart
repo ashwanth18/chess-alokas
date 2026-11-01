@@ -382,9 +382,9 @@ class AlokasApiClient {
     });
   }
 
-  /// Adds a receipt to a registration that has none. The API does not have
-  /// this route yet: see apps/mobile/README.md. Until it does, a 404 here is
-  /// reported plainly and the registration is left as it was.
+  /// Adds a receipt to a registration after sending it. The server's own wording
+  /// is shown for a bad file (400), a registration that can't take one now (409)
+  /// and too many tries (429).
   Future<ApiResult<RegistrationRecord>> uploadReceipt({
     required String registrationId,
     required ReceiptFile receipt,
@@ -406,8 +406,7 @@ class AlokasApiClient {
     );
     if (result case ApiFailure(statusCode: 404)) {
       return const ApiFailure(
-        'This server cannot take a receipt after registering yet. Nothing was '
-        'sent. Please give the receipt to the organizer.',
+        'That registration was not found on this account. Nothing was sent.',
         statusCode: 404,
       );
     }

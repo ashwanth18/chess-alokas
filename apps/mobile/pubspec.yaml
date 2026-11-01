@@ -1,5 +1,5 @@
 name: chess_alokas_mobile
-description: "Chess Alokas participant and family app: browse events, register players, follow matches and download certificates."
+description: "Chess Alokas, a player's home for chess: find events, register, follow your matches and keep your certificates."
 publish_to: 'none'
 version: 1.0.0+1
 

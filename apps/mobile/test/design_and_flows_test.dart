@@ -967,25 +967,40 @@ void main() {
       expect(body['receiptDataUrl'], startsWith('data:image/png;base64,'));
     });
 
-    testWidgets('a server without the route says nothing was sent', (
-      tester,
-    ) async {
-      final backend = FakeBackend(
-        routes((_) => jsonResponse({'error': 'Not Found'}, 404)),
-      );
+    Future<void> tryUpload(WidgetTester tester, FakeHandler upload) async {
       await _pump(
         tester,
-        backend,
+        FakeBackend(routes(upload)),
         storage: _signedIn(),
         picker: () async => PickedReceipt(name: 'fake.png', bytes: png),
       );
       await tester.tap(find.text('Account'));
       await tester.pumpAndSettle();
       await _tapKey(tester, 'add-receipt-$registrationId');
+    }
 
+    testWidgets('a registration not on this account says nothing was sent', (
+      tester,
+    ) async {
+      await tryUpload(
+        tester,
+        (_) => jsonResponse({'error': 'Registration not found'}, 404),
+      );
       expect(find.textContaining('Nothing was sent'), findsOneWidget);
       expect(find.textContaining('Receipt sent'), findsNothing);
     });
+
+    for (final (status, text) in const [
+      (400, 'Receipt must be a PNG, JPEG, WebP or PDF file.'),
+      (409, 'This registration was cancelled, so it cannot take a receipt.'),
+      (429, 'Too many tries. Try again later.'),
+    ]) {
+      testWidgets('a $status shows the server\'s own words', (tester) async {
+        await tryUpload(tester, (_) => jsonResponse({'error': text}, status));
+        expect(find.text(text), findsOneWidget);
+        expect(find.textContaining('Receipt sent'), findsNothing);
+      });
+    }
   });
 
   group('Offline', () {
@@ -1403,6 +1418,46 @@ void main() {
 
       expect(find.byKey(const Key('delete-account-error')), findsOneWidget);
       expect(storage.value, isNotNull);
+    });
+  });
+
+  group('Player-first wording', () {
+    testWidgets('the Alokas rating is not shown; real ratings are', (
+      tester,
+    ) async {
+      final profile = {
+        ...fakeProfile(),
+        'alokasRating': 1000,
+        'fideRapid': 1500,
+      };
+      final backend = FakeBackend({
+        'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
+        ..._account(),
+        'GET /api/player/profiles': (_) => jsonResponse({
+          'profiles': [profile],
+        }),
+      });
+      await _pump(tester, backend, storage: _signedIn());
+      await tester.tap(find.text('Career'));
+      await tester.pumpAndSettle();
+      expect(find.text('1000'), findsNothing);
+      expect(find.text('1500'), findsOneWidget);
+      await tester.tap(find.text('Account'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Alokas 1000'), findsNothing);
+      expect(find.textContaining('FIDE Rapid 1500'), findsOneWidget);
+    });
+
+    test('family is not a label in headings or navigation', () {
+      final text = Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))
+          .map((f) => f.readAsStringSync())
+          .join();
+      expect(text, isNot(contains('family member')));
+      expect(text, isNot(contains('& Family')));
+      expect(text, isNot(contains('Family &')));
     });
   });
 

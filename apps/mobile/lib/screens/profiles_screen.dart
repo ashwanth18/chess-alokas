@@ -264,7 +264,7 @@ class ProfilesScreen extends StatelessWidget {
             const MessageCard(
               title: 'No player profiles yet',
               message:
-                  'Add yourself or a family member to register for events.',
+                  'Add yourself, or a child you look after, to register for events.',
             )
           else ...[
             if (profilesError != null)
@@ -413,7 +413,6 @@ class ProfilesScreen extends StatelessWidget {
     ].join(' · ');
     final affiliation = prof.affiliationLabel;
     final ratings = [
-      if (prof.alokasRating != null) 'Alokas ${prof.alokasRating}',
       if (prof.fideRapid != null) 'FIDE Rapid ${prof.fideRapid}',
       if (prof.fideStandard != null) 'FIDE Std ${prof.fideStandard}',
     ];

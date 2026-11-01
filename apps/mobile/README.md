@@ -1,6 +1,6 @@
 # Chess Alokas Mobile (`apps/mobile`)
 
-Flutter app for players and parents (`chess_alokas_mobile`, package `com.chessalokas.chess_alokas_mobile`).
+A player's home for chess, for players and those who look after young players (`chess_alokas_mobile`, package `com.chessalokas.chess_alokas_mobile`).
 
 **Status: in development, not production-ready.** The app shows only what the API returns. It has no demo data: when something is unknown, missing or failed, it says so. See the tables below for what works and what does not exist yet.
 
@@ -42,17 +42,19 @@ Tested with mocked HTTP and on an Android 16 emulator against a local in-memory 
 | Sign-in | Email and password, behind one class (`lib/services/auth_service.dart`). Token refresh; session in secure storage. The app works signed out for browsing. | Supabase `/auth/v1/token` |
 | Sign-up | Email and password. With confirmation on, it asks the user to follow the emailed link and can resend it. Worded so it doesn't reveal whether an email already has an account. Links open in the browser; the app has no deep link. | `/auth/v1/signup`, `/auth/v1/resend` |
 | Password reset | Requests the email; the new password is chosen from the link. Worded the same whether or not the account exists. | `/auth/v1/recover` |
+| Late receipt | A registration still waiting on a receipt has Add receipt under Account. Shows the server's own message for a bad file, a registration that can't take one now, or too many tries. | `POST /player/registrations/:id/receipt` |
+| Consent line | Registration, for a child or anyone under 18 or of unknown age, and child profiles show one line by the submit button with a link to the Privacy Policy, and send `guardianConsent: true` on submit. An adult registering themselves sees no line and sends nothing. | `guardianConsent` |
+| Account deletion | Account has Delete my account: explains what stays, links to the retention policy, asks for the email typed out. This phone's copy goes only once the server confirms. Terms and Privacy are linked from sign-up and Account. | `DELETE /me` |
 | Profiles | List, add, edit and delete. Validation errors, including the API's `details`, appear on the field and take focus. Deleting warns about active registrations. Claim shows the server's `claimedCount`. | `GET/POST/PATCH/DELETE /player/profiles`, `POST /player/profiles/:id/claim` |
 | Matchday | One hero card: round, score, full name with `#no · section`, a true white or black block with the very large board number, then opponent. Separate states for no pairing yet, bye and finished game. Then rank, nearby ladder and earlier rounds. Polls every 30 seconds while open in the foreground, and says when it last updated. | `GET /player/dashboard`, `GET /public/live/:token` |
 | Standings and pairings | Full lists by section and round, with an as-of time, polling while open. **Ordered by points only; tied players share a rank (`4=`)**, because tie-breaks are not worked out on the phone. The screen says so. Available only if the organizer turned on the live page; otherwise the app says so. | `GET /public/live/:token` |
 | Offline | The last events, profiles, dashboard and standings are kept on the phone and shown on a cold start, always with their "as of" time and a Retry. Refreshing and pull to refresh keep what's on screen if a reload fails. The account's copy is deleted on sign-out. Backups are off (`allowBackup=false`). | |
 | Check-in pass | A screen to show at the desk: full name, number, section and a QR of the tournament and entry ids. **It does not check anyone in**, and says so: see below. | |
-| Career | Ratings on the profile, win/draw/loss totals, tournament history, certificates. | `GET /player/dashboard` |
+| Career | FIDE ratings on the profile (the Alokas rating is hidden, since it is 1000 for everyone today), win/draw/loss totals, tournament history, certificates. | `GET /player/dashboard` |
 | Certificates | PDF download with a system save dialog. | `GET /certificates/:issueId/download` |
 
-## Built but waiting on the API
+## Waiting on the API
 
-- **Adding a receipt after registering.** The app calls `POST /player/registrations/:id/receipt` with `{receiptDataUrl}` and expects `{registration}`. That route does not exist yet, so a real server answers 404 and the app says nothing was sent and to give the receipt to the organizer. The success path has only been run against a stub.
 - **QR check-in.** The desk's Roll Call cannot scan the code, and the dashboard does not say whether a player was marked present. Until both exist, the code does nothing and the pass is only a way to show the name and number.
 
 ## What does not exist yet
@@ -65,7 +67,7 @@ Tested with mocked HTTP and on an Android 16 emulator against a local in-memory 
 
 ## Known limits
 
-- Never run against real Supabase or a deployed API. Sign-up, confirmation, reset and refresh have only met a local stub that mimics Supabase's responses.
+- Never run against real Supabase or a deployed API. Sign-up, confirmation, reset and refresh have only met a local stub that mimics Supabase's responses. Account deletion's success path has only met a stub, because the local API has no Supabase admin and answers 503.
 - The opponent's `#no · section` comes from the live page, so it is missing when the organizer keeps that page off.
 - `GET /player/registrations` holds no event names, so the app looks them up one by one.
 - Android caches coarse locations for about 10 minutes, so a big move may take that long to show.

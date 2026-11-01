@@ -180,7 +180,6 @@ class CareerScreen extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SheetHeading('Ratings'),
-        line('Alokas', _rating(profile.alokasRating), 'On this profile'),
         line(
           'FIDE Rapid',
           _rating(profile.fideRapid),
