@@ -1,6 +1,6 @@
 /**
  * Icons copied from Lucide 0.460 (ISC License, Copyright (c) Lucide Contributors, https://lucide.dev)
- * so there is no runtime dependency. The mark and the two status squares are our own.
+ * so there is no runtime dependency. The mark is our own.
  * Decorative by default: put the meaning in text next to the icon, or pass `title`.
  */
 import type { ReactNode, SVGProps } from 'react';

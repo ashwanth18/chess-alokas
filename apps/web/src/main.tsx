@@ -15,7 +15,7 @@ import RouteTitle from './components/RouteTitle';
 import ParticipantShell from './shells/ParticipantShell';
 import FloorSurface from './shells/FloorSurface';
 import HallSurface from './shells/HallSurface';
-import { RequireAuth, SessionLoading, isDesktop } from './shells/gates';
+import { BootSplash, RequireAuth, isDesktop } from './shells/gates';
 
 // Dexie, sync and the desktop backup agent live behind this one lazy import. See src/shells.
 const OrganizerShell = lazy(() => import('./shells/OrganizerShell'));
@@ -79,7 +79,7 @@ function RootEntry() {
   if (isDesktop) return <Navigate to="/app" replace />;
   if (!auth.configured) return <Navigate to="/app" replace />;
   if (auth.loading) {
-    return <SessionLoading title="Loading" />;
+    return <BootSplash />;
   }
   if (auth.user) return <Navigate to="/app" replace />;
   return <LandingPage />;
@@ -93,7 +93,7 @@ function AppRoot() {
           <DesktopUpdateBanner />
           <ProductTelemetry />
           <RouteTitle />
-          <Suspense fallback={<SessionLoading title="Loading" />}>
+          <Suspense fallback={<BootSplash />}>
           <Routes>
           {/* Family: no Dexie, no sync. e2e/shells.spec.ts enforces this. */}
           <Route element={<ParticipantShell />}>

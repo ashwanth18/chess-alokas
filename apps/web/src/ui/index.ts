@@ -1,4 +1,4 @@
-/** The Pairing Sheet component set. Guide: docs/design/COMPONENTS.md. Must never import Dexie. */
+/** The Chess Alokas component set. Guide: docs/design/COMPONENTS.md. Must never import Dexie. */
 export { PlayerName, type PlayerNameProps } from './PlayerName';
 export { displayName, findLookalikes, formatDisambiguator, nameParts } from './names';
 export { formatPoints, resultSpoken, resultText, type ResultCode } from './results';

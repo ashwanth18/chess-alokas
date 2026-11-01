@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { loginPathFor } from '../auth/returnTo';
 import BootIssueCard from '../components/BootIssueCard';
+import { Mark } from '../ui/icons';
 
 export const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) || import.meta.env.VITE_DESKTOP === '1';
@@ -21,6 +22,28 @@ export function SessionLoading({ title }: { title: string }) {
           {slow ? 'This is taking longer than usual. If it stays here, copy the error below.' : 'Please wait…'}
         </p>
         <BootIssueCard />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * While a route's code loads: the same paper screen as the boot splash in index.html, whose styles
+ * stay in the head. So a parent never sees a flash of legacy green between splash and page.
+ */
+export function BootSplash() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setSlow(true), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
+  return (
+    <div id="boot-splash" role="status">
+      <div>
+        <Mark />
+        Chess Alokas
+        <p>{slow ? 'This is taking longer than usual.' : 'Loading…'}</p>
+        {slow && <BootIssueCard />}
       </div>
     </div>
   );

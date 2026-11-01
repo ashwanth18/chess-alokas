@@ -1,15 +1,16 @@
 /*
  * Page frames for new surfaces. Imported into `@layer shell`, the top layer, by app.css.
- * Nothing here applies until a page sets `html[data-surface]` through `useSurface`, so legacy
- * pages are untouched.
+ * Nothing here applies until a page sets `html[data-surface]` through `Surface`, so legacy pages are
+ * untouched.
  */
 
-/* Repaint behind a new page: index.css gives body a green gradient and its own type. */
+/* Paint the theme behind a new page, in place of the legacy body. */
 html[data-surface] { background: var(--paper); }
 html[data-surface] body {
-  background: var(--paper);
+  background-color: var(--paper);
+  background-image: var(--page-gradient);
   color: var(--ink);
-  font: 400 var(--t-body)/1.4 var(--font);
+  font: 400 var(--t-body)/1.5 var(--font-text);
   letter-spacing: 0;
 }
 
@@ -22,8 +23,8 @@ html[data-surface="hall"] { --u: calc(100vw / 100); overflow: hidden; }
  * right on Windows and Linux. Same numbers as the legacy .topbar in index.css.
  */
 .ui-topbar {
-  display: flex; align-items: center; gap: var(--s5);
-  min-height: 44px; padding: 0 var(--s5);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s5);
+  min-height: 44px; padding: var(--s2) var(--s5);
   border-bottom: 1px solid var(--rule);
 }
 html.is-desktop .ui-topbar { -webkit-app-region: drag; }

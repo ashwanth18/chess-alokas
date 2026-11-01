@@ -1,12 +1,12 @@
 import { useEffect, type ReactNode } from 'react';
 
 export type SurfaceName = 'desk' | 'family' | 'floor' | 'hall';
-export type SurfaceTheme = 'light' | 'dark' | 'sun' | 'tv';
+export type SurfaceTheme = 'light' | 'sun' | 'tv';
 
 /**
- * The root of every new page. It marks `<html>` so the shell layer repaints the green legacy body, sets
- * density for the surface, and undoes index.css's global type inside `.ui-root`. Undone on unmount, so
- * moving back to a legacy page restores it. Without a `theme`, the page follows the system light or dark.
+ * The root of every new page. It marks `<html>` so tokens and the shell layer apply, sets density for the
+ * surface, and undoes index.css's global type inside `.ui-root`. Undone on unmount, so
+ * moving back to a legacy page restores it. Without a `theme`, the page is the forest brand.
  */
 export function Surface({
   name,

@@ -122,7 +122,7 @@ export default function UiGallery() {
         <span className="ui-faint" style={{ flex: 1 }}>
           Component sheet, dev only
         </span>
-        {(['light', 'dark', 'sun', 'tv'] as const).map((t) => (
+        {(['sun', 'light', 'tv'] as const).map((t) => (
           <Button
             key={t}
             size="sm"
@@ -136,7 +136,7 @@ export default function UiGallery() {
       </header>
       <main style={{ padding: '0 var(--s5) var(--s9)', maxWidth: 1200, margin: '0 auto' }}>
         <h1 className="ui-display" style={{ fontSize: 'var(--t-4xl)', margin: 'var(--s6) 0' }}>
-          Pairing Sheet
+          Chess Alokas components
         </h1>
 
         <Section title="PlayerName, narrowing then wrapping">

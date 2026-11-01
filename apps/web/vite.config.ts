@@ -102,8 +102,8 @@ export default defineConfig(({ mode }) => {
             name: 'Chess Alokas',
             short_name: 'Chess Alokas',
             description: 'Chess tournament management that keeps working when the Wi-Fi drops',
-            theme_color: '#F7F5EF',
-            background_color: '#F7F5EF',
+            theme_color: '#0f3d2e',
+            background_color: '#0f3d2e',
             display: 'standalone',
             start_url: '/app',
             icons: [

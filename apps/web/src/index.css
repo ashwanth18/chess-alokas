@@ -47,8 +47,8 @@
   --surface-accent: #8b6a38;
   --forest: #0f3d2e;
 
-  --font-display: 'Archivo', 'Segoe UI', system-ui, sans-serif;
-  --font-body: 'Archivo', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Source Sans 3', system-ui, sans-serif;
 
   --radius-sm: 4px;
   --radius: 8px;
@@ -65,7 +65,8 @@
 /* ─── Reset & Base ──────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; }
+/* Green behind legacy pages too: overflow past the body shows the canvas. New surfaces repaint in the shell layer. */
+html { background: #0f3d2e; scroll-behavior: smooth; }
 
 /* Desktop scrollbars — thin wood/green track matching the shell */
 html.is-desktop {
@@ -5400,6 +5401,11 @@ button.live-duel-side:not(:disabled):hover {
 }
 .menu-toggle { min-width: 44px; min-height: 44px; }
 /* The top bar never pushes the page sideways: it wraps. Sign out stays on screen at every width. */
+@media (max-width: 1500px) {
+  /* One row on a 1366 laptop: Account is already in the nav. */
+  .brand-name { display: none; }
+  .user-chip { display: none; }
+}
 .topbar { height: auto; min-height: 60px; flex-wrap: wrap; row-gap: 0.25rem; }
 .topnav { min-width: 0; flex-wrap: wrap; }
 .sync-bar { min-width: 0; }
