@@ -134,7 +134,7 @@ export default function DiscoverEventsPage() {
             </>
           ) : (
             <>
-              <Link to="/login" className="btn btn-sm btn-ghost">
+              <Link to="/login" className="btn btn-sm btn-outline">
                 Sign in
               </Link>
               <Link to="/signup" className="btn btn-sm btn-primary">
@@ -176,6 +176,7 @@ export default function DiscoverEventsPage() {
               <input
                 className="input discover-search-input"
                 type="search"
+                aria-label="Search tournaments"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by tournament name, city, state, venue, or academy…"

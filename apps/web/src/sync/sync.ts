@@ -3,6 +3,39 @@ import { apiSyncPush, apiSyncPull } from '../api/client';
 import type { LocalTournament, LocalCategory, LocalParticipant, LocalGame } from '../db/local';
 import { repairInvalidGameCategoryIds, softDeleteOrphanGames } from '../lib/poolCategory';
 import { supabase } from '../lib/supabase';
+import type { SyncRejection } from '@chess-alokas/shared';
+
+/** A row the server refused, with a name the organizer will recognise. */
+export type ShownRejection = SyncRejection & { label: string };
+
+export interface SyncOutcome {
+  pushed: number;
+  pulled: number;
+  /** Rows the server refused. They stay dirty locally. */
+  rejected: ShownRejection[];
+}
+
+/** Latest refused rows, whichever screen or timer started the sync. Empty after a clean sync. */
+export const SYNC_REJECTIONS_EVENT = 'alokas:sync-rejections';
+
+async function withLabels(rejected: SyncRejection[]): Promise<ShownRejection[]> {
+  const labelled: ShownRejection[] = [];
+  for (const r of rejected) {
+    let label: string = r.entity;
+    if (r.entity === 'participant') {
+      label = `Player ${(await db.participants.get(r.id))?.name ?? r.id}`;
+    } else if (r.entity === 'tournament') {
+      label = `Tournament ${(await db.tournaments.get(r.id))?.name ?? r.id}`;
+    } else if (r.entity === 'category') {
+      label = `Category ${(await db.categories.get(r.id))?.name ?? r.id}`;
+    } else if (r.entity === 'game') {
+      const g = await db.games.get(r.id);
+      label = g ? `Round ${g.round}, table ${g.board}` : 'A game result';
+    }
+    labelled.push({ ...r, label });
+  }
+  return labelled;
+}
 
 function toSyncItem(
   entity: 'tournament' | 'category' | 'participant' | 'game',
@@ -30,7 +63,7 @@ function toSyncItem(
   };
 }
 
-let syncInFlight: Promise<{ pushed: number; pulled: number }> | null = null;
+let syncInFlight: Promise<SyncOutcome> | null = null;
 
 /**
  * Runs a full push/pull sync. Multiple triggers (timers, window focus, a
@@ -39,7 +72,7 @@ let syncInFlight: Promise<{ pushed: number; pulled: number }> | null = null;
  * while one is already in flight just awaits that same run instead of
  * starting a second one.
  */
-export function syncOnline(): Promise<{ pushed: number; pulled: number }> {
+export function syncOnline(): Promise<SyncOutcome> {
   if (syncInFlight) return syncInFlight;
   const run = syncOnlineImpl().finally(() => {
     if (syncInFlight === run) syncInFlight = null;
@@ -48,7 +81,7 @@ export function syncOnline(): Promise<{ pushed: number; pulled: number }> {
   return run;
 }
 
-async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
+async function syncOnlineImpl(): Promise<SyncOutcome> {
   const opened = await ensureDbOpen();
   if (!opened.ok) throw opened.error;
 
@@ -66,14 +99,15 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   const currentUserId = supabase
     ? ((await supabase.auth.getSession()).data.session?.user.id ?? null)
     : null;
-  const ownsRow = (ownerId: string | null | undefined) =>
-    !currentUserId || !ownerId || ownerId === currentUserId;
+  // The server decides what an organization member may write and reports anything it refuses.
+  const ownsRow = (t: LocalTournament) =>
+    !currentUserId || !t.ownerId || t.ownerId === currentUserId || Boolean(t.organizationId);
 
   const allDirtyTournaments = await db.tournaments.where('dirty').equals(1).toArray();
-  const dirtyTournaments = allDirtyTournaments.filter((t) => ownsRow(t.ownerId));
+  const dirtyTournaments = allDirtyTournaments.filter(ownsRow);
   const ownedTournamentIds = currentUserId
     ? new Set(
-        (await db.tournaments.filter((t) => ownsRow(t.ownerId)).toArray()).map((t) => t.id),
+        (await db.tournaments.filter(ownsRow).toArray()).map((t) => t.id),
       )
     : null;
 
@@ -112,6 +146,8 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
 
   let pushed = 0;
   let pulled = 0;
+  let rejected: SyncRejection[] = [];
+  let lostToNewerEdit = false;
 
   // Only clear `dirty` on rows whose updatedAt still matches what we just
   // pushed — if the user (or another sync trigger) edited a row again while
@@ -136,23 +172,35 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   }
 
   if (items.length > 0) {
-    const pushResult = await apiSyncPush({ clientId, items });
+    const pushResult = await apiSyncPush({ clientId, items, reportRejections: true });
     if (!pushResult.ok) {
       throw new Error(pushResult.error ?? 'Sync push failed');
     }
     pushed = pushResult.data.accepted;
+    // 'stale' means someone else's newer edit won: clearing dirty lets the pull bring it down.
+    // Anything else stays dirty, so the work isn't lost, and is shown to the user.
+    const refused = pushResult.data.rejected ?? [];
+    rejected = refused.filter((r) => r.code !== 'stale');
+    lostToNewerEdit = refused.some((r) => r.code === 'stale');
+    const keepDirty = new Set(rejected.map((r) => r.id));
+    const unlessRejected = <T extends { id: string }>(rows: T[]) =>
+      rows.filter((row) => !keepDirty.has(row.id));
 
-    await clearDirtyIfUnchanged(db.tournaments, tournamentsToPush, (rec) => {
+    await clearDirtyIfUnchanged(db.tournaments, unlessRejected(tournamentsToPush), (rec) => {
       if (currentUserId && !rec.ownerId) {
         rec.ownerId = currentUserId;
       }
     });
-    await clearDirtyIfUnchanged(db.categories, dirtyCategories);
-    await clearDirtyIfUnchanged(db.participants, dirtyParticipants);
-    await clearDirtyIfUnchanged(db.games, dirtyGames);
+    await clearDirtyIfUnchanged(db.categories, unlessRejected(dirtyCategories));
+    await clearDirtyIfUnchanged(db.participants, unlessRejected(dirtyParticipants));
+    await clearDirtyIfUnchanged(db.games, unlessRejected(dirtyGames));
   }
 
-  const since = (await getLastSyncAt(currentUserId)) ?? '1970-01-01T00:00:00.000Z';
+  // A stale row may have been skipped by an earlier pull while it was still dirty, which moved the
+  // cursor past it. Pull everything so it can't stay different from the server without anyone knowing.
+  const since = lostToNewerEdit
+    ? '1970-01-01T00:00:00.000Z'
+    : ((await getLastSyncAt(currentUserId)) ?? '1970-01-01T00:00:00.000Z');
   const pullResult = await apiSyncPull(since);
 
   if (!pullResult.ok) {
@@ -246,7 +294,9 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
 
   await setLastSyncAt(serverTime ?? new Date().toISOString(), currentUserId);
 
-  return { pushed, pulled };
+  const shown = await withLabels(rejected);
+  window.dispatchEvent(new CustomEvent(SYNC_REJECTIONS_EVENT, { detail: shown }));
+  return { pushed, pulled, rejected: shown };
 }
 
 /**

@@ -40,7 +40,7 @@ export default function HomePage() {
         // Shared devices can carry another signed-in user's local rows —
         // only show tournaments owned by whoever is signed in now (or
         // not-yet-owned local-only rows, which belong to the current session).
-        .filter((t) => !t.deletedAt && (!t.ownerId || t.ownerId === user?.id))
+        .filter((t) => !t.deletedAt && (!t.ownerId || t.ownerId === user?.id || Boolean(t.organizationId)))
         .reverse()
         .sortBy('updatedAt'),
     [user?.id],
@@ -103,7 +103,7 @@ export default function HomePage() {
             Chess Alokas
           </h1>
           <p className="hero-tagline">
-            Offline-first tournament management for chess clubs &amp; academies.
+            Tournament management for chess clubs &amp; academies that keeps working offline.
           </p>
           <Link to="/tournaments/new" className="btn btn-primary btn-lg">
             New Tournament

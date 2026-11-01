@@ -169,6 +169,18 @@ export default function SettingsPage() {
         </section>
       )}
 
+      {isDesktop && (
+        <section className="account-panel">
+          <h3>Backups</h3>
+          <p className="form-hint">
+            Automatic snapshots of your local tournaments, saved on this computer.
+          </p>
+          <Link className="btn btn-outline" to="/backups">
+            Manage backups
+          </Link>
+        </section>
+      )}
+
       <section className="account-panel">
         <h3>About</h3>
         <p className="form-hint">

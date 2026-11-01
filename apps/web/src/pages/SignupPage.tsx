@@ -5,10 +5,14 @@ import AuthShell from '../components/AuthShell';
 import { trackPageView } from '../lib/pageAnalytics';
 import { apiCreateOrganization, apiCreatePlayerProfile } from '../api/client';
 import { supabase } from '../lib/supabase';
+import { PENDING_SIGNUP_STORAGE_KEY } from '../lib/pendingSignup';
 
 type SignupRole = 'participant' | 'organizer';
 
-export const PENDING_SIGNUP_STORAGE_KEY = 'alokas:pendingSignupAction';
+const isDesktop =
+  Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
+  import.meta.env.VITE_DESKTOP === '1';
+
 
 export default function SignupPage() {
   const auth = useAuth();
@@ -57,13 +61,17 @@ export default function SignupPage() {
 
     if (hasSession) {
       if (role === 'organizer') {
-        await apiCreateOrganization({
+        const created = await apiCreateOrganization({
           name: orgName.trim(),
           city: orgCity.trim() || null,
           state: orgState.trim() || null,
           contactPhone: orgPhone.trim() || null,
           contactEmail: email.trim(),
         });
+        if (!created.ok) {
+          // The account exists, so the dashboard retries this and reports the error if it fails.
+          rememberPendingSignup();
+        }
         setBusy(false);
         navigate('/app', { replace: true });
         return;
@@ -82,6 +90,12 @@ export default function SignupPage() {
       }
     }
 
+    rememberPendingSignup();
+    setBusy(false);
+    setMessage(email.trim());
+  }
+
+  function rememberPendingSignup() {
     try {
       localStorage.setItem(
         PENDING_SIGNUP_STORAGE_KEY,
@@ -98,10 +112,20 @@ export default function SignupPage() {
     } catch {
       /* ignore storage errors */
     }
+  }
 
-    setBusy(false);
-    setMessage('Account created. Check your email if confirmation is required, then sign in.');
-    navigate('/login');
+  if (message) {
+    return (
+      <AuthShell title="Check your email" subtitle="One more step to finish your account">
+        <p className="form-hint" role="status">
+          We sent a confirmation link to <strong>{message}</strong>. Open it, then sign in. If it
+          doesn’t arrive in a few minutes, check your spam folder.
+        </p>
+        <Link className="btn btn-primary" to="/login">
+          Go to sign in
+        </Link>
+      </AuthShell>
+    );
   }
 
   return (
@@ -226,25 +250,29 @@ export default function SignupPage() {
               : 'Start Organizer Sandbox Trial'}
         </button>
       </form>
-      <div className="auth-divider">or</div>
-      <div className="auth-oauth">
-        <button
-          type="button"
-          className="btn btn-outline"
-          disabled={!auth.configured}
-          onClick={() => void auth.signInWithOAuth('google')}
-        >
-          Google
-        </button>
-        <button
-          type="button"
-          className="btn btn-outline"
-          disabled={!auth.configured}
-          onClick={() => void auth.signInWithOAuth('github')}
-        >
-          GitHub
-        </button>
-      </div>
+      {!isDesktop && (
+        <>
+          <div className="auth-divider">or</div>
+          <div className="auth-oauth">
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={!auth.configured}
+              onClick={() => void auth.signInWithOAuth('google')}
+            >
+              Google
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={!auth.configured}
+              onClick={() => void auth.signInWithOAuth('github')}
+            >
+              GitHub
+            </button>
+          </div>
+        </>
+      )}
       {error && <div className="form-error">{error}</div>}
       {message && <p className="form-hint">{message}</p>}
       <p className="auth-footer">

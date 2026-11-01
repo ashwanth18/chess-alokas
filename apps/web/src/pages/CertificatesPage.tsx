@@ -1309,6 +1309,15 @@ export default function CertificatesPage() {
             })}
           </div>
 
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            disabled={!templateBytes}
+            onClick={() => placeFieldAt(0.5, 0.5)}
+          >
+            Place “{certificateColumnLabel(selectedColumn)}” on the page
+          </button>
+
           <h3>Placed on template</h3>
           <ul className="cert-field-list">
             {fields.length === 0 && (

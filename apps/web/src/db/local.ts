@@ -23,6 +23,8 @@ export interface LocalTournament {
   sharedPlaces?: boolean;
   /** Supabase Auth user id (manager) */
   ownerId?: string | null;
+  /** Set on tournaments that belong to an organization; members may edit them too. */
+  organizationId?: string | null;
   /** Round the current arbiter PIN applies to (mirrors server). */
   arbiterPinRound?: number | null;
   /** Plaintext PIN for the current round — local display only; never sync. */

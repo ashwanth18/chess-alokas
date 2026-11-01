@@ -165,9 +165,6 @@ export default function PlayerPortalPage() {
       }
       setModalOpen(false);
       setNotice(`Added profile for ${res.data.profile.fullName}.`);
-      await apiClaimPlayerParticipations(res.data.profile.id, {
-        fullName: res.data.profile.fullName,
-      });
       await loadDashboard(res.data.profile.id);
     }
   }
@@ -178,11 +175,7 @@ export default function PlayerPortalPage() {
     setClaiming(true);
     setError(null);
     setNotice(null);
-    const res = await apiClaimPlayerParticipations(profile.id, {
-      email: profile.email ?? auth.user?.email ?? undefined,
-      fideId: profile.fideId ?? undefined,
-      fullName: profile.fullName,
-    });
+    const res = await apiClaimPlayerParticipations(profile.id);
     setClaiming(false);
     if (!res.ok) {
       setError(res.error);
@@ -190,8 +183,8 @@ export default function PlayerPortalPage() {
     }
     setNotice(
       res.data.claimedCount > 0
-        ? `Linked ${res.data.claimedCount} tournament participation(s) to ${profile.fullName}!`
-        : `No additional unclaimed participations found matching ${profile.fullName}'s FIDE ID, email, or name.`,
+        ? `Linked ${res.data.claimedCount} tournament participation(s) to ${profile.fullName}.`
+        : `Nothing to link. An entry links only when it has your confirmed email (${auth.user?.email ?? 'your account email'}) and its name matches this profile's full name exactly. Otherwise, register from this profile and the organizer links it when approving.`,
     );
     await loadDashboard(profile.id);
   }
@@ -243,6 +236,11 @@ export default function PlayerPortalPage() {
             Track live tournament pairings, manage child &amp; student profiles, and download official
             digital certificates.
           </p>
+          <p className="page-subtitle">
+            A tournament joins this profile in one of two ways: you register from this profile and
+            the organizer approves it, or the organizer entered your confirmed account email and
+            you link it here. Names and FIDE IDs aren&apos;t enough, since anyone can type them.
+          </p>
         </div>
         <div className="page-header-actions">
           <Link to="/discover" className="btn btn-outline">
@@ -255,7 +253,7 @@ export default function PlayerPortalPage() {
               onClick={() => void handleClaimPast()}
               disabled={claiming}
             >
-              {claiming ? 'Scanning…' : 'Claim Past Tournaments'}
+              {claiming ? 'Linking…' : 'Link Tournaments by My Email'}
             </button>
           )}
           <button
@@ -380,8 +378,10 @@ export default function PlayerPortalPage() {
             {liveMatches.length === 0 ? (
               <p className="admin-metric-detail" style={{ marginTop: '0.5rem' }}>
                 No active live tournament round right now. If {selectedProfile.fullName} is playing in
-                an event today, click <strong>Claim Past Tournaments</strong> to link their roster
-                entry by FIDE ID, email, or full name.
+                an event today, click <strong>Link Tournaments by My Email</strong>. An entry links
+                only when it has your confirmed email and its name matches this profile&apos;s full
+                name. Otherwise, the organizer links the player when approving a registration made
+                from this profile.
               </p>
             ) : (
               <div className="player-live-grid">
@@ -511,8 +511,9 @@ export default function PlayerPortalPage() {
             </p>
             {tournaments.length === 0 ? (
               <p className="admin-metric-detail" style={{ marginTop: '0.5rem' }}>
-                No tournaments linked yet. Use <strong>Claim Past Tournaments</strong> to automatically
-                match past entries.
+                No tournaments linked yet. <strong>Link Tournaments by My Email</strong> finds entries with
+                your confirmed email and this profile&apos;s full name. Otherwise, the organizer links
+                the player when approving a registration made from this profile.
               </p>
             ) : (
               <div className="table-scroll" style={{ marginTop: '0.75rem' }}>
@@ -794,7 +795,7 @@ export default function PlayerPortalPage() {
                   />
                 </label>
                 <label>
-                  Contact Email (for cert claims)
+                  Contact Email
                   <input
                     className="input"
                     type="email"

@@ -170,8 +170,8 @@ const PLATFORM_ORDER: PlatformKey[] = ['windows', 'macos', 'linux'];
 
 const FEATURES = [
   {
-    title: 'Offline-first',
-    body: 'Run full tournaments with zero internet. Every pairing, result, and standing lives on the device — sync is a bonus, not a dependency.',
+    title: 'Keeps working offline',
+    body: 'Once you have signed in online, the app reopens without internet. Swiss pairing, results and standings all work on the device, and sync when you reconnect. Floor PINs, QR stickers, the live page and FIDE Dutch pairing on the web need a connection.',
     glyph: '♟',
   },
   {
@@ -428,13 +428,13 @@ export default function LandingPage() {
           </h1>
           <p className="landing-lede">
             Pair rounds, track standings, and print certificates — in the browser or as a desktop
-            app. Built offline-first for the tournament hall, and syncs the moment you’re back
-            online.
+            app. Built for the tournament hall: when the Wi-Fi drops you keep pairing and scoring,
+            and it syncs when you’re back online.
           </p>
           <div className="landing-cta">{appCta}</div>
           <div className="landing-hero-chips">
             <span className="landing-chip">♜ Swiss &amp; FIDE Dutch</span>
-            <span className="landing-chip">⚡ Works with zero internet</span>
+            <span className="landing-chip">⚡ Keeps working when Wi-Fi drops</span>
             <span className="landing-chip">✓ Free to start</span>
           </div>
         </div>

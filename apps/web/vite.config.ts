@@ -84,14 +84,35 @@ export default defineConfig(({ mode }) => {
           },
         },
       },
-      // Emit a self-destroying sw.js so existing installs uninstall themselves.
-      // Offline data lives in IndexedDB; a caching SW was intercepting /api (Failed to fetch)
-      // while Supabase auth (other origin) still worked.
+      // Hand-written worker (src/sw.ts): static shell only, /api and other origins untouched,
+      // navigations network-first. Set `selfDestroying: true` here to uninstall it from every
+      // browser if it ever misbehaves. Never built for Electron, which loads over file://.
       !isDesktopBuild &&
         VitePWA({
-          selfDestroying: true,
+          strategies: 'injectManifest',
+          srcDir: 'src',
+          filename: 'sw.ts',
           injectRegister: false,
-          manifest: false,
+          registerType: 'prompt',
+          injectManifest: {
+            globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+            globIgnores: ['**/sw.js'],
+            maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+            rollupFormat: 'iife',
+          },
+          manifest: {
+            name: 'Chess Alokas',
+            short_name: 'Chess Alokas',
+            description: 'Chess tournament management that keeps working when the Wi-Fi drops',
+            theme_color: '#0f3d2e',
+            background_color: '#0f3d2e',
+            display: 'standalone',
+            start_url: '/app',
+            icons: [
+              { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+              { src: '/icon-512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any' },
+            ],
+          },
         }),
       uploadSourceMaps &&
         sentryVitePlugin({

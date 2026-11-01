@@ -37,6 +37,13 @@ import {
   withWithdrawFrom,
 } from '@chess-alokas/shared';
 import { db, nowIso, type LocalParticipant } from '../db/local';
+import PlayerFormModal from '../components/PlayerFormModal';
+import { snapshotAfterResult } from '../components/IndexedDbRecovery';
+import { isNetworkFailure } from '../lib/offline';
+import { bulkAbsentConfirmMessage, checkInPatch } from '../lib/rollCall';
+import { findLikelyDuplicates, needsPaymentConfirmation } from '../lib/registrationReview';
+import { draftToFields, roundBlockingDelete, type PlayerDraft } from '../lib/playerEditing';
+import { usePlayerLimit } from '../lib/importLimit';
 import ColorSide from '../components/ColorSide';
 import {
   effectiveTournamentStatus,
@@ -75,6 +82,7 @@ import {
   apiPublicLiveDisable,
   apiListTournamentRegistrations,
   apiReviewTournamentRegistration,
+  apiFetchRegistrationReceipt,
   apiUpdateTournamentPublishing,
 } from '../api/client';
 import { syncOnline } from '../sync/sync';
@@ -234,15 +242,56 @@ function StageStrip({ stage }: { stage: string }) {
   );
 }
 
+const QR_NEEDS_CONNECTION =
+  'Table QR codes need a connection. You can still pair and score at the desk; create them once you are back online.';
+
+function pendingPinKey(tournamentId: string) {
+  return `alokas:pendingFloorPin:${tournamentId}`;
+}
+
+/** Round whose floor PIN could not be issued because the device was offline. */
+function readPendingPin(tournamentId: string): number | null {
+  try {
+    const raw = localStorage.getItem(pendingPinKey(tournamentId));
+    return raw ? Number(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberPendingPin(tournamentId: string, round: number) {
+  try {
+    localStorage.setItem(pendingPinKey(tournamentId), String(round));
+  } catch {
+    /* ignore */
+  }
+}
+
+function forgetPendingPin(tournamentId: string) {
+  try {
+    localStorage.removeItem(pendingPinKey(tournamentId));
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function TournamentPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('players');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
-  const [selectedRound, setSelectedRound] = useState<number>(1);
+  /** 0 = follow the current round. */
+  const [selectedRound, setSelectedRound] = useState<number>(0);
   const [pairing, setPairing] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
   const [floorBusy, setFloorBusy] = useState(false);
+  const [floorNotice, setFloorNotice] = useState<string | null>(null);
+  const [playerForm, setPlayerForm] = useState<{ player: LocalParticipant | null } | null>(null);
+  const [paymentConfirm, setPaymentConfirm] = useState<{
+    id: string;
+    name: string;
+    vouched: boolean;
+  } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [resultChange, setResultChange] = useState<{
     gameId: string;
@@ -284,7 +333,24 @@ export default function TournamentPage() {
   const [regBusyId, setRegBusyId] = useState<string | null>(null);
   const [regError, setRegError] = useState<string | null>(null);
   const [regNotice, setRegNotice] = useState<string | null>(null);
-  const [receiptModalUrl, setReceiptModalUrl] = useState<string | null>(null);
+  const [receiptModal, setReceiptModal] = useState<{ url: string; isPdf: boolean } | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+  const closeReceiptModal = () => {
+    if (receiptModal) URL.revokeObjectURL(receiptModal.url);
+    setReceiptModal(null);
+  };
+  const openReceipt = async (registrationId: string) => {
+    setReceiptError(null);
+    const res = await apiFetchRegistrationReceipt(id!, registrationId);
+    if (!res.ok) {
+      setReceiptError(res.error);
+      return;
+    }
+    setReceiptModal({
+      url: URL.createObjectURL(res.blob),
+      isPdf: res.blob.type === 'application/pdf',
+    });
+  };
 
   const [pubSlug, setPubSlug] = useState('');
   const [pubRegOpen, setPubRegOpen] = useState(false);
@@ -302,6 +368,7 @@ export default function TournamentPage() {
   const [pubDescription, setPubDescription] = useState('');
   const [pubSaving, setPubSaving] = useState(false);
   const [pubLoadedForId, setPubLoadedForId] = useState<string | null>(null);
+  const playerLimit = usePlayerLimit(Boolean(auth.user));
 
   const tournament = useLiveQuery(() => (id ? db.tournaments.get(id) : undefined), [id]);
   const categories = useLiveQuery(
@@ -352,7 +419,7 @@ export default function TournamentPage() {
   const roundsInPlay = games
     ? [...new Set(games.map((g) => g.round))].sort((a, b) => a - b)
     : [];
-  const displayRound = selectedRound || (tournament?.currentRound ?? 1);
+  const displayRound = selectedRound || tournament?.currentRound || 1;
   const maxRounds = tournament?.rounds ?? 0;
   const nextPairingRound =
     tournament && categories && participants && games
@@ -449,8 +516,10 @@ export default function TournamentPage() {
 
     const tick = async () => {
       try {
-        await syncOnline();
+        const { pulled } = await syncOnline();
         if (cancelled) return;
+        // Floor results arrive through sync rather than applyDirectorResult.
+        if (pulled > 0) snapshotAfterResult();
         if ((floorTables?.length ?? 0) === 0) {
           const listed = await apiFloorListTables(id);
           if (listed.ok && !cancelled) {
@@ -613,16 +682,36 @@ export default function TournamentPage() {
     }
   }
 
+  /** Approving goes through here so paid entries and likely duplicates get a human check. */
+  function requestApproval(reg: TournamentRegistration) {
+    const duplicate = duplicateRegs.get(reg.id);
+    if (
+      duplicate &&
+      !window.confirm(`${reg.playerSnapshot.name}: ${duplicate}. Approve anyway?`)
+    ) {
+      return;
+    }
+    if (needsPaymentConfirmation(reg, tournament?.entryFeeCents)) {
+      setPaymentConfirm({ id: reg.id, name: reg.playerSnapshot.name, vouched: false });
+      return;
+    }
+    void handleReviewRegistration(reg.id, 'approve');
+  }
+
   async function handleReviewRegistration(
     regId: string,
     action: 'approve' | 'reject' | 'waitlist',
+    confirmPaymentWithoutReceipt = false,
   ) {
     if (!id) return;
     setRegBusyId(regId);
     setRegError(null);
     setRegNotice(null);
     try {
-      const res = await apiReviewTournamentRegistration(id, regId, { action });
+      const res = await apiReviewTournamentRegistration(id, regId, {
+        action,
+        ...(confirmPaymentWithoutReceipt ? { confirmPaymentWithoutReceipt: true } : {}),
+      });
       if (!res.ok) {
         setRegError(res.error);
         return;
@@ -649,8 +738,13 @@ export default function TournamentPage() {
 
   async function handleApproveAllPending() {
     if (!id) return;
-    const pendingList = registrations.filter((r) => r.status === 'pending');
-    if (pendingList.length === 0) return;
+    const allPending = registrations.filter((r) => r.status === 'pending');
+    if (allPending.length === 0) return;
+    // Anything needing a human decision is left in the queue for one-by-one approval.
+    const pendingList = allPending.filter(
+      (r) => !needsPaymentConfirmation(r, tournament?.entryFeeCents) && !duplicateRegs.has(r.id),
+    );
+    const heldBack = allPending.length - pendingList.length;
     setRegBusyId('__batch__');
     setRegError(null);
     setRegNotice(null);
@@ -676,8 +770,14 @@ export default function TournamentPage() {
         approvedCount += 1;
       }
       await loadRegistrations();
-      if (approvedCount > 0) {
-        setRegNotice(`Approved ${approvedCount} player(s) into the tournament roster.`);
+      if (approvedCount > 0 || heldBack > 0) {
+        setRegNotice(
+          `Approved ${approvedCount} player(s).${
+            heldBack > 0
+              ? ` ${heldBack} left for you to check one by one: no receipt on a paid entry, or a likely duplicate.`
+              : ''
+          }`,
+        );
       }
     } finally {
       setRegBusyId(null);
@@ -688,7 +788,6 @@ export default function TournamentPage() {
   useEffect(() => {
     if (!id || tab !== 'pairings') {
       setRoundCards([]);
-      setFloorAlerts([]);
       return;
     }
     let cancelled = false;
@@ -696,14 +795,10 @@ export default function TournamentPage() {
     let pollHandle: number | null = null;
 
     const refreshCards = async () => {
-      const [res, alertsRes] = await Promise.all([
-        apiListGameCards(id, displayRound),
-        apiFloorListAlerts(id, true),
-      ]);
+      const res = await apiListGameCards(id, displayRound);
       if (cancelled) return;
       if (res.ok && res.data?.cards) setRoundCards(res.data.cards);
       else setRoundCards([]);
-      if (alertsRes.ok && alertsRes.data?.alerts) setFloorAlerts(alertsRes.data.alerts);
     };
 
     void refreshCards();
@@ -730,23 +825,34 @@ export default function TournamentPage() {
       pollHandle = window.setInterval(() => void refreshCards(), 4_000);
     }
 
-    const alertsPoll = window.setInterval(() => {
-      void apiFloorListAlerts(id, true).then((r) => {
-        if (!cancelled && r.ok) setFloorAlerts(r.data.alerts);
-      });
-    }, 6_000);
-
     const onFocus = () => void refreshCards();
     window.addEventListener('focus', onFocus);
 
     return () => {
       cancelled = true;
       unsub();
-      window.clearInterval(alertsPoll);
       if (pollHandle != null) window.clearInterval(pollHandle);
       window.removeEventListener('focus', onFocus);
     };
   }, [id, tab, displayRound]);
+
+  // A floor arbiter's call must reach the director whichever tab is open.
+  const tournamentLive = caps?.stage === 'in_progress';
+  useEffect(() => {
+    if (!id || !tournamentLive) return;
+    let cancelled = false;
+    const refreshAlerts = () => {
+      void apiFloorListAlerts(id, true).then((r) => {
+        if (!cancelled && r.ok && r.data?.alerts) setFloorAlerts(r.data.alerts);
+      });
+    };
+    refreshAlerts();
+    const handle = window.setInterval(refreshAlerts, 6_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [id, tournamentLive]);
 
   async function handleResolveFloorAlert(alertId: string) {
     if (!id || alertBusyId) return;
@@ -763,24 +869,9 @@ export default function TournamentPage() {
 
   async function togglePlayerCheckIn(player: LocalParticipant) {
     const currentlyChecked = Boolean(player.customFields?.checkedIn);
-    const nextChecked = !currentlyChecked;
-    const nextFields = {
-      ...(player.customFields ?? {}),
-      checkedIn: nextChecked,
-    };
     const round1Paired = (games ?? []).some((g) => !g.deletedAt && g.round === 1);
-    const reactivated =
-      nextChecked && !round1Paired && isExcludedFromRound(player, 1)
-        ? withReactivatedFrom(player, 1)
-        : null;
     await db.participants.update(player.id, {
-      customFields: nextFields,
-      ...(reactivated
-        ? {
-            excludedRounds: reactivated.excludedRounds ?? [],
-            withdrawnFromRound: reactivated.withdrawnFromRound ?? null,
-          }
-        : {}),
+      ...checkInPatch(player, !currentlyChecked, round1Paired),
       updatedAt: nowIso(),
       dirty: 1,
     });
@@ -790,9 +881,10 @@ export default function TournamentPage() {
   async function handleCheckInAll(checked: boolean) {
     if (!participants?.length) return;
     const now = nowIso();
+    const round1Paired = (games ?? []).some((g) => !g.deletedAt && g.round === 1);
     for (const p of participants) {
       await db.participants.update(p.id, {
-        customFields: { ...(p.customFields ?? {}), checkedIn: checked },
+        ...checkInPatch(p, checked, round1Paired),
         updatedAt: now,
         dirty: 1,
       });
@@ -814,6 +906,7 @@ export default function TournamentPage() {
       setRollCallNotice('All active players are already checked in or marked absent for Round 1.');
       return;
     }
+    if (!window.confirm(bulkAbsentConfirmMessage(unchecked.length, participants.length))) return;
     const now = nowIso();
     for (const p of unchecked) {
       const patch = withAbsentThisRound(p, 1);
@@ -865,8 +958,64 @@ export default function TournamentPage() {
     void persistMissingSeedsAndYob(participants, mix || !hasCategories);
   }, [id, participants, caps, mix, hasCategories]);
 
+  const duplicateRegs = useMemo(
+    () => findLikelyDuplicates(registrations, participants ?? []),
+    [registrations, participants],
+  );
+
+  const playersInCategory = (participants ?? []).filter(
+    (p) => !selectedCategoryId || (p.categoryIds ?? []).includes(selectedCategoryId),
+  );
+
+  async function savePlayer(draft: PlayerDraft) {
+    if (!id || !playerForm) return;
+    const now = nowIso();
+    const existing = playerForm.player;
+    if (existing) {
+      await db.participants.update(existing.id, {
+        ...draftToFields(draft, existing.age),
+        updatedAt: now,
+        dirty: 1,
+      });
+    } else {
+      if (playerLimit != null && (participants?.length ?? 0) >= playerLimit) {
+        throw new Error(
+          `Your plan allows ${playerLimit} players per tournament. Ask for verification to add more.`,
+        );
+      }
+      await db.participants.put({
+        id: crypto.randomUUID(),
+        tournamentId: id,
+        customFields: {},
+        excludedRounds: [],
+        withdrawnFromRound: null,
+        country: 'Malaysia',
+        ...draftToFields(draft),
+        updatedAt: now,
+        dirty: 1,
+      });
+    }
+    setPlayerForm(null);
+    void syncOnline().catch(() => {});
+  }
+
+  async function removePlayer(player: LocalParticipant) {
+    const round = roundBlockingDelete(player.id, games ?? []);
+    if (round != null) {
+      const withdraw = window.confirm(
+        `${player.name} is on a board in Round ${round}, so removing them would break that game and the standings.\n\nWithdraw them from Round ${absenceRound} onward instead?`,
+      );
+      if (withdraw) await withdrawPlayer(player, absenceRound);
+      return;
+    }
+    if (!window.confirm(`Remove ${player.name} from this tournament?`)) return;
+    const now = nowIso();
+    await db.participants.update(player.id, { deletedAt: now, updatedAt: now, dirty: 1 });
+    void syncOnline().catch(() => {});
+  }
+
   const filteredParticipants = sortRoster(
-    (participants ?? []).filter((p) =>
+    playersInCategory.filter((p) =>
       matchesTextSearch(
         playerSearch,
         p.name,
@@ -1040,16 +1189,22 @@ export default function TournamentPage() {
         rotatePin: false,
       });
       if (!floor.ok) {
-        setPairError(floor.error || 'Could not create table QR codes');
+        setPairError(
+          isNetworkFailure(floor.error)
+            ? QR_NEEDS_CONNECTION
+            : floor.error || 'Could not create table QR codes',
+        );
         return false;
       }
       await persistFloorTables(tournamentId, floor.data.tables, floor.data.tableCount);
       return true;
     } catch (err) {
       setPairError(
-        err instanceof Error
-          ? `QR setup failed: ${err.message}`
-          : 'QR setup failed (sign in and sync online required)',
+        isNetworkFailure(err)
+          ? QR_NEEDS_CONNECTION
+          : err instanceof Error
+            ? `QR setup failed: ${err.message}`
+            : 'QR setup failed (sign in and sync online required)',
       );
       return false;
     }
@@ -1060,6 +1215,18 @@ export default function TournamentPage() {
     tournamentId: string,
     pinRound: number,
   ): Promise<boolean> {
+    const deferred = () => {
+      rememberPendingPin(tournamentId, pinRound);
+      setFloorNotice(
+        `You're offline. Round ${pinRound} is ready to score here at the desk; its floor PIN will be issued automatically when you reconnect.`,
+      );
+      return false;
+    };
+    const done = () => {
+      forgetPendingPin(tournamentId);
+      setFloorNotice(null);
+      return true;
+    };
     const tableCount = Math.max(
       1,
       estimatedTables,
@@ -1080,6 +1247,7 @@ export default function TournamentPage() {
           rotatePin: true,
         });
         if (!floor.ok) {
+          if (isNetworkFailure(floor.error)) return deferred();
           setPairError(floor.error || 'Could not issue floor PIN');
           return false;
         }
@@ -1092,10 +1260,11 @@ export default function TournamentPage() {
             dirty: 1,
           });
         }
-        return true;
+        return done();
       }
       const res = await apiFloorRotatePin(tournamentId, pinRound);
       if (!res.ok) {
+        if (isNetworkFailure(res.error)) return deferred();
         setPairError(res.error || 'Could not issue floor PIN');
         return false;
       }
@@ -1105,8 +1274,9 @@ export default function TournamentPage() {
         updatedAt: nowIso(),
         dirty: 1,
       });
-      return true;
+      return done();
     } catch (err) {
+      if (isNetworkFailure(err)) return deferred();
       setPairError(
         err instanceof Error
           ? `Floor PIN failed: ${err.message}`
@@ -1255,7 +1425,12 @@ export default function TournamentPage() {
         });
 
         if (catsToPair.length === 0) {
-          setPairError('All categories already have pairings for this round.');
+          const anyoneAvailable = participants.some((p) => !isExcludedFromRound(p, round));
+          setPairError(
+            anyoneAvailable
+              ? 'All categories already have pairings for this round.'
+              : `No players available for Round ${round}. Clear absences first.`,
+          );
           setPairing(false);
           return;
         }
@@ -1341,7 +1516,7 @@ export default function TournamentPage() {
 
       // Issue this round's floor PIN (QR stickers should already exist from pre-pair setup).
       const floorOk = await issueFloorPinForRound(id, round);
-      if (!floorOk) {
+      if (!floorOk && !readPendingPin(id)) {
         setPairError((prev) =>
           prev
             ? `Round paired, but floor PIN failed: ${prev}`
@@ -1352,11 +1527,52 @@ export default function TournamentPage() {
       setSelectedRound(round);
       setTab('pairings');
     } catch (err) {
-      setPairError(err instanceof Error ? err.message : 'Pairing failed');
+      setPairError(
+        isNetworkFailure(err)
+          ? 'FIDE Dutch pairing needs a connection on the web. Reconnect to pair this round, or use the desktop app.'
+          : err instanceof Error
+            ? err.message
+            : 'Pairing failed',
+      );
     } finally {
       setPairing(false);
     }
   }
+
+  // A PIN that couldn't be issued offline goes out once the server is reachable again.
+  const issuePinRef = useRef(issueFloorPinForRound);
+  issuePinRef.current = issueFloorPinForRound;
+  const liveRound = tournament?.currentRound ?? 0;
+  useEffect(() => {
+    if (!id || liveRound < 1) return;
+    let running = false;
+    const retry = async () => {
+      const pending = readPendingPin(id);
+      if (pending == null || running || !navigator.onLine) return;
+      if (pending !== liveRound) {
+        forgetPendingPin(id);
+        return;
+      }
+      running = true;
+      try {
+        await issuePinRef.current(id, pending);
+      } finally {
+        running = false;
+      }
+    };
+    if (readPendingPin(id) != null && !navigator.onLine) {
+      setFloorNotice(
+        `You're offline. Round ${liveRound} is ready to score here at the desk; its floor PIN will be issued automatically when you reconnect.`,
+      );
+    }
+    void retry();
+    window.addEventListener('online', retry);
+    const handle = window.setInterval(() => void retry(), 20_000);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.clearInterval(handle);
+    };
+  }, [id, liveRound]);
 
   const applyDirectorResult = useCallback(
     async (gameId: string, result: GameResult, confirm: boolean, note?: string) => {
@@ -1395,10 +1611,12 @@ export default function TournamentPage() {
             updatedAt: now,
             dirty: 1,
           });
-          if (res.error && res.error !== 'Network error') {
+          // Offline is fine: the result is saved here and goes up with the next sync.
+          if (res.error && !isNetworkFailure(res.error)) {
             setPairError(res.error);
           }
         }
+        snapshotAfterResult();
       } finally {
         setResultBusy(false);
         setResultChange(null);
@@ -2053,12 +2271,21 @@ export default function TournamentPage() {
 
       {hasCategories && (
         <div className="category-tabs">
+          {tab === 'players' && (
+            <button
+              className={`cat-tab ${!selectedCategoryId ? 'active' : ''}`}
+              onClick={() => setSelectedCategoryId('')}
+            >
+              All
+            </button>
+          )}
           {categories!.map((cat) => {
             const pending = !mix ? pendingResultsCountForCategory(games ?? [], cat.id) : 0;
+            const isActive = tab === 'players' ? selectedCategoryId === cat.id : activeCatId === cat.id;
             return (
               <button
                 key={cat.id}
-                className={`cat-tab ${activeCatId === cat.id ? 'active' : ''}`}
+                className={`cat-tab ${isActive ? 'active' : ''}`}
                 onClick={() => setSelectedCategoryId(cat.id)}
               >
                 {cat.name}
@@ -2075,7 +2302,53 @@ export default function TournamentPage() {
         </p>
       )}
 
-      <div className="tabs">
+      {floorAlerts.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            border: '2px solid #ef4444',
+            background: 'rgba(239, 68, 68, 0.14)',
+            borderRadius: '10px',
+            padding: '0.85rem 1rem',
+            marginBottom: '1rem',
+            display: 'grid',
+            gap: '0.5rem',
+          }}
+        >
+          {floorAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+              }}
+            >
+              <div>
+                <strong>
+                  🚨 Table {alert.tableNumber} needs Chief Arbiter (Arbiter:{' '}
+                  {alert.arbiterName || 'Floor'} — {alert.reason})
+                </strong>
+                <span className="admin-metric-detail" style={{ marginLeft: '0.6rem' }}>
+                  Round {alert.round}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={alertBusyId === alert.id}
+                onClick={() => void handleResolveFloorAlert(alert.id)}
+              >
+                {alertBusyId === alert.id ? 'Resolving…' : 'Resolve / Dismiss'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="tabs" role="tablist">
         {(['players', 'registrations', 'pairings', 'standings'] as Tab[]).map((t) => {
           const pendingRegCount =
             t === 'registrations'
@@ -2084,6 +2357,8 @@ export default function TournamentPage() {
           return (
             <button
               key={t}
+              role="tab"
+              aria-selected={tab === t}
               className={`tab ${tab === t ? 'active' : ''}`}
               onClick={() => setTab(t)}
             >
@@ -2101,7 +2376,11 @@ export default function TournamentPage() {
       {tab === 'players' && (
         <div className="tab-panel">
           <div className="tab-actions">
-            <span className="count-label">{participants?.length ?? 0} participants</span>
+            <span className="count-label">
+              {selectedCategoryId
+                ? `${playersInCategory.length} of ${participants?.length ?? 0} participants in ${categoryNames[selectedCategoryId] ?? 'this category'}`
+                : `${participants?.length ?? 0} participants`}
+            </span>
             <div className="tab-actions-buttons">
               {(participants?.length ?? 0) > 0 && caps?.stage !== 'completed' && (
                 <button
@@ -2117,6 +2396,13 @@ export default function TournamentPage() {
               )}
               {caps?.canImport && (
                 <>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline"
+                    onClick={() => setPlayerForm({ player: null })}
+                  >
+                    + Add player
+                  </button>
                   <Link to={importHref} className="btn btn-sm btn-outline">
                     {caps.importRequiresLateWarning ? 'Late entry CSV' : 'Import CSV'}
                   </Link>
@@ -2189,6 +2475,18 @@ export default function TournamentPage() {
               {rollCallNotice}
             </p>
           )}
+          {playerForm && (
+            <PlayerFormModal
+              player={playerForm.player}
+              categories={categories ?? []}
+              categoryRequired={!mix && hasCategories}
+              lockedByRound={
+                playerForm.player ? roundBlockingDelete(playerForm.player.id, games ?? []) : null
+              }
+              onSave={savePlayer}
+              onClose={() => setPlayerForm(null)}
+            />
+          )}
           {fideLookupOpen && id && participants && (
             <FideLookupModal
               tournamentId={id}
@@ -2216,18 +2514,32 @@ export default function TournamentPage() {
           {(!participants || participants.length === 0) ? (
             <div className="empty-state">
               <span className="empty-icon">♟</span>
-              <p>No players yet. Import a CSV to continue setup.</p>
+              <p>No players yet. Add them one by one or import a CSV to continue setup.</p>
               {caps?.canImport && (
-                <Link to={importHref} className="btn btn-primary">
-                  Import Players
-                </Link>
+                <div className="empty-actions">
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => setPlayerForm({ player: null })}
+                  >
+                    + Add player
+                  </button>
+                  <Link to={importHref} className="btn btn-primary">
+                    Import Players
+                  </Link>
+                </div>
               )}
             </div>
           ) : filteredParticipants.length === 0 ? (
             <div className="empty-state">
-              <p>No players match &ldquo;{playerSearch.trim()}&rdquo;.</p>
+              <p>
+                {playerSearch.trim()
+                  ? <>No players match &ldquo;{playerSearch.trim()}&rdquo;.</>
+                  : 'No players in this category.'}
+              </p>
             </div>
           ) : (
+            <div className="table-scroll">
             <table className="data-table">
               <thead>
                 <tr>
@@ -2301,9 +2613,28 @@ export default function TournamentPage() {
                       )}
                     </td>
                     <td>
-                      {canChangeAbsence && (
-                        <div className="player-row-actions">
-                          {status === 'playing' ? (
+                      <div className="player-row-actions">
+                        {caps?.canImport && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ghost"
+                              aria-label={`Edit ${p.name}`}
+                              onClick={() => setPlayerForm({ player: p })}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ghost"
+                              aria-label={`Remove ${p.name}`}
+                              onClick={() => void removePlayer(p)}
+                            >
+                              Remove
+                            </button>
+                          </>
+                        )}
+                        {canChangeAbsence && (status === 'playing' ? (
                             <>
                               <button
                                 type="button"
@@ -2328,15 +2659,15 @@ export default function TournamentPage() {
                             >
                               Reactivate
                             </button>
-                          )}
-                        </div>
-                      )}
+                          ))}
+                      </div>
                     </td>
                   </tr>
                   );
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -2370,7 +2701,8 @@ export default function TournamentPage() {
                   className="btn btn-sm btn-outline"
                   onClick={() => {
                     const slugOrId = pubSlug.trim() || tournament.publicSlug || tournament.id;
-                    const url = `${window.location.origin}/register/${slugOrId}`;
+                    const origin = window.desktop?.isDesktop ? 'https://chess-manager.alokas.com' : window.location.origin;
+                    const url = `${origin}/register/${slugOrId}`;
                     void navigator.clipboard?.writeText(url);
                     setRegNotice(`Copied registration link: ${url}`);
                   }}
@@ -2387,7 +2719,7 @@ export default function TournamentPage() {
             </div>
 
             <div className="auth-form" style={{ marginTop: '0.75rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.75rem' }}>
+              <div className="publish-grid">
                 <label>
                   Public Registration Slug
                   <input
@@ -2415,7 +2747,7 @@ export default function TournamentPage() {
                 </label>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.75rem' }}>
+              <div className="publish-grid">
                 <label>
                   Venue Name
                   <input
@@ -2454,7 +2786,7 @@ export default function TournamentPage() {
                 </label>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto 1fr 1fr', gap: '0.75rem', alignItems: 'end' }}>
+              <div className="publish-grid">
                 <label>
                   Latitude (GPS)
                   <input
@@ -2513,7 +2845,7 @@ export default function TournamentPage() {
                 </label>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="publish-grid">
                 <label>
                   Event Description / Notes
                   <textarea
@@ -2662,6 +2994,11 @@ export default function TournamentPage() {
                           <tr key={r.id}>
                             <td>
                               <strong>{snap.name}</strong>
+                              {duplicateRegs.has(r.id) && (
+                                <div className="reg-duplicate-flag">
+                                  ⚠ Possible duplicate: {duplicateRegs.get(r.id)}
+                                </div>
+                              )}
                               <div className="admin-metric-detail">
                                 {[
                                   snap.yearOfBirth ? `Born ${snap.yearOfBirth}` : null,
@@ -2685,12 +3022,16 @@ export default function TournamentPage() {
                               <span className="player-chip-badge">
                                 {r.paymentStatus.replace('_', ' ')}
                               </span>
-                              {r.receiptDataUrl && (
+                              {r.status !== 'approved' &&
+                                needsPaymentConfirmation(r, tournament?.entryFeeCents) && (
+                                  <div className="reg-duplicate-flag">No receipt uploaded</div>
+                                )}
+                              {r.hasReceipt && (
                                 <div style={{ marginTop: '0.25rem' }}>
                                   <button
                                     type="button"
                                     className="btn btn-sm btn-ghost"
-                                    onClick={() => setReceiptModalUrl(r.receiptDataUrl ?? null)}
+                                    onClick={() => void openReceipt(r.id)}
                                   >
                                     View Receipt
                                   </button>
@@ -2717,7 +3058,7 @@ export default function TournamentPage() {
                                     type="button"
                                     className="btn btn-sm btn-primary"
                                     disabled={regBusyId !== null}
-                                    onClick={() => void handleReviewRegistration(r.id, 'approve')}
+                                    onClick={() => requestApproval(r)}
                                   >
                                     Approve into Roster
                                   </button>
@@ -2753,8 +3094,65 @@ export default function TournamentPage() {
             )}
           </section>
 
-          {receiptModalUrl && (
-            <div className="modal-backdrop" onClick={() => setReceiptModalUrl(null)}>
+          {paymentConfirm && (
+            <div className="modal-backdrop" onClick={() => setPaymentConfirm(null)}>
+              <div
+                className="modal-card"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Confirm payment"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="modal-header">
+                  <h2>No receipt for {paymentConfirm.name}</h2>
+                </div>
+                <p className="form-hint">
+                  This entry costs{' '}
+                  {(tournament.currency ?? 'MYR')}{' '}
+                  {((tournament.entryFeeCents ?? 0) / 100).toFixed(2)} and no receipt was uploaded.
+                  Approving will mark the payment as verified.
+                </p>
+                <label className="late-confirm">
+                  <input
+                    type="checkbox"
+                    checked={paymentConfirm.vouched}
+                    onChange={(e) =>
+                      setPaymentConfirm({ ...paymentConfirm, vouched: e.target.checked })
+                    }
+                  />
+                  I have received this payment another way (cash, bank transfer).
+                </label>
+                <div className="player-form-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setPaymentConfirm(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!paymentConfirm.vouched}
+                    onClick={() => {
+                      const regId = paymentConfirm.id;
+                      setPaymentConfirm(null);
+                      void handleReviewRegistration(regId, 'approve', true);
+                    }}
+                  >
+                    Confirm payment and approve
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {receiptError && (
+            <p className="form-error" role="alert">
+              {receiptError}
+            </p>
+          )}
+          {receiptModal && (
+            <div className="modal-backdrop" onClick={closeReceiptModal}>
               <div
                 className="modal-card"
                 role="dialog"
@@ -2767,15 +3165,16 @@ export default function TournamentPage() {
                   <button
                     type="button"
                     className="btn btn-sm btn-ghost"
-                    onClick={() => setReceiptModalUrl(null)}
+                    aria-label="Close receipt"
+                    onClick={closeReceiptModal}
                   >
                     ✕
                   </button>
                 </div>
                 <div style={{ textAlign: 'center', marginTop: '0.75rem' }}>
-                  {receiptModalUrl.startsWith('data:application/pdf') ? (
+                  {receiptModal.isPdf ? (
                     <a
-                      href={receiptModalUrl}
+                      href={receiptModal.url}
                       download="payment-receipt.pdf"
                       className="btn btn-primary"
                     >
@@ -2783,7 +3182,7 @@ export default function TournamentPage() {
                     </a>
                   ) : (
                     <img
-                      src={receiptModalUrl}
+                      src={receiptModal.url}
                       alt="Uploaded payment receipt"
                       style={{
                         maxWidth: '100%',
@@ -2802,52 +3201,11 @@ export default function TournamentPage() {
 
       {tab === 'pairings' && (
         <div className="tab-panel">
-          {floorAlerts.length > 0 && (
-            <div
-              role="alert"
-              style={{
-                border: '2px solid #ef4444',
-                background: 'rgba(239, 68, 68, 0.14)',
-                borderRadius: '10px',
-                padding: '0.85rem 1rem',
-                marginBottom: '1rem',
-                display: 'grid',
-                gap: '0.5rem',
-              }}
-            >
-              {floorAlerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '0.75rem',
-                  }}
-                >
-                  <div>
-                    <strong>
-                      🚨 Table {alert.tableNumber} needs Chief Arbiter (Arbiter:{' '}
-                      {alert.arbiterName || 'Floor'} — {alert.reason})
-                    </strong>
-                    <span className="admin-metric-detail" style={{ marginLeft: '0.6rem' }}>
-                      Round {alert.round}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary"
-                    disabled={alertBusyId === alert.id}
-                    onClick={() => void handleResolveFloorAlert(alert.id)}
-                  >
-                    {alertBusyId === alert.id ? 'Resolving…' : 'Resolve / Dismiss'}
-                  </button>
-                </div>
-              ))}
-            </div>
+          {floorNotice && (
+            <p className="form-hint stage-banner-warn" role="status">
+              {floorNotice}
+            </p>
           )}
-
           {tournament &&
             (caps?.stage === 'ready' ||
               caps?.stage === 'in_progress' ||
@@ -2863,12 +3221,13 @@ export default function TournamentPage() {
                   <>
                     <div className="floor-panel-main">
                       <div className="floor-panel-title-row">
-                        <h3>One-time: table QR stickers</h3>
-                        <span className="floor-chip floor-chip-warn">Do this before Round 1</span>
+                        <h3>Table QR stickers for floor arbiters</h3>
+                        <span className="floor-chip floor-chip-warn">Optional · needs internet</span>
                       </div>
                       <p className="form-hint">
-                        Print stickers once and leave them on the tables for the whole event. Each
-                        round only changes the PIN — you do not recreate QR codes every round.
+                        Print stickers once and leave them on the tables so arbiters can score from
+                        their phones. Each round only changes the PIN. You can pair and score at the
+                        desk without them.
                       </p>
                       {floorEstimate && !mix && (
                         <p className="form-hint">
@@ -3116,16 +3475,7 @@ export default function TournamentPage() {
               <button
                 className="btn btn-primary"
                 onClick={generatePairings}
-                disabled={
-                  pairing ||
-                  !caps?.canPair ||
-                  (caps?.stage === 'ready' && (floorTables?.length ?? 0) === 0)
-                }
-                title={
-                  caps?.stage === 'ready' && (floorTables?.length ?? 0) === 0
-                    ? 'Create table QR codes first'
-                    : undefined
-                }
+                disabled={pairing || !caps?.canPair}
               >
                 {pairing
                   ? 'Pairing…'
@@ -3133,9 +3483,7 @@ export default function TournamentPage() {
                     ? 'Tournament complete'
                     : caps?.allRoundsPaired
                       ? 'All rounds paired'
-                      : caps?.stage === 'ready' && (floorTables?.length ?? 0) === 0
-                        ? 'Create QR codes first'
-                        : `Generate Round ${nextPairingRound ?? '—'}`}
+                      : `Generate Round ${nextPairingRound ?? '—'}`}
               </button>
               {caps?.canConfirmRound && (
                 <button
@@ -3533,6 +3881,7 @@ export default function TournamentPage() {
                   sharedPlaces={tournament?.sharedPlaces ?? true}
                 />
               </div>
+              <div className="table-scroll">
               <table className="data-table standings-table">
                 <thead>
                   <tr>
@@ -3585,6 +3934,7 @@ export default function TournamentPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </>
           )}
         </div>

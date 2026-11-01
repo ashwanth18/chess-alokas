@@ -18,6 +18,7 @@ import type {
   FloorAlert,
   FloorZoneBoard,
   FilterGroup,
+  SyncRejection,
 } from '@chess-alokas/shared';
 import { supabase } from '../lib/supabase';
 
@@ -29,11 +30,26 @@ export function resolveApiBaseUrl(): string {
   return import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 }
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
+/** Reachable without signing in; everything else needs a token once auth is configured. */
+function isPublicPath(path: string): boolean {
+  return path === '/health' || path.startsWith('/public/');
+}
+
+/**
+ * getSession can hang when a token refresh is stuck offline, so it gets the request's own deadline.
+ * Returns null when that deadline passes, which is a connection problem, not a signed-out user.
+ */
+async function getAuthHeaders(signal: AbortSignal): Promise<Record<string, string> | null> {
   if (!supabase) return {};
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const expired = new Promise<null>((resolve) => {
+    if (signal.aborted) resolve(null);
+    else signal.addEventListener('abort', () => resolve(null), { once: true });
+  });
+  const session = supabase.auth.getSession().then(({ data }): Record<string, string> => {
+    const token = data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  });
+  return Promise.race([session, expired]);
 }
 
 async function req<T>(
@@ -47,15 +63,26 @@ async function req<T>(
       ? 120_000
       : 8_000;
   const BASE_URL = resolveApiBaseUrl();
+  const deadline = AbortSignal.timeout(timeoutMs ?? defaultTimeout);
   try {
-    const authHeaders = await getAuthHeaders();
+    const authHeaders = await getAuthHeaders(deadline);
+    if (!isPublicPath(path) && supabase) {
+      // Not sending these also means no 401, which would sign the person out: an outage or a
+      // stuck session check must never cost anyone their saved sign-in.
+      if (authHeaders === null) {
+        return { data: null, ok: false, error: 'Sign-in check timed out' };
+      }
+      if (!('Authorization' in authHeaders)) {
+        return { data: null, ok: false, error: 'Not signed in' };
+      }
+    }
     const hasBody = fetchOptions.body != null && fetchOptions.body !== '';
     const res = await fetch(`${BASE_URL}${path}`, {
-      signal: AbortSignal.timeout(timeoutMs ?? defaultTimeout),
+      signal: deadline,
       ...fetchOptions,
       headers: {
         ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-        ...authHeaders,
+        ...(authHeaders ?? {}),
         ...(fetchOptions.headers ?? {}),
       },
     });
@@ -182,7 +209,12 @@ export interface SyncPullResponse {
 }
 
 export async function apiSyncPush(body: SyncPushRequest) {
-  return req<{ accepted: number; serverTime: string }>('/sync/push', {
+  return req<{
+    accepted: number;
+    serverTime: string;
+    /** Rows the server did not save, and why. Sent only if the request asks with reportRejections. */
+    rejected?: SyncRejection[];
+  }>('/sync/push', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -564,13 +596,14 @@ export type PublicLivePayload = {
     id: string;
     name: string;
     rating: number | null;
-    club: string | null;
-    school: string | null;
+    /** No longer sent: kept optional so LivePage compiles until it drops them. */
+    club?: string | null;
+    school?: string | null;
+    yearOfBirth?: number | null;
+    age?: number | null;
     city: string | null;
     state: string | null;
     country: string | null;
-    yearOfBirth: number | null;
-    age?: number | null;
     seed: number | null;
     categoryIds: string[];
   }>;
@@ -903,15 +936,13 @@ export async function apiDeletePlayerProfile(id: string) {
   });
 }
 
-export async function apiClaimPlayerParticipations(
-  profileId: string,
-  body?: { email?: string | null; fideId?: number | null; fullName?: string | null },
-) {
+/** Links past tournaments entered under the signed-in account's confirmed email. */
+export async function apiClaimPlayerParticipations(profileId: string) {
   return req<{ claimedCount: number; participantIds: string[] }>(
     `/player/profiles/${encodeURIComponent(profileId)}/claim`,
     {
       method: 'POST',
-      body: JSON.stringify(body ?? {}),
+      body: JSON.stringify({}),
     },
   );
 }
@@ -927,7 +958,7 @@ export async function apiDownloadCertificatePdf(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const BASE_URL = resolveApiBaseUrl();
   try {
-    const authHeaders = await getAuthHeaders();
+    const authHeaders = await getAuthHeaders(AbortSignal.timeout(8_000));
     const res = await fetch(`${BASE_URL}/certificates/${encodeURIComponent(issueId)}/download`, {
       headers: {
         ...authHeaders,
@@ -1069,6 +1100,22 @@ export async function apiSubmitEventRegistration(
   );
 }
 
+export async function apiFetchRegistrationReceipt(
+  tournamentId: string,
+  registrationId: string,
+): Promise<{ ok: true; blob: Blob } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(
+      `${resolveApiBaseUrl()}/tournaments/${encodeURIComponent(tournamentId)}/registrations/${encodeURIComponent(registrationId)}/receipt`,
+      { headers: (await getAuthHeaders(AbortSignal.timeout(8_000))) ?? {} },
+    );
+    if (!res.ok) return { ok: false, error: `Could not load the receipt (${res.status}).` };
+    return { ok: true, blob: await res.blob() };
+  } catch {
+    return { ok: false, error: 'Could not load the receipt. Check your connection.' };
+  }
+}
+
 export async function apiUpdateTournamentPublishing(
   tournamentId: string,
   body: {
@@ -1116,6 +1163,8 @@ export async function apiReviewTournamentRegistration(
     action: 'approve' | 'reject' | 'waitlist';
     reviewerNote?: string | null;
     categoryIds?: string[];
+    /** The organizer vouches for a paid entry with no receipt. Without it the server answers 409. */
+    confirmPaymentWithoutReceipt?: boolean;
   },
 ) {
   return req<{

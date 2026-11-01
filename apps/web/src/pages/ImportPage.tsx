@@ -5,6 +5,8 @@ import Papa from 'papaparse';
 import { matchesFilter } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import { getTournamentCapabilities, isMixedTournament } from '../lib/tournamentProgress';
+import { useAuth } from '../auth/AuthContext';
+import { defaultKeepIndexes, importAllowance, usePlayerLimit } from '../lib/importLimit';
 import {
   categoryNameMatchesLabel,
   findAgeCategoryInRow,
@@ -171,6 +173,9 @@ export default function ImportPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [lateConfirmed, setLateConfirmed] = useState(false);
+  const [keepIndexes, setKeepIndexes] = useState<Set<number>>(new Set());
+  const auth = useAuth();
+  const playerLimit = usePlayerLimit(Boolean(auth.user));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tournament = useLiveQuery(
@@ -352,7 +357,16 @@ export default function ImportPage() {
   };
 
   const preview = rawRows.length > 0 ? parseRows(rawRows.slice(0, 5), mapping) : [];
-  const total = rawRows.length > 0 ? parseRows(rawRows, mapping).length : 0;
+  const allParsed = rawRows.length > 0 ? parseRows(rawRows, mapping) : [];
+  const total = allParsed.length;
+  const { over: overLimit, room } = importAllowance(
+    playerLimit ?? null,
+    participants?.length ?? 0,
+    total,
+  );
+  useEffect(() => {
+    setKeepIndexes(defaultKeepIndexes(total, room));
+  }, [total, room]);
 
   async function handleImport() {
     if (!tournamentId || rawRows.length === 0) return;
@@ -369,7 +383,7 @@ export default function ImportPage() {
     setImportError(null);
 
     try {
-      const parsed = parseRows(rawRows, mapping);
+      const parsed = allParsed.filter((_, i) => !overLimit || keepIndexes.has(i));
       const now = nowIso();
 
       for (const p of parsed) {
@@ -512,13 +526,14 @@ export default function ImportPage() {
                 <div className="mapping-grid">
                   {ALL_FIELDS.map((field) => (
                     <div key={field} className="mapping-row">
-                      <label className="mapping-label">
+                      <label className="mapping-label" htmlFor={`map-${field}`}>
                         {FIELD_LABELS[field]}
                         {REQUIRED_FIELDS.includes(field as never) && (
                           <span className="required-star">*</span>
                         )}
                       </label>
                       <select
+                        id={`map-${field}`}
                         className="input input-sm"
                         value={mapping[field] ?? ''}
                         onChange={(e) =>
@@ -540,6 +555,7 @@ export default function ImportPage() {
               {preview.length > 0 && (
                 <section className="preview-section">
                   <h3>Preview (first {preview.length} rows)</h3>
+                  <div className="table-scroll">
                   <table className="data-table preview-table">
                     <thead>
                       <tr>
@@ -562,7 +578,46 @@ export default function ImportPage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                   <p className="form-hint">{total} rows total</p>
+                </section>
+              )}
+
+              {overLimit && (
+                <section className="import-limit" aria-label="Choose who to keep">
+                  <h3>This file is over your plan’s limit</h3>
+                  <p className="form-hint">
+                    Your plan allows {playerLimit} players per tournament.{' '}
+                    {(participants?.length ?? 0) > 0
+                      ? `This tournament already has ${participants!.length}, so you can add ${room} more. `
+                      : ''}
+                    The file has {total}. Tick who to keep ({keepIndexes.size} of {room} chosen), or
+                    ask for verification to raise the limit.
+                  </p>
+                  <div className="import-limit-list">
+                    {allParsed.map((p, i) => {
+                      const kept = keepIndexes.has(i);
+                      return (
+                        <label key={i}>
+                          <input
+                            type="checkbox"
+                            checked={kept}
+                            disabled={!kept && keepIndexes.size >= room}
+                            onChange={(e) =>
+                              setKeepIndexes((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(i);
+                                else next.delete(i);
+                                return next;
+                              })
+                            }
+                          />
+                          {p.name}
+                          {p.school ? <span className="form-hint"> · {p.school}</span> : null}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </section>
               )}
 
@@ -583,14 +638,15 @@ export default function ImportPage() {
                   disabled={
                     importing ||
                     !mapping['name'] ||
-                    (requiresLateWarning && !lateConfirmed)
+                    (requiresLateWarning && !lateConfirmed) ||
+                    (overLimit && keepIndexes.size === 0)
                   }
                 >
                   {importing
                     ? 'Importing…'
                     : requiresLateWarning
-                      ? `Import ${total} late entries`
-                      : `Import ${total} Players`}
+                      ? `Import ${overLimit ? keepIndexes.size : total} late entries`
+                      : `Import ${overLimit ? keepIndexes.size : total} Players`}
                 </button>
               </div>
             </>

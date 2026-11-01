@@ -29,6 +29,14 @@ import {
   loadFloorCredentials,
   saveFloorCredentials,
 } from '../lib/floorCredentials';
+import {
+  conflictMessage,
+  flushBanner,
+  summarizeFlush,
+  type FlushAttempt,
+  type QueuedFloorResult,
+  type RejectedFloorResult,
+} from '../lib/floorQueue';
 
 function isNetworkError(raw: string): boolean {
   return /abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(raw);
@@ -44,15 +52,47 @@ function networkErrorMessage(raw: string): string {
 const SESSION_KEY = (slug: string) => `chess-alokas-arbiter-session:${slug}`;
 const LAST_SESSION_KEY = 'chess-alokas-arbiter-last-token';
 const OFFLINE_QUEUE_KEY = 'alokas-floor-offline-queue';
+const CONFLICTS_KEY = 'alokas-floor-offline-conflicts';
+const VIEW_KEY = (slug: string) => `alokas-floor-view:${slug}`;
+const ZONE_KEY = (slug: string) => `alokas-floor-zone:${slug}`;
 
-export type OfflineFloorResultItem = {
-  slug: string;
-  token: string;
-  result: ArbiterScorableResult;
-  arbiterName?: string;
-  tableNumber?: number;
-  queuedAt: string;
-};
+export type OfflineFloorResultItem = QueuedFloorResult & { result: ArbiterScorableResult };
+
+/** Last boards seen, per tab, so a reload with no signal can still show them and queue results. */
+function rememberForTab(key: string, value: unknown) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* ignore */
+  }
+}
+
+function recallFromTab<T>(key: string): T | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadConflicts(): RejectedFloorResult[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CONFLICTS_KEY) ?? '[]');
+    return Array.isArray(parsed) ? (parsed as RejectedFloorResult[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveConflicts(items: RejectedFloorResult[]) {
+  try {
+    if (items.length === 0) localStorage.removeItem(CONFLICTS_KEY);
+    else localStorage.setItem(CONFLICTS_KEY, JSON.stringify(items));
+  } catch {
+    /* ignore */
+  }
+}
 
 function loadOfflineQueue(): OfflineFloorResultItem[] {
   try {
@@ -289,6 +329,7 @@ export default function TableScoringPage() {
   );
   const [offlineBanner, setOfflineBanner] = useState<string | null>(null);
   const [flushingQueue, setFlushingQueue] = useState(false);
+  const [conflicts, setConflicts] = useState<RejectedFloorResult[]>(() => loadConflicts());
 
   useEffect(() => {
     setToken(slug ? loadSession(slug) : null);
@@ -326,6 +367,11 @@ export default function TableScoringPage() {
       setZoneLoading(false);
       if (res.ok) {
         setZoneBoards(res.data.boards);
+        rememberForTab(ZONE_KEY(slug), res.data.boards);
+      } else if (isNetworkError(res.error)) {
+        setZoneBoards((current) =>
+          current.length > 0 ? current : (recallFromTab<FloorZoneBoard[]>(ZONE_KEY(slug)) ?? []),
+        );
       }
     },
     [slug, token],
@@ -339,15 +385,21 @@ export default function TableScoringPage() {
       const res = await apiPublicTableGet(slug, session);
       setLoading(false);
       if (!res.ok) {
-        setError(networkErrorMessage(res.error));
         if (isNetworkError(res.error)) {
           setOnline(false);
+          const lastSeen = recallFromTab<FloorTableView>(VIEW_KEY(slug));
+          if (lastSeen && session) {
+            setView(lastSeen);
+            return;
+          }
         }
+        setError(networkErrorMessage(res.error));
         setView(null);
         return;
       }
       setOnline(true);
       setView(res.data);
+      if (res.data.sessionOk) rememberForTab(VIEW_KEY(slug), res.data);
       const creds = loadFloorCredentials(res.data.tournamentId);
       if (creds) {
         setArbiterName((n) => n || creds.arbiterName);
@@ -373,7 +425,8 @@ export default function TableScoringPage() {
   }, [refresh]);
 
   useEffect(() => {
-    if (viewMode === 'zone' && token && view?.sessionOk) {
+    // Also before Zone Grid is opened, so its boards are there if the Wi-Fi drops first.
+    if (token && view?.sessionOk) {
       void refreshZone(token);
     }
   }, [viewMode, token, view?.sessionOk, refreshZone]);
@@ -383,8 +436,7 @@ export default function TableScoringPage() {
     const queued = loadOfflineQueue();
     if (queued.length === 0 || flushingQueue) return;
     setFlushingQueue(true);
-    const remaining: OfflineFloorResultItem[] = [];
-    let submittedCount = 0;
+    const attempts: { item: QueuedFloorResult; attempt: FlushAttempt }[] = [];
 
     for (const item of queued) {
       const res = await apiPublicTableSetResult(
@@ -393,26 +445,38 @@ export default function TableScoringPage() {
         item.result,
         item.arbiterName || arbiterName.trim() || 'Floor Arbiter',
       );
-      if (res.ok) {
-        submittedCount += 1;
-      } else if (isNetworkError(res.error)) {
-        remaining.push(item);
-      } else {
-        // Non-network rejection (e.g. 409 already locked or round closed) — drop from queue
-        submittedCount += 1;
-      }
+      attempts.push({ item, attempt: res.ok ? { ok: true } : { ok: false, error: res.error } });
     }
 
+    const summary = summarizeFlush(attempts);
+    const remaining = summary.remaining as OfflineFloorResultItem[];
     saveOfflineQueue(remaining);
     setOfflineQueue(remaining);
+
+    if (summary.rejected.length > 0) {
+      // Show what the server actually holds, so the arbiter can tell the chief what differs.
+      const newConflicts: RejectedFloorResult[] = [];
+      for (const { item, reason } of summary.rejected) {
+        const current = await apiPublicTableGet(item.slug, item.token);
+        newConflicts.push({
+          slug: item.slug,
+          tableNumber: item.tableNumber,
+          result: item.result,
+          reason,
+          serverResult: current.ok ? current.data.result : null,
+          rejectedAt: new Date().toISOString(),
+        });
+      }
+      setConflicts((prev) => {
+        const next = [...prev, ...newConflicts];
+        saveConflicts(next);
+        return next;
+      });
+    }
     setFlushingQueue(false);
 
-    if (submittedCount > 0) {
-      setOfflineBanner(
-        remaining.length === 0
-          ? `Synced ${submittedCount} queued offline result${submittedCount === 1 ? '' : 's'}!`
-          : `Synced ${submittedCount} result(s); ${remaining.length} still waiting for connection.`,
-      );
+    setOfflineBanner(flushBanner(summary));
+    if (summary.submitted > 0 || summary.rejected.length > 0) {
       void refresh();
       if (viewMode === 'zone') void refreshZone();
     }
@@ -735,6 +799,25 @@ export default function TableScoringPage() {
           </div>
         </div>
       )}
+
+      {conflicts.map((c) => (
+        <div className="table-score-card floor-conflict" role="alert" key={`${c.slug}:${c.rejectedAt}`}>
+          <strong>{conflictMessage(c)}</strong>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() =>
+              setConflicts((prev) => {
+                const next = prev.filter((x) => x !== c);
+                saveConflicts(next);
+                return next;
+              })
+            }
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
 
       {chiefBanner && (
         <div

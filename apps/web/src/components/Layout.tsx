@@ -8,12 +8,12 @@ import {
   apiCreatePlayerProfile,
   type UserOrganization,
 } from '../api/client';
-import { syncOnline } from '../sync/sync';
+import { SYNC_REJECTIONS_EVENT, syncOnline, type ShownRejection } from '../sync/sync';
 import { getLastSyncAt } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
 import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
 import { reportSyncFailure, syncErrorMessage } from '../lib/syncError';
-import { PENDING_SIGNUP_STORAGE_KEY } from '../pages/SignupPage';
+import { PENDING_SIGNUP_STORAGE_KEY } from '../lib/pendingSignup';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -31,6 +31,7 @@ export default function Layout() {
   const [syncFailed, setSyncFailed] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [rejections, setRejections] = useState<ShownRejection[]>([]);
 
   const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
   const [orgsLoaded, setOrgsLoaded] = useState(false);
@@ -63,8 +64,9 @@ export default function Layout() {
         setOrgFormPhone(primary.contactPhone ?? '');
         setOrgFormPayment(primary.paymentInstructions ?? '');
       }
+      // Only on success: offline, "no organization yet" would be a false prompt to register one.
+      setOrgsLoaded(true);
     }
-    setOrgsLoaded(true);
   }, [auth.user]);
 
   useEffect(() => {
@@ -94,13 +96,22 @@ export default function Layout() {
       };
       void (async () => {
         if (pending.role === 'organizer' && pending.orgName) {
-          await apiCreateOrganization({
+          const created = await apiCreateOrganization({
             name: pending.orgName,
             city: pending.orgCity || null,
             state: pending.orgState || null,
             contactPhone: pending.orgPhone || null,
             contactEmail: pending.email || auth.user?.email || null,
           });
+          if (!created.ok) {
+            setOrgFormName(pending.orgName);
+            setOrgFormCity(pending.orgCity ?? '');
+            setOrgFormState(pending.orgState ?? '');
+            setOrgFormPhone(pending.orgPhone ?? '');
+            setOrgError(`Your account is ready, but the organization was not registered: ${created.error}`);
+            setOrgModalOpen(true);
+            return;
+          }
           await loadOrganizations();
         } else if (pending.role === 'participant') {
           if (pending.displayName) {
@@ -159,6 +170,14 @@ export default function Layout() {
   }, []);
 
   useEffect(() => {
+    const onRejections = (e: Event) => {
+      setRejections((e as CustomEvent<ShownRejection[]>).detail);
+    };
+    window.addEventListener(SYNC_REJECTIONS_EVENT, onRejections);
+    return () => window.removeEventListener(SYNC_REJECTIONS_EVENT, onRejections);
+  }, []);
+
+  useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMenuOpen(false);
@@ -167,17 +186,20 @@ export default function Layout() {
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
 
-  const handleSync = useCallback(async () => {
-    if (!online || syncing || !auth.user) return;
+  const handleSync = useCallback(async (afterReconnect = false) => {
+    if ((!online && !afterReconnect) || syncing || !auth.user) return;
     setSyncing(true);
     setSyncResult(null);
     setSyncFailed(false);
     try {
-      const { pushed, pulled } = await syncOnline();
+      const { pushed, pulled, rejected } = await syncOnline();
       const now = new Date().toISOString();
       setLastSync(now);
-      setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
-      setTimeout(() => setSyncResult(null), 4000);
+      // Refused rows are listed in the banner below the top bar and stay there until they sync.
+      if (rejected.length === 0) {
+        setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
+        setTimeout(() => setSyncResult(null), 4000);
+      }
     } catch (err) {
       reportSyncFailure(err);
       setSyncFailed(true);
@@ -187,6 +209,16 @@ export default function Layout() {
     }
   }, [online, syncing, auth.user]);
 
+  // Work done offline goes up as soon as the connection returns.
+  useEffect(() => {
+    const onReconnect = () => {
+      setOnline(true);
+      void handleSync(true);
+    };
+    window.addEventListener('online', onReconnect);
+    return () => window.removeEventListener('online', onReconnect);
+  }, [handleSync]);
+
   useEffect(() => {
     if (!window.desktop?.isDesktop || !auth.user) return;
     let cancelled = false;
@@ -195,12 +227,14 @@ export default function Layout() {
       if (cancelled || !reachable) return;
       setOnline(true);
       try {
-        const { pushed, pulled } = await syncOnline();
+        const { pushed, pulled, rejected } = await syncOnline();
         if (cancelled) return;
         setLastSync(new Date().toISOString());
-        setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
         setSyncFailed(false);
-        setTimeout(() => setSyncResult(null), 4000);
+        if (rejected.length === 0) {
+          setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
+          setTimeout(() => setSyncResult(null), 4000);
+        }
       } catch (err) {
         reportSyncFailure(err);
         setSyncFailed(true);
@@ -384,9 +418,6 @@ export default function Layout() {
               Synced {formatSyncTime(lastSync)}
             </span>
           )}
-          {syncResult && (
-            <span className={`sync-result${syncFailed ? ' is-error' : ''}`}>{syncResult}</span>
-          )}
           <button
             type="button"
             className="btn btn-sm btn-sync"
@@ -405,6 +436,32 @@ export default function Layout() {
           </button>
         </div>
       </header>
+
+      {syncResult && (
+        <div className={`sync-toast${syncFailed ? ' is-error' : ''}`} role="status">
+          {syncResult}
+        </div>
+      )}
+
+      {rejections.length > 0 && (
+        <div className="sync-rejections" role="alert">
+          <strong>
+            {rejections.length} change{rejections.length === 1 ? ' was' : 's were'} not saved online
+          </strong>
+          <span className="form-hint">
+            They are still on this device and retry at every sync. Other devices and the live page
+            won’t show them until this is resolved.
+          </span>
+          <ul>
+            {rejections.slice(0, 6).map((r) => (
+              <li key={`${r.entity}:${r.id}`}>
+                {r.label}: {r.reason}
+              </li>
+            ))}
+          </ul>
+          {rejections.length > 6 && <span className="form-hint">…and {rejections.length - 6} more</span>}
+        </div>
+      )}
 
       {isOrganizerRoute && orgsLoaded && (!primaryOrg || primaryOrg.planTier === 'trial' || primaryOrg.verificationStatus !== 'verified') && (
         <div className="desktop-update-banner" role="region" aria-label="Organization status">
@@ -562,7 +619,7 @@ export default function Layout() {
 
       <footer className="app-footer">
         <span>
-          Chess Alokas · Offline-first tournament management
+          Chess Alokas · Tournament management that keeps working offline
           {window.desktop?.isDesktop ? (
             <>
               {' '}

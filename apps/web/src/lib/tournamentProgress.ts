@@ -247,7 +247,7 @@ export function getTournamentInstructions(
     status: markedReady ? 'done' : 'current',
     title: markedReady ? 'Player list confirmed' : 'Confirm player list',
     description: markedReady
-      ? 'List locked for start — next create table QR codes'
+      ? 'List locked for start — next pair Round 1'
       : 'Click Mark Ready when registration is final',
   });
 
@@ -263,7 +263,7 @@ export function getTournamentInstructions(
         id: 'play',
         status: 'upcoming',
         title: 'Pair rounds & enter results',
-        description: 'After QR stickers are ready, generate Round 1 — the floor PIN appears then',
+        description: 'Generate Round 1 — the floor PIN appears then, once online',
       },
       {
         id: 'complete',
@@ -277,13 +277,12 @@ export function getTournamentInstructions(
 
   // 3 — Table QR stickers (before pairing)
   let floorStatus: InstructionStatus = 'upcoming';
-  let floorTitle = 'Generate table QR codes';
+  let floorTitle = 'Generate table QR codes (optional)';
   let floorDescription = `Confirm ~${estimatedTables} boards on Pairings, create QR stations, then download stickers`;
 
   if (!qrReady) {
     floorStatus = 'current';
-    floorTitle = 'Generate table QR codes';
-    floorDescription = `On Pairings: create ${estimatedTables} table QR code${estimatedTables === 1 ? '' : 's'} from the player list, then download stickers`;
+    floorDescription = `For floor arbiter phones: create ${estimatedTables} table QR code${estimatedTables === 1 ? '' : 's'} on Pairings (needs internet). You can pair and score at the desk without them.`;
   } else {
     floorStatus = 'done';
     floorTitle = `${Math.max(floorTableCount, tournament.tableCount ?? 0)} table stickers ready`;
@@ -299,15 +298,11 @@ export function getTournamentInstructions(
   });
 
   // 4 — Pair & play (PIN issued when a round is paired)
-  let playStatus: InstructionStatus = qrReady ? 'current' : 'upcoming';
+  let playStatus: InstructionStatus = 'current';
   let playTitle = 'Pair rounds & enter results';
-  let playDescription = qrReady
-    ? 'Generate Round 1 — the floor PIN for that round appears on Pairings'
-    : 'Finish table QR stickers first, then generate Round 1';
+  let playDescription = 'Generate Round 1 — the floor PIN for that round appears on Pairings';
 
-  if (!qrReady) {
-    playTitle = 'Pair rounds & enter results';
-  } else if (!hasGames) {
+  if (!hasGames) {
     playTitle = 'Generate Round 1 pairings';
     playDescription = hasCategories && !mix
       ? 'Open Pairings and generate Round 1 — each category pairs separately; share the new round PIN with floor staff'
@@ -325,7 +320,7 @@ export function getTournamentInstructions(
     if (pendingDetail) playDescription += ` ${pendingDetail}`;
     const pinOk =
       !!tournament.arbiterPin && tournament.arbiterPinRound === caps.pendingResultsRound;
-    if (!pinOk) {
+    if (!pinOk && qrReady) {
       playDescription += ' Floor PIN missing — use Issue round PIN on Pairings.';
     }
   } else if (caps.pendingConfirmRound != null) {
@@ -506,6 +501,19 @@ export function getNextPairingRound(
   const cats = asList(categories);
   const players = asList(participants);
   const activeGames = asList(games);
+
+  // Nobody available for Round 1 must not skip it: the tournament would jump to Round 2 with the
+  // Round 1 absences no longer reachable from the Players tab.
+  if (
+    maxRounds >= 1 &&
+    !mixCategories &&
+    cats.length > 0 &&
+    !activeGames.some((g) => !g.deletedAt) &&
+    players.some((p) => !p.deletedAt) &&
+    players.every((p) => p.deletedAt || isExcludedFromRound(p, 1))
+  ) {
+    return 1;
+  }
 
   for (let round = 1; round <= maxRounds; round++) {
     if (mixCategories || cats.length === 0) {

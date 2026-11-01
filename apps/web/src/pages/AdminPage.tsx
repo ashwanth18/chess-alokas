@@ -177,7 +177,7 @@ export default function AdminPage() {
         verificationStatus: 'verified',
         planTier: 'event_pass',
         maxTournamentsQuota: 3,
-        maxPlayersPerTournament: 250,
+        maxPlayersPerTournament: 150,
         eventCreditsRemaining: 1,
         canPublishGlobal: true,
         canAcceptPaidRegistrations: true,

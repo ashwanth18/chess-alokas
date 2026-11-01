@@ -117,7 +117,8 @@ export default function EventRegistrationPage() {
     }
     setDetail(res.data);
     if (res.data.categories.length > 0 && !selectedCategoryId) {
-      setSelectedCategoryId(res.data.categories[0]!.id);
+      const first = [...res.data.categories].sort((a, b) => a.sortOrder - b.sortOrder)[0]!;
+      setSelectedCategoryId(first.id);
     }
 
     if (auth.user) {
@@ -203,7 +204,7 @@ export default function EventRegistrationPage() {
   }
 
   const event = detail?.event ?? null;
-  const categories = detail?.categories ?? [];
+  const categories = [...(detail?.categories ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
   const participants = detail?.participants ?? [];
   const formSchema = event?.registrationFormSchema;
   const mapsHref =
@@ -248,7 +249,7 @@ export default function EventRegistrationPage() {
             <p className="loading-row">Loading tournament details…</p>
           ) : error || !event ? (
             <div className="empty-state">
-              <h2>Tournament Not Found</h2>
+              <h1>Tournament Not Found</h1>
               <p className="form-hint">{error ?? 'This registration link is no longer valid.'}</p>
               <Link to="/discover" className="btn btn-primary">
                 Explore Events
@@ -563,7 +564,7 @@ export default function EventRegistrationPage() {
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                       <label>
-                        Contact Email (for confirmation &amp; certificate)
+                        Contact email (for the organizer and your digital certificate)
                         <input
                           className="input"
                           type="email"
@@ -686,7 +687,6 @@ export default function EventRegistrationPage() {
                           <th>Name</th>
                           <th>Rating</th>
                           <th>FIDE ID</th>
-                          <th>School / Club</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -698,7 +698,6 @@ export default function EventRegistrationPage() {
                             </td>
                             <td>{p.rating ?? '—'}</td>
                             <td>{p.fideId ?? '—'}</td>
-                            <td>{p.school || p.club || p.city || '—'}</td>
                           </tr>
                         ))}
                       </tbody>

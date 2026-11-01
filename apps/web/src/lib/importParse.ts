@@ -7,6 +7,7 @@ const NRIC_KEY_HINT = /nric|ic\b|mykad|identification/i;
 export function isNumericAgeColumn(columnName: string): boolean {
   const c = columnName.toLowerCase().trim();
   if (AGE_CATEGORY_HINT.test(c)) return false;
+  if (/proof|upload|certificate|url|link/.test(c)) return false;
   if (c === 'age' || c === 'years' || c === 'yr') return true;
   if (/\bage\b/.test(c) && !AGE_CATEGORY_HINT.test(c)) return true;
   return c === 'years old' || c === 'umur';

@@ -7,6 +7,10 @@ import { trackPageView } from '../lib/pageAnalytics';
 
 type Tab = 'password' | 'otp';
 
+const isDesktop =
+  Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
+  import.meta.env.VITE_DESKTOP === '1';
+
 export default function LoginPage() {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -44,7 +48,11 @@ export default function LoginPage() {
     if (res.error) setError(res.error);
     else {
       setOtpSent(true);
-      setMessage('Check your email for a magic link or 6-digit code.');
+      setMessage(
+        isDesktop
+          ? 'Check your email and enter the 6-digit code here. Links in the email open in your browser, not this app.'
+          : 'Check your email for a magic link or 6-digit code.',
+      );
     }
   }
 
@@ -146,30 +154,49 @@ export default function LoginPage() {
             </label>
           )}
           <button className="btn btn-primary" type="submit" disabled={busy || !auth.configured}>
-            {busy ? 'Please wait…' : otpSent ? 'Verify code' : 'Send code / magic link'}
+            {busy
+              ? 'Please wait…'
+              : otpSent
+                ? 'Verify code'
+                : isDesktop
+                  ? 'Send code'
+                  : 'Send code / magic link'}
           </button>
         </form>
       )}
 
-      <div className="auth-divider">or continue with</div>
-      <div className="auth-oauth">
-        <button
-          type="button"
-          className="btn btn-outline"
-          disabled={!auth.configured || busy}
-          onClick={() => void auth.signInWithOAuth('google')}
-        >
-          Google
-        </button>
-        <button
-          type="button"
-          className="btn btn-outline"
-          disabled={!auth.configured || busy}
-          onClick={() => void auth.signInWithOAuth('github')}
-        >
-          GitHub
-        </button>
-      </div>
+      {isDesktop ? (
+        <p className="form-hint">
+          Google and GitHub sign-in are not available in the desktop app. If your account only uses
+          them, set a password at{' '}
+          <a href="https://chess-manager.alokas.com/account" target="_blank" rel="noreferrer">
+            chess-manager.alokas.com
+          </a>{' '}
+          first.
+        </p>
+      ) : (
+        <>
+          <div className="auth-divider">or continue with</div>
+          <div className="auth-oauth">
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={!auth.configured || busy}
+              onClick={() => void auth.signInWithOAuth('google')}
+            >
+              Google
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={!auth.configured || busy}
+              onClick={() => void auth.signInWithOAuth('github')}
+            >
+              GitHub
+            </button>
+          </div>
+        </>
+      )}
 
       {error && <div className="form-error">{error}</div>}
       {message && <p className="form-hint">{message}</p>}
@@ -177,7 +204,14 @@ export default function LoginPage() {
       <p className="auth-footer">
         No account? <Link to="/signup">Create one</Link>
         {' · '}
-        <Link to="/auth/reset">Forgot password</Link>
+        {isDesktop ? (
+          // The reset link must be requested and opened in the same browser.
+          <a href="https://chess-manager.alokas.com/auth/reset" target="_blank" rel="noreferrer">
+            Forgot password (opens your browser)
+          </a>
+        ) : (
+          <Link to="/auth/reset">Forgot password</Link>
+        )}
       </p>
       <p className="auth-footer auth-footer-secondary">
         <Link to="/">← Back to Chess Alokas home</Link>

@@ -49,6 +49,16 @@ const PRESETS: Array<{ label: string; key: keyof typeof PRESET_FILTERS }> = [
   { label: 'Male', key: 'male' },
 ];
 
+/** Initials of the tournament name, so a new event doesn't inherit another event's serial prefix. */
+function serialPrefixFromName(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-z0-9]/gi, '').charAt(0))
+    .join('')
+    .toUpperCase()
+    .slice(0, 6);
+}
+
 function newCategory(): CategoryDraft {
   return {
     id: crypto.randomUUID(),
@@ -89,9 +99,13 @@ export default function CreateTournamentPage() {
     setCategories((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   }
 
-  function applyPreset(catId: string, key: keyof typeof PRESET_FILTERS) {
+  function applyPreset(catId: string, key: keyof typeof PRESET_FILTERS, label: string) {
     const preset = PRESET_FILTERS[key];
-    updateCategory(catId, { filter: preset as FilterGroup });
+    setCategories((cs) =>
+      cs.map((c) =>
+        c.id === catId ? { ...c, filter: preset as FilterGroup, name: c.name.trim() || label } : c,
+      ),
+    );
   }
 
   function addRule(catId: string) {
@@ -202,7 +216,7 @@ export default function CreateTournamentPage() {
         publicEnabled: false,
         certEmailSubject: DEFAULT_CERT_EMAIL_SUBJECT,
         certEmailBody: DEFAULT_CERT_EMAIL_BODY,
-        certSerialPrefix: DEFAULT_CERT_SERIAL_PREFIX,
+        certSerialPrefix: serialPrefixFromName(name) || DEFAULT_CERT_SERIAL_PREFIX,
         certSerialPad: DEFAULT_CERT_SERIAL_PAD,
         certSerialNext: 1,
         updatedAt: now,
@@ -408,7 +422,7 @@ export default function CreateTournamentPage() {
                     key={p.key}
                     type="button"
                     className="btn btn-xs btn-outline"
-                    onClick={() => applyPreset(cat.id, p.key)}
+                    onClick={() => applyPreset(cat.id, p.key, p.label)}
                   >
                     {p.label}
                   </button>

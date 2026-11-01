@@ -7,7 +7,13 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { Provider, Session, User } from '@supabase/supabase-js';
+import {
+  isAuthApiError,
+  isAuthSessionMissingError,
+  type Provider,
+  type Session,
+  type User,
+} from '@supabase/supabase-js';
 import * as Sentry from '@sentry/react';
 import { authRedirectTo, supabase, supabaseConfigured } from '../lib/supabase';
 import { db } from '../db/local';
@@ -19,6 +25,12 @@ interface AuthContextValue {
   loading: boolean;
   session: Session | null;
   user: User | null;
+  /**
+   * True when `user` comes from the saved sign-in because its token could not be
+   * refreshed (no network). Local work continues; `session` stays null, so no
+   * token is available for cloud calls until the refresh succeeds.
+   */
+  sessionOffline: boolean;
   displayName: string | null;
   isPlatformAdmin: boolean;
   signInWithPassword: (email: string, password: string) => Promise<{ error?: string }>;
@@ -51,9 +63,79 @@ async function persistOwnerId(userId: string | null) {
   }
 }
 
+function isDesktopApp(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    (Boolean(window.desktop?.isDesktop) || import.meta.env.VITE_DESKTOP === '1')
+  );
+}
+
+const DESKTOP_OAUTH_MESSAGE =
+  'Google and GitHub sign-in are not available in the desktop app. Sign in with your email and password or an email code. If your account only uses Google or GitHub, set a password at chess-manager.alokas.com first.';
+const DESKTOP_RESET_MESSAGE =
+  'Reset your password at chess-manager.alokas.com in your browser, then sign in here.';
+
+function authStorageKey(): string | null {
+  if (!supabase) return null;
+  const fromClient = (supabase.auth as unknown as { storageKey?: unknown }).storageKey;
+  return typeof fromClient === 'string' ? fromClient : null;
+}
+
+/** The saved sign-in as supabase-js stored it, read without touching the network. */
+function readCachedSignIn(): { user: User; expired: boolean } | null {
+  const key = authStorageKey();
+  if (!key) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { user?: User; expires_at?: number; refresh_token?: string };
+    if (!parsed?.user?.id || !parsed.refresh_token) return null;
+    return {
+      user: parsed.user,
+      expired: !parsed.expires_at || parsed.expires_at * 1000 <= Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The auth server said no. Anything else (no network, 5xx, timeout) may succeed later. */
+function isDefinitiveAuthRejection(err: unknown): boolean {
+  if (isAuthSessionMissingError(err)) return true;
+  return isAuthApiError(err) && err.status >= 400 && err.status < 500;
+}
+
+/** supabase-js waits on any refresh in flight, which can take a long time to fail offline. */
+async function signOutWithin(scope: 'local' | 'global', ms: number): Promise<{ error: unknown }> {
+  if (!supabase) return { error: null };
+  const attempt = supabase.auth.signOut({ scope }).then(
+    ({ error }) => ({ error: error as unknown }),
+    (err: unknown) => ({ error: err }),
+  );
+  const timeout = new Promise<{ error: unknown }>((resolve) => {
+    window.setTimeout(() => resolve({ error: new Error('Sign-out timed out') }), ms);
+  });
+  return Promise.race([attempt, timeout]);
+}
+
+function removeStoredSignIn() {
+  const key = authStorageKey();
+  if (key) {
+    window.localStorage.removeItem(key);
+    window.localStorage.removeItem(`${key}-code-verifier`);
+  }
+}
+
+/** Sign-out must work offline, where supabase-js can return before clearing its storage. */
+async function clearSignInLocally() {
+  const { error } = await signOutWithin('local', 3_000);
+  if (error) removeStoredSignIn();
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
+  const [offlineUser, setOfflineUser] = useState<User | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
@@ -93,6 +175,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let mounted = true;
     let settled = false;
+    // An expired token needs the network to refresh, and that can take a long
+    // time to fail. Don't make someone without Wi-Fi wait for it to reach their data.
+    const cached = readCachedSignIn();
+    if (cached?.expired) {
+      setOfflineUser(cached.user);
+      setLoading(false);
+    }
     const timer = window.setTimeout(() => {
       if (!mounted || settled) return;
       reportBootIssue(
@@ -106,13 +195,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ data, error }) => {
         if (!mounted) return;
         settled = true;
-        if (error) {
-          reportBootIssue('AUTH_SESSION_FAILED', error.message);
-        } else {
+        if (data.session) {
           clearBootIssue();
+          setSession(data.session);
+          setOfflineUser(null);
+          void persistOwnerId(data.session.user.id);
+          return;
         }
-        setSession(data.session);
-        void persistOwnerId(data.session?.user.id ?? null);
+        const stillSaved = readCachedSignIn();
+        if (error && !isDefinitiveAuthRejection(error) && stillSaved) {
+          // Could not refresh right now. Keep local access with no token.
+          console.warn('[auth] could not refresh sign-in; working offline', error.message);
+          setOfflineUser(stillSaved.user);
+          return;
+        }
+        if (error) reportBootIssue('AUTH_SESSION_FAILED', error.message);
+        else clearBootIssue();
+        setSession(null);
+        setOfflineUser(null);
+        void persistOwnerId(null);
       })
       .catch((err) => {
         if (!mounted) return;
@@ -124,9 +225,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.clearTimeout(timer);
         if (mounted) setLoading(false);
       });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSession(next);
-      void persistOwnerId(next?.user.id ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
+      if (next) {
+        setSession(next);
+        setOfflineUser(null);
+        void persistOwnerId(next.user.id);
+        return;
+      }
+      setSession(null);
+      // INITIAL_SESSION also reports null when a refresh merely failed; the saved
+      // sign-in is still there then. SIGNED_OUT is what a real rejection or sign-out sends.
+      const saved = event === 'SIGNED_OUT' ? null : readCachedSignIn();
+      setOfflineUser(saved?.user ?? null);
+      if (!saved) void persistOwnerId(null);
     });
     return () => {
       mounted = false;
@@ -139,14 +250,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshProfile();
   }, [refreshProfile]);
 
-  // The API rejected our access token with 401 and it wasn't a token we can
-  // recover from client-side (auto-refresh already tried) — sign out so the
-  // user sees the login screen instead of every request silently failing.
+  // While working offline, keep trying to get a real session back.
+  const hasOfflineUser = Boolean(offlineUser);
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !hasOfflineUser) return;
+    let running = false;
+    const retry = () => {
+      if (running) return;
+      running = true;
+      void client.auth
+        .getSession()
+        .then(({ data }) => {
+          if (!data.session) return;
+          setSession(data.session);
+          setOfflineUser(null);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          running = false;
+        });
+    };
+    const interval = window.setInterval(retry, 30_000);
+    window.addEventListener('online', retry);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('online', retry);
+    };
+  }, [hasOfflineUser]);
+
+  // The API answered 401. That alone does not prove the sign-in is dead: on flaky
+  // Wi-Fi a failed refresh leaves the request with no token at all. Ask the auth
+  // server. Sign out only if it rejects the refresh token, or if a just-refreshed
+  // token is rejected again.
   useEffect(() => {
     const client = supabase;
     if (!client) return;
+    let checking = false;
+    let refreshedAt = 0;
+    const signOutNow = async () => {
+      await clearSignInLocally();
+      setSession(null);
+      setOfflineUser(null);
+      await persistOwnerId(null);
+    };
     const onExpired = () => {
-      void client.auth.signOut({ scope: 'local' }).then(() => persistOwnerId(null));
+      if (checking) return;
+      checking = true;
+      void (async () => {
+        try {
+          if (Date.now() - refreshedAt < 60_000) {
+            await signOutNow();
+            return;
+          }
+          const { error } = await client.auth.refreshSession();
+          if (!error) {
+            refreshedAt = Date.now();
+          } else if (isDefinitiveAuthRejection(error)) {
+            await signOutNow();
+          } else {
+            console.warn('[auth] 401 but could not reach the auth server; keeping sign-in', error.message);
+          }
+        } finally {
+          checking = false;
+        }
+      })();
     };
     window.addEventListener('auth:session-expired', onExpired);
     return () => window.removeEventListener('auth:session-expired', onExpired);
@@ -154,15 +322,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!sentryEnabled) return;
-    if (session?.user) {
-      Sentry.setUser({
-        id: session.user.id,
-        email: session.user.email ?? undefined,
-      });
-    } else {
-      Sentry.setUser(null);
-    }
-  }, [session?.user]);
+    // Opaque id only: no email or other personal data goes to error reporting.
+    const id = session?.user.id ?? offlineUser?.id;
+    Sentry.setUser(id ? { id } : null);
+  }, [session?.user.id, offlineUser?.id]);
 
   const getAccessToken = useCallback(async () => {
     if (!supabase) return null;
@@ -175,7 +338,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configured: supabaseConfigured,
       loading,
       session,
-      user: session?.user ?? null,
+      user: session?.user ?? offlineUser,
+      sessionOffline: !session && Boolean(offlineUser),
       displayName,
       isPlatformAdmin,
       getAccessToken,
@@ -216,6 +380,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async signInWithOAuth(provider) {
         if (!supabase) return { error: 'Auth is not configured' };
+        if (isDesktopApp()) {
+          // The browser would finish the PKCE flow without the verifier held here.
+          // The sign-up page ignores this return value, so say it out loud too.
+          window.alert(DESKTOP_OAUTH_MESSAGE);
+          return { error: DESKTOP_OAUTH_MESSAGE };
+        }
         const { error } = await supabase.auth.signInWithOAuth({
           provider: provider as Provider,
           options: { redirectTo: authRedirectTo(), skipBrowserRedirect: false },
@@ -224,6 +394,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async resetPassword(email) {
         if (!supabase) return { error: 'Auth is not configured' };
+        if (isDesktopApp()) return { error: DESKTOP_RESET_MESSAGE };
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: authRedirectTo('/auth/reset'),
         });
@@ -246,6 +417,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async linkIdentity(provider) {
         if (!supabase) return { error: 'Auth is not configured' };
+        if (isDesktopApp()) return { error: DESKTOP_OAUTH_MESSAGE };
         const { error } = await supabase.auth.linkIdentity({
           provider: provider as Provider,
           options: { redirectTo: authRedirectTo() },
@@ -261,12 +433,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async signOut(scope = 'local') {
         if (!supabase) return;
-        await supabase.auth.signOut({ scope });
+        if (offlineUser && !session) {
+          // No reachable server: end it on this device now rather than wait for a timeout.
+          removeStoredSignIn();
+          void signOutWithin('local', 3_000);
+        } else {
+          const { error } = await signOutWithin(scope, 5_000);
+          // Offline the server call fails; the sign-out on this device must still happen.
+          if (error) removeStoredSignIn();
+        }
+        setSession(null);
+        setOfflineUser(null);
         await persistOwnerId(null);
         if (sentryEnabled) Sentry.setUser(null);
       },
     }),
-    [loading, session, displayName, isPlatformAdmin, getAccessToken, refreshProfile],
+    [loading, session, offlineUser, displayName, isPlatformAdmin, getAccessToken, refreshProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

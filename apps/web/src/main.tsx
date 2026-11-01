@@ -1,6 +1,6 @@
 import './instrument';
 
-import { StrictMode, useEffect, useState } from 'react';
+import { Component, StrictMode, Suspense, lazy, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { reactErrorHandler } from '@sentry/react';
@@ -10,30 +10,32 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import Layout from './components/Layout';
 import DesktopUpdateBanner from './components/DesktopUpdateBanner';
 import BootIssueCard from './components/BootIssueCard';
-import IndexedDbRecovery from './components/IndexedDbRecovery';
+import IndexedDbRecovery, { BackupPage, DesktopBackupAgent } from './components/IndexedDbRecovery';
 import { trackDesktopPresence } from './lib/productTelemetry';
 import { ensureDbOpen } from './db/local';
 import { reportBootIssue } from './lib/bootDiagnostics';
-import HomePage from './pages/HomePage';
-import CreateTournamentPage from './pages/CreateTournamentPage';
-import TournamentPage from './pages/TournamentPage';
-import ImportPage from './pages/ImportPage';
-import SimulatorPage from './pages/SimulatorPage';
-import CertificatesPage from './pages/CertificatesPage';
-import LoginPage from './pages/LoginPage';
-import SignupPage from './pages/SignupPage';
-import AuthCallbackPage from './pages/AuthCallbackPage';
-import ResetPasswordPage from './pages/ResetPasswordPage';
-import AccountPage from './pages/AccountPage';
-import SettingsPage from './pages/SettingsPage';
-import AdminPage from './pages/AdminPage';
-import PlayerPortalPage from './pages/PlayerPortalPage';
-import DiscoverEventsPage from './pages/DiscoverEventsPage';
-import EventRegistrationPage from './pages/EventRegistrationPage';
-import LandingPage from './pages/LandingPage';
-import TableScoringPage from './pages/TableScoringPage';
-import LivePage from './pages/LivePage';
-import LiveTvPage from './pages/LiveTvPage';
+import RouteTitle from './components/RouteTitle';
+
+const HomePage = lazy(() => import('./pages/HomePage'));
+const CreateTournamentPage = lazy(() => import('./pages/CreateTournamentPage'));
+const TournamentPage = lazy(() => import('./pages/TournamentPage'));
+const ImportPage = lazy(() => import('./pages/ImportPage'));
+const SimulatorPage = lazy(() => import('./pages/SimulatorPage'));
+const CertificatesPage = lazy(() => import('./pages/CertificatesPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const SignupPage = lazy(() => import('./pages/SignupPage'));
+const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
+const AccountPage = lazy(() => import('./pages/AccountPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
+const PlayerPortalPage = lazy(() => import('./pages/PlayerPortalPage'));
+const DiscoverEventsPage = lazy(() => import('./pages/DiscoverEventsPage'));
+const EventRegistrationPage = lazy(() => import('./pages/EventRegistrationPage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const TableScoringPage = lazy(() => import('./pages/TableScoringPage'));
+const LivePage = lazy(() => import('./pages/LivePage'));
+const LiveTvPage = lazy(() => import('./pages/LiveTvPage'));
 
 const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
@@ -103,7 +105,17 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     return <SessionLoading title="Loading session" />;
   }
   if (!auth.user) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return (
+    <>
+      {auth.sessionOffline && (
+        <div className="form-hint" role="status" style={{ padding: '0.35rem 1rem', textAlign: 'center' }}>
+          Working offline with your saved sign-in. Your work stays on this device and syncs once the
+          connection returns.
+        </div>
+      )}
+      {children}
+    </>
+  );
 }
 
 /** Guests see marketing landing; signed-in users go to the tournament dashboard. */
@@ -163,6 +175,9 @@ function AppRoot() {
         <>
           <DesktopUpdateBanner />
           <ProductTelemetry />
+          {isDesktop && <DesktopBackupAgent />}
+          <RouteTitle />
+          <Suspense fallback={<SessionLoading title="Loading" />}>
           <Routes>
           <Route path="/" element={<RootEntry />} />
           <Route path="/login" element={<LoginPage />} />
@@ -191,6 +206,7 @@ function AppRoot() {
             <Route path="/simulator" element={<SimulatorPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/backups" element={<BackupPage />} />
             <Route path="/admin" element={<AdminPage />} />
           </Route>
           <Route
@@ -208,10 +224,47 @@ function AppRoot() {
             }
           />
           </Routes>
+          </Suspense>
         </>
       </Router>
     </AuthProvider>
   );
+}
+
+/** A render error must not leave a blank window in the middle of a tournament. */
+class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo) {
+    reportBootIssue('RENDER_ERROR', error.message.slice(0, 300), info.componentStack ?? '');
+  }
+
+  override render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <h1>This screen hit a problem</h1>
+          <p className="form-hint">Your tournament data is safe on this device.</p>
+          <BootIssueCard />
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              window.location.hash = '';
+              window.location.reload();
+            }}
+          >
+            Reload the app
+          </button>
+        </div>
+      </div>
+    );
+  }
 }
 
 createRoot(document.getElementById('root')!, {
@@ -220,6 +273,8 @@ createRoot(document.getElementById('root')!, {
   onRecoverableError: reactErrorHandler(),
 }).render(
   <StrictMode>
-    <AppRoot />
+    <AppErrorBoundary>
+      <AppRoot />
+    </AppErrorBoundary>
   </StrictMode>,
 );

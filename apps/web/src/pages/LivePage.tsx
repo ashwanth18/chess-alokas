@@ -10,7 +10,6 @@ import {
 } from '../api/client';
 import TableSearch from '../components/TableSearch';
 import TiebreakRulesHelp from '../components/TiebreakRulesHelp';
-import { displaySchool, displayYearOfBirth } from '../lib/importParse';
 import {
   loadLiveBookmarks,
   toggleLiveBookmark,
@@ -252,7 +251,7 @@ export default function LivePage() {
   const filteredPlayers = useMemo(() => {
     if (!data) return [];
     return data.players.filter((p) =>
-      matchesTextSearch(search, p.name, p.club, p.school, p.city, p.rating),
+      matchesTextSearch(search, p.name, p.city, p.rating),
     );
   }, [data, search]);
 
@@ -262,8 +261,8 @@ export default function LivePage() {
       const white = g.whiteId ? playerById.get(g.whiteId) : null;
       const black = g.blackId ? playerById.get(g.blackId) : null;
       return (
-        matchesTextSearch(search, white?.name, white?.club, white?.rating) ||
-        matchesTextSearch(search, black?.name, black?.club, black?.rating)
+        matchesTextSearch(search, white?.name, white?.rating) ||
+        matchesTextSearch(search, black?.name, black?.rating)
       );
     });
   }, [boardsForRound, search, playerById]);
@@ -624,12 +623,9 @@ export default function LivePage() {
                 matchesTextSearch(
                   search,
                   p.name,
-                  p.school,
-                  p.club,
                   p.city,
                   p.state,
                   p.rating,
-                  p.yearOfBirth,
                 ),
               ),
             ).map((p) => {
@@ -656,7 +652,6 @@ export default function LivePage() {
                       <span className="live-player-card-meta">
                         {p.rating && p.rating > 0 ? `FIDE ${p.rating}` : 'Unrated'}
                         {ageCategory ? ` · ${ageCategory}` : ''}
-                        {displaySchool(p) ? ` · ${displaySchool(p)}` : ''}
                       </span>
                     </button>
                     <BookmarkButton active={pinned} onToggle={() => pinPlayer(p)} />
@@ -888,10 +883,6 @@ function LivePlayerView({
         />
         <dl className="live-player-profile">
           <div>
-            <dt>Year of birth</dt>
-            <dd>{displayYearOfBirth(player) ?? '—'}</dd>
-          </div>
-          <div>
             <dt>Start rank</dt>
             <dd>{startRankById.get(player.id) ?? '—'}</dd>
           </div>
@@ -902,10 +893,6 @@ function LivePlayerView({
           <div>
             <dt>FIDE rating</dt>
             <dd>{player.rating && player.rating > 0 ? player.rating : 'Unrated'}</dd>
-          </div>
-          <div>
-            <dt>School</dt>
-            <dd>{displaySchool(player) ?? '—'}</dd>
           </div>
           <div>
             <dt>City</dt>
