@@ -248,7 +248,7 @@ export function RegisterPhone() {
       </div>
       <div className="ps-person">
         <Name n={['Lim Gambit Ling', '']} />
-        <small>Born 2012 · Student</small>
+        <small>Born 2012 · Child</small>
       </div>
       <div className="ps-foot-act">
         <div className="ps-btn ps-btn-wide">Continue</div>
@@ -283,7 +283,7 @@ export function AccountPhone() {
         </div>
         <div>
           <Name n={['Lim Gambit Ling', '']} />
-          <small>Born 2012 · Student</small>
+          <small>Born 2012 · Child</small>
         </div>
       </div>
     </Phone>
@@ -292,7 +292,7 @@ export function AccountPhone() {
 
 export function CareerPhone() {
   return (
-    <Phone tab="Career" label="Career screen: win, draw and loss totals, a certificate with a Download PDF button, and tournament history.">
+    <Phone tab="Career" label="Career screen: win, draw and loss totals, past tournaments, a certificate with a Download PDF button, and tournament history.">
       <AppBar />
       <PlayerPicker n={PLAYER} sub="Born 2009 · Primary · Self" />
       <div className="ps-card">
@@ -313,6 +313,13 @@ export function CareerPhone() {
         </div>
       </div>
       <div className="ps-card">
+        <div className="ps-h ps-h-in">Tournaments</div>
+        <p className="ps-ev ps-ev-s">Kejohanan Rook Lift Junior</p>
+        <p className="ps-dim">9 Aug 2026 · 4 / 6 · W3 D2 L1</p>
+        <p className="ps-ev ps-ev-s">Piala Zugzwang Rapid</p>
+        <p className="ps-dim">21 Jun 2026 · 3½ / 7 · W3 D1 L3</p>
+      </div>
+      <div className="ps-card">
         <div className="ps-row">
           <div className="ps-h ps-h-in">Certificates</div>
           <span className="ps-dim">2 issued</span>
@@ -320,11 +327,6 @@ export function CareerPhone() {
         <p className="ps-ev ps-ev-s">Kejohanan Rook Lift Junior</p>
         <p className="ps-dim">Winner, rank 3 · 9 Aug 2026 · KRL-00031</p>
         <div className="ps-btn ps-btn-fit">Download PDF</div>
-      </div>
-      <div className="ps-card">
-        <div className="ps-h ps-h-in">Tournaments</div>
-        <p className="ps-ev ps-ev-s">Kejohanan Rook Lift Junior</p>
-        <p className="ps-dim">9 Aug 2026</p>
       </div>
     </Phone>
   );

@@ -158,8 +158,10 @@ export default function MobileAppPage() {
         </Story>
 
         <Story id="ma-register" title="Register in a few taps." phone={<RegisterPhone />}>
-          <p>Save your player profile once. Then choose who&apos;s playing and send your entry.</p>
+          <p>Save your player profile once, and add your children if you have them. Then choose who&apos;s playing and send your entry.</p>
           <ul>
+            <li>Register more than one player at a time</li>
+            <li>Switch between players at the top of the screen</li>
             <li>The section is suggested from age, for you to check</li>
             <li>Leave halfway and your draft waits on the phone</li>
           </ul>
@@ -177,46 +179,24 @@ export default function MobileAppPage() {
           <p>Your board, your colour and your opponent, on one card. The card is white if you play White, black if you play Black.</p>
           <ul>
             <li>See your score and earlier rounds</li>
+            <li>An open Matchday updates by itself when new pairings are posted</li>
+            <li>A high-contrast Sunlight display for bright venues</li>
             <li>If the organizer turns on the live page, also rank, all pairings and full standings</li>
           </ul>
         </Story>
 
-        <Story id="ma-career" flip title="Every result. Every certificate." phone={<CareerPhone />}>
-          <p>Your wins, draws, losses and tournament history, and your certificates in one place, ready to save as a PDF.</p>
+        <Story id="ma-career" flip title="Every tournament you've played." phone={<CareerPhone />}>
+          <p>See your past tournaments with the date, your score, and your wins, draws and losses. Your certificates sit alongside them, ready to save as a PDF.</p>
+          <ul>
+            <li>Career totals across your events</li>
+            <li>Played before you signed up? Claim your past entries when your confirmed email and name match</li>
+          </ul>
         </Story>
 
         <Story id="ma-signal" title="Weak signal in the hall? Still there." phone={<OfflinePhone />}>
           <p>The app keeps the last information it loaded, and tells you exactly how old it is. When the signal returns, tap Retry or pull to refresh.</p>
           <p className="ma-fine">It can only show what it has already loaded once, and new pairings wait for a connection.</p>
         </Story>
-
-        <section className="ma-kids" aria-labelledby="ma-h-kids">
-          <div className="ma-wrap ma-kids-in">
-            <div>
-              <h2 id="ma-h-kids">Manage your children too.</h2>
-              <p>Add them to your account, register more than one at a time, and switch between players at the top of the screen.</p>
-            </div>
-            <figure className="ma-kids-fig">
-              <div className="ma-kids-cards" aria-hidden="true">
-                <div className="is-on">
-                  <Pawn side="w" />
-                  <span>
-                    <b>Puteri Alekhine Damia</b> binti Hafiz Gambit
-                    <small>Board 14, plays White</small>
-                  </span>
-                </div>
-                <div>
-                  <Pawn side="b" />
-                  <span>
-                    <b>Muhammad Caro Kann</b> bin Hafiz Gambit
-                    <small>Board 22, plays Black</small>
-                  </span>
-                </div>
-              </div>
-              <figcaption>Illustration with invented names.</figcaption>
-            </figure>
-          </div>
-        </section>
 
         <section className="ma-diff" aria-labelledby="ma-h-diff">
           <div className="ma-wrap">

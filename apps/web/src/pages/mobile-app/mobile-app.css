@@ -117,7 +117,7 @@ body:has(.ma) { background: #071f17; }
 
 /* Matchday facts */
 .ma-four { background: linear-gradient(180deg, var(--ma-panel), var(--ma-bg2)); padding-block: clamp(48px, 6vw, 88px); border-block: 1px solid var(--ma-line2); }
-.ma-four h2, .ma-story h2, .ma-kids h2, .ma-diff h2 { font-size: clamp(36px, 4.6vw, 72px); line-height: 1.04; letter-spacing: -0.012em; text-wrap: balance; }
+.ma-four h2, .ma-story h2, .ma-diff h2 { font-size: clamp(36px, 4.6vw, 72px); line-height: 1.04; letter-spacing: -0.012em; text-wrap: balance; }
 .ma-four dl { display: grid; gap: 12px; margin: clamp(24px, 3vw, 44px) 0 0; }
 .ma-four dl > div { padding: 22px; border-radius: 22px; border: 1px solid var(--ma-line); background: rgba(255, 255, 255, 0.04); }
 .ma-four dt { font-family: var(--ma-serif); font-weight: 600; font-size: clamp(25px, 2.2vw, 32px); line-height: 1.1; color: var(--ma-gold); }
@@ -137,31 +137,12 @@ body:has(.ma) { background: #071f17; }
 .ma-story-copy li::before { content: ""; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--ma-gold); transform: translateY(-1px); }
 .ma-fig { display: flex; flex-direction: column; align-items: center; }
 .ma-fig .ps-phone, .ma-front { width: min(100%, clamp(290px, 26vw, 360px)); }
-.ma-kids-fig { min-width: 0; }
 @media (min-width: 900px) {
   .ma-story-in { grid-template-columns: 1fr 1fr; gap: 64px; }
   .ma-story.is-flip .ma-story-copy { order: 2; }
 }
 
 /* Family */
-.ma-kids { padding-block: clamp(48px, 6vw, 96px); }
-.ma-kids-in { display: grid; gap: 32px; align-items: center; }
-.ma-kids-in > * { min-width: 0; }
-.ma-kids p { margin: 18px 0 0; font-size: clamp(20px, 1.8vw, 25px); line-height: 1.35; max-width: 26em; }
-.ma-kids-cards { display: grid; gap: 14px; }
-.ma-kids-cards > div {
-  display: flex; gap: 14px; align-items: flex-start; padding: 20px 22px; border-radius: 22px;
-  background: linear-gradient(180deg, var(--ma-panel2), var(--ma-panel)); border: 1px solid var(--ma-line2);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.36);
-}
-.ma-kids-cards > div.is-on { transform: rotate(-1deg); }
-.ma-kids-cards > div:not(.is-on) { transform: rotate(1deg); }
-.ma-kids-cards svg { width: 36px; height: 36px; flex: none; stroke-width: 0.8; }
-.ma-kids-cards svg[data-side="w"] { fill: #ffffff; stroke: #5a4a2c; }
-.ma-kids-cards svg[data-side="b"] { fill: #000000; stroke: #efe3c8; }
-.ma-kids-cards b { color: var(--ma-cream); }
-.ma-kids-cards small { display: block; margin-top: 4px; font-size: 17px; font-weight: 700; color: var(--ma-gold); }
-@media (min-width: 900px) { .ma-kids-in { grid-template-columns: 1fr 1fr; gap: 64px; } }
 
 /* Difference */
 .ma-diff { padding-block: clamp(48px, 6vw, 96px); background: var(--ma-bg2); border-top: 1px solid var(--ma-line); }
