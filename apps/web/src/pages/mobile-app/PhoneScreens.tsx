@@ -1,18 +1,18 @@
 /**
- * Phone frames with the family app's screens, rebuilt in HTML and CSS from the app's current look
+ * Phone frames with the Chess Alokas app's screens, rebuilt in HTML and CSS from the app's current look
  * (apps/mobile/lib/screens and theme/alokas_tokens.dart). Names and events are invented.
  *
  * REPLACE LATER: when the Android build is final, swap each <Phone> body for a real screenshot taken
  * with invented data. One per exported screen below. Keep the captions.
  */
 import type { ReactNode } from 'react';
-import { Crown, Pawn } from '../landing/pieces';
+import { Crown } from '../landing/pieces';
 
 type Tab = 'Discover' | 'Matchday' | 'Career' | 'Account';
 
+const PLAYER = ['Harish Catalan', 'a/l Tartakower'];
 const CHILD_A = ['Puteri Alekhine Damia', 'binti Hafiz Gambit'];
 const CHILD_B = ['Muhammad Caro Kann', 'bin Hafiz Gambit'];
-const PARENT = ['Hafiz Gambit', 'bin Pawn Storm'];
 const OPPONENT = ['Kavitha Zugzwang', 'a/p Fianchetto Rajaratnam'];
 const EVENT = 'Piala Zugzwang Rapid';
 
@@ -118,11 +118,11 @@ function MatchCard({ side, board }: { side: 'w' | 'b'; board: number }) {
         </span>
       </div>
       <p className="ps-big-name">
-        <b>{CHILD_A[0]}</b>
+        <b>{PLAYER[0]}</b>
         <br />
-        {CHILD_A[1]}
+        {PLAYER[1]}
       </p>
-      <p className="ps-dim">#12 · Under 12</p>
+      <p className="ps-dim">#12 · Under 18</p>
       <div className={`ps-block ps-block-${side}`}>
         <div className="ps-row">
           <b>Board</b>
@@ -137,7 +137,7 @@ function MatchCard({ side, board }: { side: 'w' | 'b'; board: number }) {
         <br />
         {OPPONENT[1]}
       </p>
-      <p className="ps-dim">#19 · Under 12</p>
+      <p className="ps-dim">#19 · Under 18</p>
     </div>
   );
 }
@@ -149,7 +149,7 @@ export function MatchdayPhone() {
       label="Matchday screen: updated 2:32 PM. Board 14, plays White, round 4 of 7, score two and a half, with the opponent's name."
     >
       <AppBar />
-      <PlayerPicker n={CHILD_A} sub="Born 2015 · Child" />
+      <PlayerPicker n={PLAYER} sub="Born 2009 · Primary · Self" />
       <p className="ps-fresh">
         <i />
         Updated 2:32 PM
@@ -177,55 +177,6 @@ export function OfflinePhone() {
       </div>
       <div className="ps-h">{EVENT}</div>
       <MatchCard side="b" board={9} />
-    </Phone>
-  );
-}
-
-export function StandingPhone() {
-  const rows = [
-    ['3=', 'Lim Gambit Ling', '3'],
-    ['5', 'Puteri Alekhine Damia', '2½'],
-    ['6', 'Arjun Pirc', '2½'],
-    ['7', 'Tan Zwischen Zug', '2'],
-  ];
-  return (
-    <Phone tab="Matchday" label="Where we stand: two and a half points, rank 5 of 28 in Under 12, with nearby players and earlier rounds.">
-      <AppBar />
-      <div className="ps-card">
-        <div className="ps-h ps-h-in">Where we stand</div>
-        <p className="ps-points">
-          <b>2½</b> points
-        </p>
-        <p className="ps-rank">Rank 5 of 28 in Under 12</p>
-        <div className="ps-lines">
-          {rows.map(([r, n, p]) => (
-            <div key={n} className={n!.startsWith('Puteri') ? 'is-me' : undefined}>
-              <span>{r}</span>
-              <span>{n}</span>
-              <span>{p}</span>
-            </div>
-          ))}
-        </div>
-        <p className="ps-dim">By points. Tied players share a rank; the arbiter applies tie-breaks. As of 2:32 PM.</p>
-      </div>
-      <div className="ps-card">
-        <div className="ps-h ps-h-in">Earlier rounds</div>
-        <div className="ps-early">
-          <span>Round 3</span>
-          <span className="ps-sidepawn"><Pawn side="b" />Tan Zwischen Zug</span>
-          <b>½</b>
-        </div>
-        <div className="ps-early">
-          <span>Round 2</span>
-          <span className="ps-sidepawn"><Pawn side="w" />Wong Fork Jia</span>
-          <b>1</b>
-        </div>
-        <div className="ps-early">
-          <span>Round 1</span>
-          <span className="ps-sidepawn"><Pawn side="b" />Ng Pawn Mei</span>
-          <b>1</b>
-        </div>
-      </div>
     </Phone>
   );
 }
@@ -274,7 +225,7 @@ export function DiscoverPhone() {
 
 export function RegisterPhone() {
   return (
-    <Phone column label="Register, step 1 of 4, who is playing: two children chosen from saved family profiles, with a section suggested from age.">
+    <Phone column label="Register, step 1 of 4, who is playing: a player chosen from saved profiles, with a section suggested from age.">
       <div className="ps-reg-top">
         <span className="ps-back" aria-hidden="true">←</span> Register
       </div>
@@ -288,24 +239,16 @@ export function RegisterPhone() {
         Saved on this phone, so you can leave and come back.
       </p>
       <div className="ps-person is-on">
-        <Name n={CHILD_A} />
-        <small>Born 2015 · Child</small>
+        <Name n={PLAYER} />
+        <small>Born 2009 · Primary · Self</small>
       </div>
       <div className="ps-field ps-section">
         <small>Section (suggested from age; please check)</small>
-        <b>Under 12</b>
-      </div>
-      <div className="ps-person is-on">
-        <Name n={CHILD_B} />
-        <small>Born 2017 · Child</small>
-      </div>
-      <div className="ps-field ps-section">
-        <small>Section (suggested from age; please check)</small>
-        <b>Under 12</b>
+        <b>Under 18</b>
       </div>
       <div className="ps-person">
-        <Name n={PARENT} />
-        <small>Born 1985 · Primary · Self</small>
+        <Name n={['Lim Gambit Ling', '']} />
+        <small>Born 2012 · Student</small>
       </div>
       <div className="ps-foot-act">
         <div className="ps-btn ps-btn-wide">Continue</div>
@@ -317,39 +260,30 @@ export function RegisterPhone() {
 
 export function AccountPhone() {
   return (
-    <Phone tab="Account" label="Account screen: registrations for two children, one pending organizer review with receipt submitted, one approved.">
+    <Phone tab="Account" label="Account screen: registrations, one pending organizer review with receipt submitted, others approved, and saved players.">
       <AppBar />
       <div className="ps-h">Registrations</div>
       <div className="ps-regs">
         <div>
           <b>{EVENT}</b>
-          <Name n={CHILD_B} />
+          <Name n={PLAYER} />
           <small>Pending organizer review · Receipt submitted, awaiting verification</small>
         </div>
         <div>
-          <b>{EVENT}</b>
-          <Name n={CHILD_A} />
-          <small>Approved</small>
-        </div>
-        <div>
           <b>Kejohanan Rook Lift Junior</b>
-          <Name n={CHILD_A} />
+          <Name n={PLAYER} />
           <small>Approved</small>
         </div>
       </div>
-      <div className="ps-h">Players (3)</div>
+      <div className="ps-h">Players (2)</div>
       <div className="ps-regs">
         <div>
-          <Name n={CHILD_A} />
-          <small>Born 2015 · Child</small>
+          <Name n={PLAYER} />
+          <small>Born 2009 · Primary · Self</small>
         </div>
         <div>
-          <Name n={CHILD_B} />
-          <small>Born 2017 · Child</small>
-        </div>
-        <div>
-          <Name n={PARENT} />
-          <small>Born 1985 · Primary · Self</small>
+          <Name n={['Lim Gambit Ling', '']} />
+          <small>Born 2012 · Student</small>
         </div>
       </div>
     </Phone>
@@ -358,19 +292,9 @@ export function AccountPhone() {
 
 export function CareerPhone() {
   return (
-    <Phone tab="Career" label="Career screen: win, draw and loss totals, and a certificate with a Download PDF button.">
+    <Phone tab="Career" label="Career screen: win, draw and loss totals, a certificate with a Download PDF button, and tournament history.">
       <AppBar />
-      <PlayerPicker n={CHILD_A} sub="Born 2015 · Child" />
-      <div className="ps-card">
-        <div className="ps-h ps-h-in">Ratings</div>
-        <div className="ps-rate">
-          <span>
-            Alokas
-            <small>On this profile</small>
-          </span>
-          <b>1180</b>
-        </div>
-      </div>
+      <PlayerPicker n={PLAYER} sub="Born 2009 · Primary · Self" />
       <div className="ps-card">
         <div className="ps-h ps-h-in">Career</div>
         <div className="ps-stats">
@@ -394,11 +318,13 @@ export function CareerPhone() {
           <span className="ps-dim">2 issued</span>
         </div>
         <p className="ps-ev ps-ev-s">Kejohanan Rook Lift Junior</p>
-        <p className="ps-nm-line">
-          <Name n={CHILD_A} />
-        </p>
         <p className="ps-dim">Winner, rank 3 · 9 Aug 2026 · KRL-00031</p>
         <div className="ps-btn ps-btn-fit">Download PDF</div>
+      </div>
+      <div className="ps-card">
+        <div className="ps-h ps-h-in">Tournaments</div>
+        <p className="ps-ev ps-ev-s">Kejohanan Rook Lift Junior</p>
+        <p className="ps-dim">9 Aug 2026</p>
       </div>
     </Phone>
   );

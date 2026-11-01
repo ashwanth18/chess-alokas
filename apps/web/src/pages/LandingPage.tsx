@@ -303,7 +303,7 @@ export default function LandingPage() {
                 <p className="lp-small lp-hero-parent">
                   Here for your child&apos;s tournament?{' '}
                   <Link to="/discover">Find the event</Link>, or open the link your organizer sent.{' '}
-                  <Link to="/mobile-app">The family app</Link> is coming soon to Android.
+                  <Link to="/mobile-app">The Chess Alokas app</Link> is coming soon to Android.
                 </p>
               </div>
               <PairingSheet />
@@ -663,7 +663,7 @@ export default function LandingPage() {
             <Link to="/login">Sign in</Link>
             <Link to="/signup">Create account</Link>
             <Link to="/privacy">Privacy</Link>
-            <Link to="/mobile-app">Family app</Link>
+            <Link to="/mobile-app">Chess Alokas app</Link>
             <Link to="/terms">Terms</Link>
           </nav>
         </div>

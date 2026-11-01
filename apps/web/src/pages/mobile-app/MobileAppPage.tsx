@@ -9,20 +9,21 @@ import {
   MatchdayPhone,
   OfflinePhone,
   RegisterPhone,
-  StandingPhone,
 } from './PhoneScreens';
 import './mobile-app.css';
 
 /*
- * Advert for the family app. Accuracy is a hard rule: claim only what apps/mobile/lib really does.
+ * Advert for the Chess Alokas app, for players of any age and for parents. Accuracy is a hard rule:
+ * claim only what apps/mobile/lib really does. No following, feeds or public profiles, and never call
+ * the product social (see docs/PLAN.md). No Alokas rating figure: it is 1000 for everyone today.
  * The app is in no store yet: no store badges or download links until it is. iOS has never been built
  * or tested, so don't promise it. No users, ratings, testimonials or prices. Sign-in is email only.
  */
 
 const SITE = 'https://chess-manager.alokas.com/mobile-app';
-const TITLE = 'Chess Alokas family app: your child’s board, colour and opponent';
+const TITLE = 'Chess Alokas app: your chess life, in one app';
 const DESCRIPTION =
-  'A chess tournament app for parents and players. Find events, register your children, attach the payment receipt, and follow every round. Coming soon to Android.';
+  'Find your next tournament, register in a few taps, follow every round, and keep your results and certificates in one place. Coming soon to Android.';
 
 function Soon({ className = '' }: { className?: string }) {
   return (
@@ -72,13 +73,6 @@ function Story({
   );
 }
 
-const MATCH_FACTS = [
-  ['Which board', 'The number, in big type at the top of the card.'],
-  ['What colour', 'The card is white if they play White, black if they play Black.'],
-  ['Who against', 'The name and section of the player opposite, and their rating if listed.'],
-  ['How they’re doing', 'Score, earlier rounds and, where shared, their rank.'],
-];
-
 export default function MobileAppPage() {
   useEffect(() => {
     trackPageView({ routeKey: 'landing', path: '/mobile-app' });
@@ -125,10 +119,11 @@ export default function MobileAppPage() {
             <div className="ma-hero-copy">
               <Soon />
               <h1 id="ma-h1">
-                <span>Which board?</span> <span className="is-gold">What colour?</span> <span>Who against?</span>
+                <span>Your chess life,</span> <span className="is-gold">in one app.</span>
               </h1>
               <p className="ma-sub">
-                The Chess Alokas family app answers it on your phone, round after round.
+                Find your next tournament, register in a few taps, follow every round, and keep your
+                results and certificates in one place.
               </p>
               <div className="ma-cta">
                 <Today />
@@ -138,10 +133,10 @@ export default function MobileAppPage() {
             <figure className="ma-hero-fig">
               <div className="ma-hero-phones">
                 <div className="ma-back">
-                  <DiscoverPhone />
+                  <MatchdayPhone />
                 </div>
                 <div className="ma-front">
-                  <MatchdayPhone />
+                  <DiscoverPhone />
                 </div>
                 <div className="ma-hero-pieces" aria-hidden="true">
                   <Knight />
@@ -153,21 +148,7 @@ export default function MobileAppPage() {
           </div>
         </section>
 
-        <section className="ma-four" aria-labelledby="ma-h-four">
-          <div className="ma-wrap">
-            <h2 id="ma-h-four">Matchday, in one glance.</h2>
-            <dl>
-              {MATCH_FACTS.map(([k, v]) => (
-                <div key={k}>
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        </section>
-
-        <Story id="ma-find" title="Find a tournament near you." phone={<DiscoverPhone />}>
+        <Story id="ma-find" flip title="Find your next tournament." phone={<DiscoverPhone />}>
           <p>Search by name, city or venue. See events by distance from your city, or from your phone if you allow it.</p>
           <ul>
             <li>Narrow to 10, 25 or 50 km</li>
@@ -176,15 +157,15 @@ export default function MobileAppPage() {
           </ul>
         </Story>
 
-        <Story id="ma-register" flip title="Register in a few taps." phone={<RegisterPhone />}>
-          <p>Save your family once. Then choose who&apos;s playing, more than one child at a time if you like.</p>
+        <Story id="ma-register" title="Register in a few taps." phone={<RegisterPhone />}>
+          <p>Save your player profile once. Then choose who&apos;s playing and send your entry.</p>
           <ul>
             <li>The section is suggested from age, for you to check</li>
             <li>Leave halfway and your draft waits on the phone</li>
           </ul>
         </Story>
 
-        <Story id="ma-receipt" title="Paid? Attach the receipt." phone={<AccountPhone />}>
+        <Story id="ma-receipt" flip title="Paid? Attach the receipt." phone={<AccountPhone />}>
           <p>See the organizer&apos;s payment details and QR, pay them directly, then add your receipt to the entry. A photo or PDF both work.</p>
           <ul>
             <li>Follow each entry, from pending to approved</li>
@@ -192,43 +173,47 @@ export default function MobileAppPage() {
           </ul>
         </Story>
 
-        <Story id="ma-stand" flip title="See how they're doing." phone={<StandingPhone />}>
-          <p>Points, earlier rounds and who they played. If the organizer turns on the live page, you also get rank, all pairings and full standings.</p>
+        <Story id="ma-match" title="Follow every round." phone={<MatchdayPhone />}>
+          <p>Your board, your colour and your opponent, on one card. The card is white if you play White, black if you play Black.</p>
+          <ul>
+            <li>See your score and earlier rounds</li>
+            <li>If the organizer turns on the live page, also rank, all pairings and full standings</li>
+          </ul>
         </Story>
 
-        <Story id="ma-career" title="Every result. Every certificate." phone={<CareerPhone />}>
-          <p>Wins, draws, losses and tournament history for each player, and their certificates in one place, ready to save as a PDF.</p>
+        <Story id="ma-career" flip title="Every result. Every certificate." phone={<CareerPhone />}>
+          <p>Your wins, draws, losses and tournament history, and your certificates in one place, ready to save as a PDF.</p>
         </Story>
 
-        <Story id="ma-signal" flip title="Weak signal in the hall? Still there." phone={<OfflinePhone />}>
+        <Story id="ma-signal" title="Weak signal in the hall? Still there." phone={<OfflinePhone />}>
           <p>The app keeps the last information it loaded, and tells you exactly how old it is. When the signal returns, tap Retry or pull to refresh.</p>
           <p className="ma-fine">It can only show what it has already loaded once, and new pairings wait for a connection.</p>
         </Story>
 
-        <section className="ma-family" aria-labelledby="ma-h-family">
-          <div className="ma-wrap ma-family-in">
+        <section className="ma-kids" aria-labelledby="ma-h-kids">
+          <div className="ma-wrap ma-kids-in">
             <div>
-              <h2 id="ma-h-family">Made for families with more than one player.</h2>
-              <p>One account for all your children, and for you if you play too. Switch between them at the top of the screen.</p>
+              <h2 id="ma-h-kids">Manage your children too.</h2>
+              <p>Add them to your account, register more than one at a time, and switch between players at the top of the screen.</p>
             </div>
-            <figure className="ma-family-fig">
-            <div className="ma-family-cards" aria-hidden="true">
-              <div className="is-on">
-                <Pawn side="w" />
-                <span>
-                  <b>Puteri Alekhine Damia</b> binti Hafiz Gambit
-                  <small>Board 14, plays White</small>
-                </span>
+            <figure className="ma-kids-fig">
+              <div className="ma-kids-cards" aria-hidden="true">
+                <div className="is-on">
+                  <Pawn side="w" />
+                  <span>
+                    <b>Puteri Alekhine Damia</b> binti Hafiz Gambit
+                    <small>Board 14, plays White</small>
+                  </span>
+                </div>
+                <div>
+                  <Pawn side="b" />
+                  <span>
+                    <b>Muhammad Caro Kann</b> bin Hafiz Gambit
+                    <small>Board 22, plays Black</small>
+                  </span>
+                </div>
               </div>
-              <div>
-                <Pawn side="b" />
-                <span>
-                  <b>Muhammad Caro Kann</b> bin Hafiz Gambit
-                  <small>Board 22, plays Black</small>
-                </span>
-              </div>
-            </div>
-            <figcaption>Illustration with invented names.</figcaption>
+              <figcaption>Illustration with invented names.</figcaption>
             </figure>
           </div>
         </section>
@@ -237,12 +222,12 @@ export default function MobileAppPage() {
           <div className="ma-wrap">
             <h2 id="ma-h-diff">Two sides of the same tournament.</h2>
             <div className="ma-diff-grid">
-              <article className="is-family">
-                <h3>Family app</h3>
-                <p className="ma-diff-who">For parents and players. Android, coming soon.</p>
+              <article className="is-app">
+                <h3>Chess Alokas app</h3>
+                <p className="ma-diff-who">For players and parents. Android, coming soon.</p>
                 <ul>
                   <li>Find and register for events</li>
-                  <li>Follow your own players each round</li>
+                  <li>Follow every round</li>
                   <li>Keep results and certificates</li>
                 </ul>
               </article>
@@ -271,9 +256,9 @@ export default function MobileAppPage() {
               <Today />
             </div>
             <p className="ma-fine">
-              Browsing needs no account. To register or follow a player in the app, sign in with your
-              email. Matchday follows players entered from a saved profile, once the organizer approves
-              the entry.
+              Browsing needs no account. To register or see your rounds in the app, sign in with your
+              email. Matchday works for players entered from a saved profile, once the organizer
+              approves the entry.
             </p>
           </div>
         </section>

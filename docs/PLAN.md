@@ -172,6 +172,14 @@ Android in the Play Store is wanted but isn't a gate, because parents can use we
 - [ ] Windows signing certificate. Get quotes; I expect a few hundred US dollars a year (estimate)
 - [ ] Play Store account, US$25 one-time per a secondary source [4]. Choose organization (needs a registered entity, no tester rule) or personal (recruit 12 testers). Keep the upload key out of the repo
 
+## Player home: later stages
+
+The Chess Alokas app is a player's home for chess: tournaments, rounds, results and certificates. Never call the product social.
+
+- **Next:** shareable player profile. Following players, academies and organizers. Followed events. A real Alokas rating, or hide it: today it is 1000 for everyone.
+- **After that:** activity feed generated from real results, achievements, academy pages.
+- **Much later, if ever:** comments and direct messages, with minors protected from contact by strangers.
+
 ## Later: stricter privacy
 
 A founder decision on 2026-11-01: keep the rules relaxed now, and keep anything users don't feel. These are switched on when a trigger below arrives, or sooner on the lawyer's advice. Some of this may turn out to be a legal duty rather than a choice, which is the first question for the lawyer.
