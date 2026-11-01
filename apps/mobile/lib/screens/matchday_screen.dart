@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../models/live.dart';
 import '../models/models.dart';
+import '../services/alokas_api.dart';
 import '../theme/alokas_theme.dart';
+import '../theme/alokas_tokens.dart';
 import '../widgets/message_card.dart';
+import '../widgets/player_name.dart';
+import 'checkin_pass_screen.dart';
+import 'live_screen.dart';
 
 class MatchdayScreen extends StatelessWidget {
   final bool isSignedIn;
@@ -18,6 +24,13 @@ class MatchdayScreen extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final VoidCallback onGoToAccount;
 
+  /// Public tournament snapshots by live token, with when each was fetched.
+  final Map<String, LiveSnapshot> liveByToken;
+  final Map<String, DateTime> liveUpdatedAt;
+  final Future<ApiResult<LiveSnapshot>> Function(String token) loadLive;
+  final void Function(String token, LiveSnapshot snapshot) onLiveLoaded;
+  final Duration pollInterval;
+
   const MatchdayScreen({
     super.key,
     required this.isSignedIn,
@@ -30,357 +43,615 @@ class MatchdayScreen extends StatelessWidget {
     this.dashboardUpdatedAt,
     required this.onRefresh,
     required this.onGoToAccount,
+    this.liveByToken = const {},
+    this.liveUpdatedAt = const {},
+    required this.loadLive,
+    required this.onLiveLoaded,
+    required this.pollInterval,
   });
+
+  MobilePlayerProfile? get _activeProfile {
+    final matches = profiles.where((p) => p.id == selectedProfileId);
+    return matches.isEmpty ? null : matches.first;
+  }
 
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
-      color: AlokasColors.warmGold,
-      backgroundColor: AlokasColors.forestCard,
       onRefresh: onRefresh,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-        children: [
-          if (profiles.isNotEmpty) ...[
-            _buildPlayerStrip(),
-            const SizedBox(height: 12),
-          ],
-          ..._buildContent(),
-          const SizedBox(height: 16),
-          const Text(
-            'Check-in passes, full pairings, standings and result disputes are '
-            'not available in the app yet. Please use the arbiter desk.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12),
-          ),
-        ],
+        padding: const EdgeInsets.fromLTRB(0, 12, 0, 32),
+        children: _buildContent(context),
       ),
     );
   }
 
-  List<Widget> _buildContent() {
+  Widget _gutter(Widget child) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: child,
+  );
+
+  List<Widget> _buildContent(BuildContext context) {
     final current = dashboard;
+    final picker = profiles.length > 1
+        ? [
+            _gutter(
+              PlayerPicker(
+                profiles: profiles,
+                selectedId: selectedProfileId,
+                onSelect: onSelectProfile,
+              ),
+            ),
+            const SizedBox(height: 4),
+          ]
+        : const <Widget>[];
+
     if (!isSignedIn) {
       return [
-        MessageCard(
-          icon: Icons.login,
-          title: 'Sign in to see your matches',
-          message: 'Your board and opponent appear here during a tournament.',
-          actionLabel: 'Go to Sign In',
-          onAction: onGoToAccount,
-        ),
-      ];
-    }
-    if (current == null && loading) {
-      return const [
-        Padding(
-          padding: EdgeInsets.all(32),
-          child: Center(
-            child: CircularProgressIndicator(color: AlokasColors.warmGold),
+        _gutter(
+          MessageCard(
+            title: 'Sign in to see your matches',
+            message: 'Your board and opponent appear here during a tournament.',
+            actionLabel: 'Go to Sign In',
+            onAction: onGoToAccount,
           ),
         ),
       ];
     }
+    if (current == null && loading) return [...picker, const LoadingLine()];
     final problem = error;
     if (problem != null && current == null) {
       return [
-        MessageCard(
-          icon: Icons.cloud_off,
-          accent: AlokasColors.crimsonDanger,
-          title: 'Could not load your matches',
-          message: error,
-          actionLabel: 'Retry',
-          onAction: onRefresh,
+        ...picker,
+        _gutter(
+          MessageCard(
+            isProblem: true,
+            title: 'Could not load your matches',
+            message: problem,
+            actionLabel: 'Retry',
+            onAction: onRefresh,
+          ),
         ),
       ];
     }
     if (profiles.isEmpty) {
       return [
-        MessageCard(
-          icon: Icons.person_add_alt_1,
-          title: 'No player profile yet',
-          message: 'Add a player profile to follow their matches.',
-          actionLabel: 'Go to Profiles',
-          onAction: onGoToAccount,
+        _gutter(
+          MessageCard(
+            title: 'No player profile yet',
+            message: 'Add a player profile to follow their matches.',
+            actionLabel: 'Go to Profiles',
+            onAction: onGoToAccount,
+          ),
         ),
       ];
     }
-    final notice = [
+    final freshness = <Widget>[
       if (problem != null)
-        StaleNotice(
-          reason: problem,
-          lastLoadedAt: dashboardUpdatedAt,
-          onRetry: onRefresh,
-        ),
+        _gutter(
+          StaleNotice(
+            reason: problem,
+            lastLoadedAt: dashboardUpdatedAt,
+            onRetry: onRefresh,
+          ),
+        )
+      else if (dashboardUpdatedAt != null)
+        _gutter(_FreshLine(updatedAt: dashboardUpdatedAt!)),
     ];
     final matches = current?.liveMatches ?? const <PlayerLiveMatch>[];
     if (matches.isEmpty) {
       return [
-        ...notice,
-        const MessageCard(
-          icon: Icons.event_busy,
-          title: 'No match right now',
-          message:
-              'A pairing appears here once this player is in a tournament that has started.',
+        ...picker,
+        ...freshness,
+        _gutter(
+          const MessageCard(
+            title: 'No match right now',
+            message:
+                'A pairing appears here once this player is in a tournament '
+                'that has started.',
+          ),
         ),
       ];
     }
     return [
-      ...notice,
-      for (final match in matches)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: _buildMatchCard(match),
-        ),
+      ...picker,
+      ...freshness,
+      for (final match in matches) ..._buildMatch(context, match),
     ];
   }
 
-  Widget _buildPlayerStrip() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'PLAYERS',
-          style: TextStyle(
-            color: AlokasColors.warmGold,
-            fontSize: 11.5,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.8,
-          ),
-        ),
-        const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: profiles.map((prof) {
-              final selected = prof.id == selectedProfileId;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  selected: selected,
-                  selectedColor: AlokasColors.warmGold,
-                  backgroundColor: AlokasColors.forestCard,
-                  label: Text('${prof.fullName} (${prof.relationshipLabel})'),
-                  labelStyle: TextStyle(
-                    color: selected
-                        ? AlokasColors.deepForest
-                        : AlokasColors.creamIvory,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12.5,
-                  ),
-                  onSelected: (_) => onSelectProfile(prof.id),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
-    );
-  }
-
   int? _totalRounds(PlayerLiveMatch match) {
-    final history = dashboard?.tournaments ?? const [];
-    for (final item in history) {
+    for (final item in dashboard?.tournaments ?? const []) {
       if (item.tournamentId == match.tournamentId) return item.rounds;
     }
     return null;
   }
 
-  String _roundLabel(PlayerLiveMatch match) {
+  String _roundLabel(PlayerLiveMatch match, LiveSnapshot? live) {
     final round = match.round;
-    if (round == null) return 'ROUND NOT LISTED';
-    final total = _totalRounds(match);
-    return total == null ? 'ROUND $round' : 'ROUND $round OF $total';
+    if (round == null) return 'Round not listed';
+    final total = live?.totalRounds ?? _totalRounds(match);
+    return total == null ? 'Round $round' : 'Round $round of $total';
   }
 
-  String _resultLabel(PlayerLiveMatch match) {
-    if (match.isBye) return 'Bye';
-    final result = match.result;
-    if (result == null) return 'Result not listed';
-    return result == 'pending' ? 'Result pending' : 'Result: $result';
-  }
+  List<Widget> _buildMatch(BuildContext context, PlayerLiveMatch match) {
+    final token = match.publicToken;
+    final live = token == null ? null : liveByToken[token];
+    final liveAt = token == null ? null : liveUpdatedAt[token];
+    final profile = _activeProfile;
+    final me = match.participantId;
 
-  Widget _buildMatchCard(PlayerLiveMatch match) {
-    final color = match.color?.toUpperCase();
-    final isWhite = color == 'WHITE';
-    final score = match.currentScore;
-    final opponentName = match.opponentName;
-    final opponentRating = match.opponentRating;
+    void openLive(int tab) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => LiveScreen(
+            token: token!,
+            title: match.tournamentName ?? live?.name ?? 'Tournament',
+            myParticipantId: me,
+            initial: live,
+            initialAt: liveAt,
+            initialTab: tab,
+            load: loadLive,
+            onLoaded: (snapshot) => onLiveLoaded(token, snapshot),
+            pollInterval: pollInterval,
+          ),
+        ),
+      );
+    }
+
+    return [
+      _gutter(
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 8),
+          child: Text(
+            match.tournamentName ?? 'Unnamed tournament',
+            style: atype(18, weight: 700, color: context.pal.ink, height: 1.2),
+          ),
+        ),
+      ),
+      MatchHero(
+        match: match,
+        live: live,
+        playerName: profile?.fullName,
+        roundLabel: _roundLabel(match, live),
+      ),
+      _gutter(
+        _WhereWeStand(match: match, live: live, liveAt: liveAt),
+      ),
+      if (live != null && me != null) _gutter(_EarlierRounds(live: live, me: me)),
+      const SizedBox(height: 16),
+      _gutter(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (token != null) ...[
+              OutlinedButton(
+                key: const Key('open-pairings'),
+                onPressed: () => openLive(1),
+                child: const Text('All pairings'),
+              ),
+              OutlinedButton(
+                key: const Key('open-standings'),
+                onPressed: () => openLive(0),
+                child: const Text('Full standings'),
+              ),
+            ],
+            if (me != null &&
+                match.tournamentId != null &&
+                profile != null)
+              OutlinedButton(
+                key: const Key('open-checkin-pass'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CheckInPassScreen(
+                        tournamentName:
+                            match.tournamentName ?? 'Unnamed tournament',
+                        tournamentId: match.tournamentId!,
+                        participantId: me,
+                        playerName: live?.player(me)?.name ?? profile.fullName,
+                        number: live?.player(me)?.seed,
+                        section: live?.sectionOf(me),
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Check-in pass'),
+              ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 24),
+    ];
+  }
+}
+
+class _FreshLine extends StatelessWidget {
+  final DateTime updatedAt;
+
+  const _FreshLine({required this.updatedAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pal;
+    return Padding(
+      key: const Key('fresh-line'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          StatusSquare(color: p.go),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Updated ${asOfLabel(updatedAt)}',
+              style: atype(14, weight: 600, color: p.go),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The parent's answer: the block is literally the colour the child plays,
+/// white with black text or black with white text, in every theme.
+class MatchHero extends StatelessWidget {
+  final PlayerLiveMatch match;
+  final LiveSnapshot? live;
+  final String? playerName;
+  final String roundLabel;
+
+  const MatchHero({
+    super.key,
+    required this.match,
+    this.live,
+    this.playerName,
+    required this.roundLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pal;
+    if (match.isAwaitingPairing) {
+      return _neutral(
+        context,
+        title: 'Pairings are not out yet',
+        message:
+            'The board appears here as soon as the desk publishes this round.',
+      );
+    }
+    if (match.isBye) {
+      return _neutral(
+        context,
+        title: 'Bye this round',
+        message: 'No game this round.',
+      );
+    }
+    if (!match.isWhite && !match.isBlack) {
+      return _neutral(
+        context,
+        title: 'Colour not listed',
+        message: match.board == null ? null : 'Board ${match.board}',
+      );
+    }
+
+    final white = match.isWhite;
+    final background = white ? AlokasTokens.pieceWhite : AlokasTokens.pieceBlack;
+    final foreground = white ? AlokasTokens.pieceBlack : AlokasTokens.pieceWhite;
+    final me = match.participantId;
+    final finished = match.hasResult;
+
+    final parts = playerName == null ? null : splitPlayerName(playerName!);
+    final colourWord = white ? 'White' : 'Black';
+    final subject = parts?.given;
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      key: Key(white ? 'hero-white' : 'hero-black'),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AlokasColors.forestElevated, AlokasColors.forestCard],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        color: background,
+        border: Border.symmetric(
+          horizontal: BorderSide(
+            // A black block would melt into a dark page without an edge.
+            color: white ? AlokasTokens.pieceBlack : p.ruleStrong,
+            width: 3,
+          ),
         ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AlokasColors.warmGold, width: 1.4),
+      ),
+      child: DefaultTextStyle.merge(
+        style: TextStyle(color: foreground),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 12,
+              children: [
+                Text(
+                  roundLabel,
+                  style: atype(16, weight: 700, color: foreground),
+                ),
+                Text(
+                  finished ? 'Result' : 'Playing now',
+                  style: atype(16, weight: 600, color: foreground),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (finished) ...[
+              Text(
+                'Board ${match.board}',
+                style: atype(20, weight: 700, color: foreground, tabular: true),
+              ),
+              Text(
+                formatResult(match.result!),
+                style: atype(
+                  64,
+                  weight: 800,
+                  width: 112,
+                  color: foreground,
+                  tabular: true,
+                  height: 1.1,
+                ),
+              ),
+              Text(
+                [
+                  match.outcomeWord ?? 'Result in',
+                  'playing $colourWord',
+                ].join(', '),
+                style: atype(24, weight: 800, color: foreground, height: 1.2),
+              ),
+            ] else ...[
+              Text(
+                'Board',
+                style: atype(20, weight: 700, color: foreground),
+              ),
+              Text(
+                match.board == null ? 'Not listed' : '${match.board}',
+                key: const Key('hero-board'),
+                style: atype(
+                  96,
+                  weight: 800,
+                  width: 112,
+                  color: foreground,
+                  tabular: true,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                subject == null ? 'Plays $colourWord' : '$subject plays $colourWord',
+                key: const Key('hero-colour'),
+                style: atype(24, weight: 800, color: foreground, height: 1.2),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.only(top: 12),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: foreground)),
+              ),
+              child: _opponent(foreground, me),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _opponent(Color foreground, String? me) {
+    final name = match.opponentName;
+    final rating = match.opponentRating;
+    final opponentId = match.opponentId;
+    if (name == null) {
+      return Text(
+        'Opponent not listed',
+        style: atype(18, weight: 600, color: foreground),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Against', style: atype(14, weight: 600, color: foreground)),
+        const SizedBox(height: 2),
+        PlayerName(
+          name,
+          size: 20,
+          weight: 700,
+          color: foreground,
+          number: live?.player(opponentId)?.seed,
+          section: live?.sectionOf(opponentId),
+        ),
+        if (rating != null)
+          Text(
+            'Rating $rating',
+            style: atype(14, color: foreground, tabular: true),
+          ),
+      ],
+    );
+  }
+
+  Widget _neutral(
+    BuildContext context, {
+    required String title,
+    String? message,
+  }) {
+    final p = context.pal;
+    return Container(
+      key: const Key('hero-neutral'),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+      decoration: BoxDecoration(
+        color: p.paper2,
+        border: Border.symmetric(
+          horizontal: BorderSide(color: p.ink, width: 3),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(roundLabel, style: atype(16, weight: 700, color: p.ink)),
+          const SizedBox(height: 12),
           Text(
-            match.tournamentName ?? 'Unnamed tournament',
-            style: const TextStyle(
-              color: AlokasColors.creamIvory,
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-            ),
+            title,
+            style: atype(32, weight: 800, width: 108, color: p.ink, height: 1.15),
           ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
-                child: AlokasBadge(
-                  text: _roundLabel(match),
-                  color: AlokasColors.brightGold,
-                  icon: Icons.sensors,
-                ),
-              ),
-              if (score != null)
-                Text(
-                  'Score: ${score.toStringAsFixed(1)}',
-                  style: const TextStyle(
-                    color: AlokasColors.brightGold,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13.5,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (match.isBye)
-            const Text(
-              'Bye this round: no game to play.',
-              style: TextStyle(
-                color: AlokasColors.creamIvory,
-                fontWeight: FontWeight.w700,
-              ),
-            )
-          else ...[
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AlokasColors.deepForest,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AlokasColors.warmGold),
-                  ),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'TABLE / BOARD',
-                        style: TextStyle(
-                          color: AlokasColors.warmGold,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        match.board == null ? '–' : '#${match.board}',
-                        style: const TextStyle(
-                          color: AlokasColors.creamIvory,
-                          fontSize: 26,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isWhite
-                          ? AlokasColors.creamIvory
-                          : AlokasColors.deepForest,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AlokasColors.warmGold),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'YOUR PIECE COLOR',
-                          style: TextStyle(
-                            color: isWhite
-                                ? AlokasColors.deepForest
-                                : AlokasColors.warmGold,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          color ?? 'NOT LISTED',
-                          style: TextStyle(
-                            color: isWhite
-                                ? AlokasColors.deepForest
-                                : AlokasColors.creamIvory,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AlokasColors.forestSurface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AlokasColors.goldBorder),
-              ),
-              child: Row(
+          if (message != null) ...[
+            const SizedBox(height: 8),
+            Text(message, style: atype(16, color: p.ink, height: 1.35)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _WhereWeStand extends StatelessWidget {
+  final PlayerLiveMatch match;
+  final LiveSnapshot? live;
+  final DateTime? liveAt;
+
+  const _WhereWeStand({required this.match, this.live, this.liveAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pal;
+    final snapshot = live;
+    final me = match.participantId;
+    final score = match.currentScore;
+    final sectionId = snapshot?.sectionIdOf(me);
+    final rows = snapshot?.standings(sectionId) ?? const <StandingRow>[];
+    final index = rows.indexWhere((r) => r.player.id == me);
+
+    final near = <StandingRow>[];
+    if (index >= 0) {
+      final from = (index - 2).clamp(0, (rows.length - 5).clamp(0, rows.length));
+      near.addAll(rows.skip(from).take(5));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SheetHeading('Where we stand'),
+          const SizedBox(height: 8),
+          if (score != null)
+            Text.rich(
+              key: const Key('current-score'),
+              TextSpan(
                 children: [
-                  const Icon(
-                    Icons.person_pin,
-                    color: AlokasColors.warmGold,
-                    size: 28,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      opponentName == null
-                          ? 'Opponent not listed'
-                          : opponentRating == null
-                          ? 'Opponent: $opponentName'
-                          : 'Opponent: $opponentName ($opponentRating)',
-                      style: const TextStyle(
-                        color: AlokasColors.creamIvory,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                      ),
+                  TextSpan(
+                    text: formatPoints(score),
+                    style: atype(
+                      44,
+                      weight: 800,
+                      width: 112,
+                      color: p.ink,
+                      tabular: true,
                     ),
+                  ),
+                  TextSpan(
+                    text: score == 1 ? ' point' : ' points',
+                    style: atype(16, color: p.ink2),
                   ),
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 10),
-          Text(
-            _resultLabel(match),
-            style: const TextStyle(
-              color: AlokasColors.mutedSage,
-              fontSize: 12.5,
+          if (snapshot == null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                match.publicToken == null
+                    ? 'The organizer has not turned on the live page, so rank '
+                          'and other boards are not available.'
+                    : 'Rank will appear when the standings load.',
+                style: atype(14, color: p.ink2),
+              ),
             ),
-          ),
+          if (index >= 0) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: Text(
+                'Rank ${rows[index].rankLabel} of ${rows.length}'
+                '${snapshot!.sectionOf(me) == null ? '' : ' in ${snapshot.sectionOf(me)}'}',
+                style: atype(16, weight: 600, color: p.ink),
+              ),
+            ),
+            for (final row in near)
+              StandingLine(row: row, snapshot: snapshot, me: me),
+            if (liveAt != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'By points. Tied players share a rank; the arbiter applies '
+                  'tie-breaks. As of ${asOfLabel(liveAt!)}.',
+                  style: atype(14, color: p.ink2),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _EarlierRounds extends StatelessWidget {
+  final LiveSnapshot live;
+  final String me;
+
+  const _EarlierRounds({required this.live, required this.me});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pal;
+    final rounds = live.historyOf(me).where((r) => !r.game.isPending).toList();
+    if (rounds.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SheetHeading('Earlier rounds'),
+          for (final round in rounds)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: p.rule)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 28,
+                    child: Text(
+                      '${round.round}',
+                      style: atype(16, weight: 800, color: p.ink, tabular: true),
+                    ),
+                  ),
+                  if (round.playedWhite != null) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: PieceSquare(white: round.playedWhite!),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(
+                    child: round.opponent == null
+                        ? Text('Bye', style: atype(16, color: p.ink))
+                        : PlayerName(round.opponent!.name, color: p.ink),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    formatPoints(round.game.pointsFor(me)),
+                    style: atype(16, weight: 800, color: p.ink, tabular: true),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

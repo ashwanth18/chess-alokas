@@ -85,8 +85,8 @@ List<Map<String, dynamic>> _maps(Object? value) {
   return value.whereType<Map<String, dynamic>>().toList();
 }
 
-/// A city the user picks as the centre of an event search. It is a chosen city,
-/// not the user's location: the app does not read the device's location.
+/// The centre of an event search: a city the user picks, or the device's
+/// position when the user asks for it with "Use my location".
 class LocationPreset {
   final String id;
   final String city;
@@ -103,6 +103,21 @@ class LocationPreset {
   });
 
   String get label => 'Near: $city';
+
+  /// The device's position, rounded to about a kilometre before it leaves the
+  /// phone. Not remembered between launches.
+  factory LocationPreset.device(double latitude, double longitude) {
+    double round(double value) => (value * 100).roundToDouble() / 100;
+    return LocationPreset(
+      id: deviceId,
+      city: 'your location',
+      state: '',
+      latitude: round(latitude),
+      longitude: round(longitude),
+    );
+  }
+
+  static const String deviceId = 'device';
 }
 
 const List<LocationPreset> locationPresets = [
@@ -205,6 +220,9 @@ class MobileEventItem {
   final String? descriptionMd;
   final List<EventCategoryInfo> categories;
 
+  /// The row as the API gave it, for the offline copy.
+  final Map<String, dynamic>? raw;
+
   const MobileEventItem({
     required this.id,
     this.publicSlug,
@@ -230,6 +248,7 @@ class MobileEventItem {
     this.currency,
     this.descriptionMd,
     this.categories = const [],
+    this.raw,
   });
 
   String get slugOrId => publicSlug ?? id;
@@ -318,6 +337,7 @@ class MobileEventItem {
       currency: _string(json['currency']),
       descriptionMd: _string(json['descriptionMd']),
       categories: EventCategoryInfo.listFromJson(json['categories']),
+      raw: json,
     );
   }
 }
@@ -329,20 +349,60 @@ String formatMoney(int cents, String? currency) {
   return currency == null ? amount : '$currency $amount';
 }
 
+/// A question the organizer added to the registration form.
+class RegistrationQuestion {
+  final String id;
+  final String label;
+  final bool required;
+
+  /// Non-empty for a choice from a list; otherwise a typed answer.
+  final List<String> options;
+
+  const RegistrationQuestion({
+    required this.id,
+    required this.label,
+    this.required = false,
+    this.options = const [],
+  });
+
+  bool get isChoice => options.isNotEmpty;
+
+  /// The website treats a select with no options as a typed answer; so does
+  /// the app.
+  static RegistrationQuestion? tryFromJson(Map<String, dynamic> json) {
+    final id = _string(json['id']);
+    final label = _string(json['label']);
+    if (id == null || label == null) return null;
+    final rawOptions = json['options'];
+    return RegistrationQuestion(
+      id: id,
+      label: label,
+      required: json['required'] == true,
+      options: json['type'] == 'select' && rawOptions is List
+          ? rawOptions.whereType<String>().toList()
+          : const [],
+    );
+  }
+}
+
 /// `GET /public/events/:slugOrId`: nested `{event, categories, participants}`.
 class EventDetail {
   final MobileEventItem event;
   final String? paymentInstructions;
   final String? paymentQrUrl;
   final String? rulesMd;
-  final int customQuestionCount;
+  final List<RegistrationQuestion> questions;
+
+  /// The response as the API gave it, kept in a registration draft.
+  final Map<String, dynamic>? raw;
 
   const EventDetail({
     required this.event,
     this.paymentInstructions,
     this.paymentQrUrl,
     this.rulesMd,
-    this.customQuestionCount = 0,
+    this.questions = const [],
+    this.raw,
   });
 
   static EventDetail? tryFromJson(Map<String, dynamic> json) {
@@ -362,7 +422,11 @@ class EventDetail {
       paymentInstructions: _string(rawEvent['paymentInstructions']),
       paymentQrUrl: _string(rawEvent['paymentQrUrl']),
       rulesMd: _string(rawEvent['rulesMd']),
-      customQuestionCount: questions is List ? questions.length : 0,
+      questions: _maps(questions)
+          .map(RegistrationQuestion.tryFromJson)
+          .whereType<RegistrationQuestion>()
+          .toList(),
+      raw: json,
     );
   }
 }
@@ -388,6 +452,9 @@ class MobilePlayerProfile {
   final String? email;
   final String? phone;
 
+  /// The row as the API gave it, for the offline copy.
+  final Map<String, dynamic>? raw;
+
   const MobilePlayerProfile({
     required this.id,
     required this.fullName,
@@ -408,6 +475,7 @@ class MobilePlayerProfile {
     this.country,
     this.email,
     this.phone,
+    this.raw,
   });
 
   /// Age reached in the current calendar year; null if the birth year is unknown.
@@ -420,8 +488,17 @@ class MobilePlayerProfile {
 
   int? get bestRating => fideStandard ?? fideRapid ?? fideBlitz;
 
+  /// Enough to tell two similar names apart, such as "Born 2015 \u00B7 Child".
+  String get disambiguator {
+    final born = yearOfBirth;
+    return [
+      if (born != null) 'Born $born',
+      relationshipLabel,
+    ].join(' \u00B7 ');
+  }
+
   String get relationshipLabel {
-    final primary = isPrimary ? 'Primary • ' : '';
+    final primary = isPrimary ? 'Primary \u00B7 ' : '';
     switch (relationship) {
       case 'self':
         return '${primary}Self';
@@ -486,6 +563,7 @@ class MobilePlayerProfile {
       country: _string(json['country']),
       email: _string(json['email']),
       phone: _string(json['phone']),
+      raw: json,
     );
   }
 
@@ -532,6 +610,9 @@ class RegistrationRecord {
   }
 
   bool get isWaitlisted => status == 'waitlisted';
+
+  /// The fee has a registration waiting on a receipt that can still be added.
+  bool get needsReceipt => isActive && paymentStatus == 'pending_receipt';
 
   /// False once it was turned down or withdrawn, so the player may submit again.
   bool get isActive => status != 'rejected' && status != 'cancelled';
@@ -644,6 +725,12 @@ class PlayerLiveMatch {
   final bool isBye;
   final double? currentScore;
 
+  /// For the public standings and pairings; null if the organizer keeps the
+  /// live page off.
+  final String? publicToken;
+  final String? participantId;
+  final String? opponentId;
+
   const PlayerLiveMatch({
     this.tournamentId,
     this.tournamentName,
@@ -656,7 +743,38 @@ class PlayerLiveMatch {
     this.result,
     this.isBye = false,
     this.currentScore,
+    this.publicToken,
+    this.participantId,
+    this.opponentId,
   });
+
+  /// In the tournament with no game yet: the API sends board 0 and colour
+  /// "bye" with isBye false.
+  bool get isAwaitingPairing => !isBye && (board == null || board == 0);
+
+  bool get isWhite => color == 'white';
+  bool get isBlack => color == 'black';
+  bool get hasResult => result != null && result != 'pending';
+
+  /// "Won", "Lost" or "Drew" for this player; null while pending or unknown.
+  String? get outcomeWord {
+    final white = isWhite;
+    if (!white && !isBlack) return null;
+    switch (result) {
+      case '1-0':
+      case '1-0F':
+        return white ? 'Won' : 'Lost';
+      case '0-1':
+      case '0-1F':
+        return white ? 'Lost' : 'Won';
+      case '1/2-1/2':
+        return 'Drew';
+      case '0-0':
+        return 'Lost';
+      default:
+        return null;
+    }
+  }
 
   factory PlayerLiveMatch.fromJson(Map<String, dynamic> json) {
     return PlayerLiveMatch(
@@ -671,6 +789,9 @@ class PlayerLiveMatch {
       result: _string(json['result']),
       isBye: json['isBye'] == true,
       currentScore: _double(json['currentScore']),
+      publicToken: _string(json['publicToken']),
+      participantId: _string(json['participantId']),
+      opponentId: _string(json['opponentId']),
     );
   }
 }
@@ -792,12 +913,16 @@ class PlayerDashboard {
   final List<PlayerTournamentHistoryItem> tournaments;
   final List<PlayerCertificate> certificates;
 
+  /// The response as the API gave it, for the offline copy.
+  final Map<String, dynamic>? raw;
+
   const PlayerDashboard({
     this.selectedProfile,
     this.liveMatches = const [],
     this.stats,
     this.tournaments = const [],
     this.certificates = const [],
+    this.raw,
   });
 
   factory PlayerDashboard.fromJson(Map<String, dynamic> json) {
@@ -820,6 +945,7 @@ class PlayerDashboard {
           .map(PlayerCertificate.tryFromJson)
           .whereType<PlayerCertificate>()
           .toList(),
+      raw: json,
     );
   }
 }

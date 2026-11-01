@@ -5,123 +5,16 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config.dart';
+import '../models/live.dart';
 import '../models/models.dart';
+import 'auth_service.dart';
 import 'session_storage.dart';
 
-sealed class ApiResult<T> {
-  const ApiResult();
-}
+export 'auth_service.dart';
 
-final class ApiSuccess<T> extends ApiResult<T> {
-  final T value;
-
-  const ApiSuccess(this.value);
-}
-
-final class ApiFailure<T> extends ApiResult<T> {
-  final String message;
-  final int? statusCode;
-
-  /// Per-field reasons from the API's `details`, keyed by request field name.
-  final Map<String, String> fieldErrors;
-
-  const ApiFailure(
-    this.message, {
-    this.statusCode,
-    this.fieldErrors = const {},
-  });
-}
-
-class AuthSession {
-  final String accessToken;
-  final String refreshToken;
-  final DateTime? expiresAt;
-  final String? userId;
-  final String? email;
-
-  const AuthSession({
-    required this.accessToken,
-    required this.refreshToken,
-    this.expiresAt,
-    this.userId,
-    this.email,
-  });
-
-  /// Reads a Supabase token response. Null if it holds no usable tokens.
-  static AuthSession? tryFromTokenResponse(
-    Map<String, dynamic> json,
-    DateTime now,
-  ) {
-    final access = json['access_token'];
-    final refresh = json['refresh_token'];
-    if (access is! String || access.isEmpty) return null;
-    if (refresh is! String || refresh.isEmpty) return null;
-    final expiresAtSeconds = json['expires_at'];
-    final expiresIn = json['expires_in'];
-    final user = json['user'];
-    return AuthSession(
-      accessToken: access,
-      refreshToken: refresh,
-      expiresAt: expiresAtSeconds is num
-          ? DateTime.fromMillisecondsSinceEpoch(
-              expiresAtSeconds.toInt() * 1000,
-              isUtc: true,
-            )
-          : expiresIn is num
-              ? now.add(Duration(seconds: expiresIn.toInt()))
-              : null,
-      userId: user is Map<String, dynamic> ? user['id'] as String? : null,
-      email: user is Map<String, dynamic> ? user['email'] as String? : null,
-    );
-  }
-
-  static AuthSession? tryDecode(String stored) {
-    try {
-      final json = jsonDecode(stored);
-      if (json is! Map<String, dynamic>) return null;
-      final access = json['accessToken'];
-      final refresh = json['refreshToken'];
-      if (access is! String || refresh is! String) return null;
-      final expires = json['expiresAt'];
-      return AuthSession(
-        accessToken: access,
-        refreshToken: refresh,
-        expiresAt: expires is String ? DateTime.tryParse(expires) : null,
-        userId: json['userId'] as String?,
-        email: json['email'] as String?,
-      );
-    } on Object {
-      return null;
-    }
-  }
-
-  String encode() => jsonEncode({
-        'accessToken': accessToken,
-        'refreshToken': refreshToken,
-        'expiresAt': expiresAt?.toUtc().toIso8601String(),
-        'userId': userId,
-        'email': email,
-      });
-
-  AuthSession mergedWith(AuthSession? previous) => AuthSession(
-        accessToken: accessToken,
-        refreshToken: refreshToken,
-        expiresAt: expiresAt,
-        userId: userId ?? previous?.userId,
-        email: email ?? previous?.email,
-      );
-}
-
-enum _RefreshOutcome { refreshed, rejected, unavailable }
-
-const String _offlineMessage =
-    'Could not reach the server. Check your connection and try again.';
 const String _sessionExpiredMessage =
     'Your session has expired. Please sign in again.';
 const String _signInRequiredMessage = 'Please sign in first.';
-const String notConfiguredMessage =
-    "Sign-in isn't available in this version of the app. You can still browse "
-    'events.';
 
 class AlokasApiClient {
   static const Duration _defaultTimeout = Duration(seconds: 15);
@@ -136,36 +29,33 @@ class AlokasApiClient {
   /// The current session; null means signed out.
   final ValueNotifier<AuthSession?> session = ValueNotifier<AuthSession?>(null);
 
-  Future<_RefreshOutcome>? _refreshInFlight;
+  Future<RefreshOutcome>? _refreshInFlight;
+
+  /// The only route to the sign-in provider.
+  final AuthService auth;
 
   AlokasApiClient({
     AppConfig? config,
     http.Client? httpClient,
     SessionStorage? sessionStorage,
     DateTime Function()? clock,
-  })  : config = config ?? AppConfig.fromEnvironment(),
-        _http = httpClient ?? http.Client(),
-        _storage = sessionStorage ?? const SecureSessionStorage(),
-        _now = clock ?? DateTime.now;
+  }) : this._(
+         config ?? AppConfig.fromEnvironment(),
+         httpClient ?? http.Client(),
+         sessionStorage ?? const SecureSessionStorage(),
+         clock ?? DateTime.now,
+       );
+
+  AlokasApiClient._(this.config, this._http, this._storage, this._now)
+    : auth = AuthService(config: config, httpClient: _http, clock: _now);
 
   bool get isSignedIn => session.value != null;
 
   // ---- Auth ----
 
-  Uri _authUri(String path, [Map<String, String>? query]) {
-    final base = config.supabaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
-    return Uri.parse('$base/auth/v1/$path').replace(queryParameters: query);
-  }
-
-  Map<String, String> get _authHeaders => {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'apikey': config.supabaseAnonKey.trim(),
-      };
-
   /// Loads a saved session at startup. Without one the app is simply signed out.
   Future<void> restoreSession() async {
-    if (!config.isAuthConfigured) return;
+    if (!auth.isConfigured) return;
     String? stored;
     try {
       stored = await _storage.read();
@@ -186,55 +76,31 @@ class AlokasApiClient {
     required String email,
     required String password,
   }) async {
-    if (!config.isAuthConfigured) {
-      return const ApiFailure(notConfiguredMessage);
-    }
-    final http.Response response;
-    try {
-      response = await _send(
-        'POST',
-        _authUri('token', {'grant_type': 'password'}),
-        _authHeaders,
-        jsonEncode({'email': email.trim(), 'password': password}),
-        _defaultTimeout,
-      );
-    } on Object {
-      return const ApiFailure(_offlineMessage);
-    }
-    if (response.statusCode != 200) {
-      return ApiFailure(
-        _errorText(response),
-        statusCode: response.statusCode,
-      );
-    }
-    final decoded = _decodeMap(response);
-    final next = decoded == null
-        ? null
-        : AuthSession.tryFromTokenResponse(decoded, _now());
-    if (next == null) {
-      return const ApiFailure('The sign-in service returned no session.');
-    }
-    await _setSession(next);
-    return ApiSuccess(next);
+    final result = await auth.signInWithPassword(
+      email: email,
+      password: password,
+    );
+    if (result case ApiSuccess(:final value)) await _setSession(value);
+    return result;
   }
 
-  /// Always signs out on this device, even if the server cannot be told. Other
-  /// devices, such as the website, stay signed in.
+  /// Signs in only if the provider hands back a session straight away.
+  Future<ApiResult<SignUpOutcome>> signUp({
+    required String email,
+    required String password,
+  }) async {
+    final result = await auth.signUp(email: email, password: password);
+    if (result case ApiSuccess(value: SignedUpWithSession(:final session))) {
+      await _setSession(session);
+    }
+    return result;
+  }
+
+  /// Always signs out on this device, even if the server cannot be told.
   Future<void> signOut() async {
     final current = session.value;
     await _setSession(null);
-    if (current == null || !config.isAuthConfigured) return;
-    try {
-      await _send(
-        'POST',
-        _authUri('logout', {'scope': 'local'}),
-        {..._authHeaders, 'Authorization': 'Bearer ${current.accessToken}'},
-        null,
-        _defaultTimeout,
-      );
-    } on Object {
-      // The token stays valid until it expires; it is gone from this device.
-    }
+    if (current != null) await auth.signOut(current);
   }
 
   Future<void> _setSession(AuthSession? next) async {
@@ -256,46 +122,23 @@ class AlokasApiClient {
         !_now().add(_refreshMargin).isBefore(expiresAt);
   }
 
-  /// Supabase rotates refresh tokens, so concurrent callers share one refresh.
-  Future<_RefreshOutcome> _refresh() {
-    return _refreshInFlight ??=
-        _doRefresh().whenComplete(() => _refreshInFlight = null);
+  /// Refresh tokens rotate, so concurrent callers share one refresh.
+  Future<RefreshOutcome> _refresh() {
+    return _refreshInFlight ??= _doRefresh().whenComplete(
+      () => _refreshInFlight = null,
+    );
   }
 
-  Future<_RefreshOutcome> _doRefresh() async {
+  Future<RefreshOutcome> _doRefresh() async {
     final current = session.value;
-    if (current == null || !config.isAuthConfigured) {
-      return _RefreshOutcome.rejected;
-    }
-    final http.Response response;
-    try {
-      response = await _send(
-        'POST',
-        _authUri('token', {'grant_type': 'refresh_token'}),
-        _authHeaders,
-        jsonEncode({'refresh_token': current.refreshToken}),
-        _defaultTimeout,
-      );
-    } on Object {
-      return _RefreshOutcome.unavailable;
-    }
-    if (response.statusCode == 200) {
-      final decoded = _decodeMap(response);
-      final next = decoded == null
-          ? null
-          : AuthSession.tryFromTokenResponse(decoded, _now());
-      if (next != null) {
-        await _setSession(next.mergedWith(current));
-        return _RefreshOutcome.refreshed;
-      }
-    }
-    if (response.statusCode >= 400 &&
-        response.statusCode < 500 &&
-        response.statusCode != 429) {
+    if (current == null) return RefreshOutcome.rejected;
+    final result = await auth.refresh(current);
+    if (result.outcome == RefreshOutcome.refreshed) {
+      await _setSession(result.session);
+    } else if (result.outcome == RefreshOutcome.rejected) {
       await _setSession(null);
-      return _RefreshOutcome.rejected;
     }
-    return _RefreshOutcome.unavailable;
+    return result.outcome;
   }
 
   // ---- Transport ----
@@ -354,11 +197,11 @@ class AlokasApiClient {
       }
       if (_isExpiring(current)) {
         final outcome = await _refresh();
-        if (outcome == _RefreshOutcome.rejected) {
+        if (outcome == RefreshOutcome.rejected) {
           return const ApiFailure(_sessionExpiredMessage, statusCode: 401);
         }
-        if (outcome == _RefreshOutcome.unavailable) {
-          return const ApiFailure(_offlineMessage);
+        if (outcome == RefreshOutcome.unavailable) {
+          return const ApiFailure(offlineMessage);
         }
         current = session.value;
         if (current == null) {
@@ -370,16 +213,16 @@ class AlokasApiClient {
       if (first.statusCode != 401) return ApiSuccess(first);
 
       final outcome = await _refresh();
-      if (outcome == _RefreshOutcome.rejected) {
+      if (outcome == RefreshOutcome.rejected) {
         return const ApiFailure(_sessionExpiredMessage, statusCode: 401);
       }
       final refreshed = session.value;
-      if (outcome == _RefreshOutcome.unavailable || refreshed == null) {
+      if (outcome == RefreshOutcome.unavailable || refreshed == null) {
         return ApiSuccess(first);
       }
       return ApiSuccess(await sendWith(refreshed.accessToken));
     } on Object {
-      return const ApiFailure(_offlineMessage);
+      return const ApiFailure(offlineMessage);
     }
   }
 
@@ -489,6 +332,7 @@ class AlokasApiClient {
     required MobilePlayerProfile profile,
     String? categoryId,
     ReceiptFile? receipt,
+    Map<String, String> customAnswers = const {},
   }) {
     return _readJson(
       _request(
@@ -499,6 +343,7 @@ class AlokasApiClient {
           if (categoryId != null && isUuid(categoryId))
             'selectedCategoryId': categoryId,
           if (receipt != null) 'receiptDataUrl': receipt.toDataUrl(),
+          if (customAnswers.isNotEmpty) 'customAnswers': customAnswers,
         },
         authed: true,
         timeout: receipt == null ? _defaultTimeout : _uploadTimeout,
@@ -524,6 +369,47 @@ class AlokasApiClient {
             .map(RegistrationRecord.fromJson)
             .toList();
       },
+    );
+  }
+
+  /// Adds a receipt to a registration that has none. The API does not have
+  /// this route yet: see apps/mobile/README.md. Until it does, a 404 here is
+  /// reported plainly and the registration is left as it was.
+  Future<ApiResult<RegistrationRecord>> uploadReceipt({
+    required String registrationId,
+    required ReceiptFile receipt,
+  }) async {
+    final result = await _readJson<RegistrationRecord>(
+      _request(
+        'POST',
+        '/player/registrations/${Uri.encodeComponent(registrationId)}/receipt',
+        body: {'receiptDataUrl': receipt.toDataUrl()},
+        authed: true,
+        timeout: _uploadTimeout,
+      ),
+      (json) {
+        final registration = json['registration'];
+        return registration is Map<String, dynamic>
+            ? RegistrationRecord.fromJson(registration)
+            : null;
+      },
+    );
+    if (result case ApiFailure(statusCode: 404)) {
+      return const ApiFailure(
+        'This server cannot take a receipt after registering yet. Nothing was '
+        'sent. Please give the receipt to the organizer.',
+        statusCode: 404,
+      );
+    }
+    return result;
+  }
+
+  // ---- Live tournament ----
+
+  Future<ApiResult<LiveSnapshot>> fetchLive(String token) {
+    return _readJson(
+      _request('GET', '/public/live/${Uri.encodeComponent(token)}'),
+      LiveSnapshot.tryFromJson,
     );
   }
 

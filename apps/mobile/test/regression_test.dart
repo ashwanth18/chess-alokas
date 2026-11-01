@@ -11,18 +11,6 @@ const String _eventsPath = '/api/public/events';
 const String _detailPath = '/api/public/events/fake-open';
 const String _profilesPath = '/api/player/profiles';
 
-class _MemoryPreferences implements AppPreferences {
-  String? city;
-
-  _MemoryPreferences([this.city]);
-
-  @override
-  Future<String?> readCityId() async => city;
-
-  @override
-  Future<void> writeCityId(String id) async => city = id;
-}
-
 InMemorySessionStorage _signedIn() {
   return InMemorySessionStorage(
     AuthSession(
@@ -76,7 +64,8 @@ Future<void> _pump(
         httpClient: backend.client,
         sessionStorage: storage ?? InMemorySessionStorage(),
       ),
-      preferences: preferences ?? _MemoryPreferences(),
+      preferences: preferences ?? MemoryPreferences(),
+      localStore: InMemoryLocalStore(),
     ),
   );
   await tester.pumpAndSettle();
@@ -86,6 +75,13 @@ Future<void> _openEvent(WidgetTester tester) async {
   final button = find.byType(ElevatedButton).first;
   await tester.ensureVisible(button);
   await tester.tap(button);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _startFlow(WidgetTester tester) async {
+  final start = find.byKey(const Key('start-register-button'));
+  await tester.ensureVisible(start);
+  await tester.tap(start);
   await tester.pumpAndSettle();
 }
 
@@ -217,7 +213,7 @@ void main() {
             : jsonResponse({'error': 'Feed is down for tests'}, 500),
       });
       await _pump(tester, backend);
-      expect(find.text('TOURNAMENTS (1)'), findsOneWidget);
+      expect(find.text('Tournaments (1)'), findsOneWidget);
 
       healthy = false;
       await _goTo(tester, 'Matchday');
@@ -226,7 +222,7 @@ void main() {
       expect(find.text('Fake Open Test Event'), findsOneWidget);
       expect(find.byKey(const Key('stale-notice')), findsOneWidget);
       expect(find.textContaining('Feed is down for tests'), findsOneWidget);
-      expect(find.textContaining('TOURNAMENTS (0)'), findsNothing);
+      expect(find.textContaining('Tournaments (0)'), findsNothing);
 
       healthy = true;
       await tester.tap(find.text('Retry'));
@@ -246,8 +242,8 @@ void main() {
       await _pump(tester, backend, storage: _signedIn());
 
       expect(find.text('Could not load events'), findsOneWidget);
-      expect(find.text('TOURNAMENTS'), findsOneWidget);
-      expect(find.textContaining('TOURNAMENTS (0)'), findsNothing);
+      expect(find.text('Tournaments'), findsOneWidget);
+      expect(find.textContaining('Tournaments (0)'), findsNothing);
 
       await _goTo(tester, 'Account');
       expect(find.text('Could not load profiles'), findsOneWidget);
@@ -278,13 +274,13 @@ void main() {
       });
       await _pump(tester, backend, storage: _signedIn());
       await _goTo(tester, 'Matchday');
-      expect(find.text('#7'), findsOneWidget);
+      expect(find.text('7'), findsOneWidget);
 
       healthy = false;
       await _goTo(tester, 'Career');
       await _goTo(tester, 'Matchday');
 
-      expect(find.text('#7'), findsOneWidget);
+      expect(find.text('7'), findsOneWidget);
       expect(find.byKey(const Key('stale-notice')), findsOneWidget);
       expect(find.text('Could not load your matches'), findsNothing);
     });
@@ -393,6 +389,7 @@ void main() {
 
       expect(find.textContaining('Register by '), findsOneWidget);
       await _openEvent(tester);
+      await _startFlow(tester);
       expect(find.byKey(const Key('confirm-register-button')), findsOneWidget);
     });
   });
@@ -409,6 +406,7 @@ void main() {
       expect(find.text('View & Join Waitlist'), findsOneWidget);
 
       await _openEvent(tester);
+      await _startFlow(tester);
 
       final warning = find.byKey(const Key('event-full-warning'));
       expect(warning, findsOneWidget);
@@ -416,7 +414,7 @@ void main() {
         tester.widget<Text>(warning).data,
         contains('Test Player One will be waitlisted'),
       );
-      expect(find.textContaining('Join Waitlist (1 Player)'), findsOneWidget);
+      expect(find.textContaining('Join waitlist (1 player)'), findsOneWidget);
       expect(
         tester.getTopLeft(warning).dy,
         lessThan(
@@ -431,10 +429,11 @@ void main() {
       final backend = FakeBackend({..._event(event(1)), ..._account()});
       await _pump(tester, backend, storage: _signedIn());
       await _openEvent(tester);
+      await _startFlow(tester);
 
       expect(find.byKey(const Key('event-full-warning')), findsNothing);
       expect(
-        find.textContaining('Confirm Registration (1 Player)'),
+        find.textContaining('Send registration (1 player)'),
         findsOneWidget,
       );
     });
@@ -471,7 +470,7 @@ void main() {
     });
 
     testWidgets('the chosen city is remembered', (tester) async {
-      final preferences = _MemoryPreferences();
+      final preferences = MemoryPreferences();
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
       });
@@ -489,7 +488,7 @@ void main() {
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
       });
-      await _pump(tester, backend, preferences: _MemoryPreferences('jb'));
+      await _pump(tester, backend, preferences: MemoryPreferences('jb'));
 
       expect(find.text('Near: Johor Bahru'), findsOneWidget);
       expect(
@@ -560,7 +559,7 @@ void main() {
       await _goTo(tester, 'Career');
 
       expect(tester.takeException(), isNull);
-      expect(find.text('ALOKAS RATING'), findsOneWidget);
+      expect(find.text('Ratings'), findsOneWidget);
     });
   });
 }

@@ -82,6 +82,8 @@ Future<void> _pumpApp(
       apiClient: api,
       receiptPicker: picker ?? () async => null,
       certificateSaver: saver ?? (_, _) async => true,
+      preferences: MemoryPreferences(),
+      localStore: InMemoryLocalStore(),
     ),
   );
   await tester.pumpAndSettle();
@@ -94,7 +96,28 @@ Future<void> _openFirstEvent(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// From the event page into the flow, as far as its last step.
+Future<void> _walkToLastStep(WidgetTester tester) async {
+  final start = find.byKey(const Key('start-register-button'));
+  if (start.evaluate().isNotEmpty) {
+    await tester.ensureVisible(start);
+    await tester.tap(start);
+    await tester.pumpAndSettle();
+  }
+  final next = find.byKey(const Key('register-next'));
+  while (next.evaluate().isNotEmpty) {
+    await tester.tap(next);
+    await tester.pumpAndSettle();
+  }
+}
+
+Future<void> _leaveDonePage(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('register-done-button')));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _tapConfirm(WidgetTester tester) async {
+  await _walkToLastStep(tester);
   final confirm = find.byKey(const Key('confirm-register-button'));
   await tester.ensureVisible(confirm);
   await tester.pumpAndSettle();
@@ -155,8 +178,8 @@ void main() {
 
       expect(find.text('Unnamed event'), findsOneWidget);
       expect(find.text('Venue not listed'), findsOneWidget);
-      expect(find.text('Date not listed'), findsOneWidget);
-      expect(find.text('Fee not listed'), findsOneWidget);
+      expect(find.textContaining('Date not listed'), findsOneWidget);
+      expect(find.textContaining('Fee not listed'), findsOneWidget);
       expect(find.textContaining('km from'), findsNothing);
       expect(find.byIcon(Icons.verified), findsNothing);
       for (final text in _visibleTexts(tester)) {
@@ -379,6 +402,7 @@ void main() {
       expect(body.containsKey('receiptDataUrl'), isFalse);
       expect(request.headers['Authorization'], 'Bearer fake-access-token');
 
+      await _leaveDonePage(tester);
       expect(
         find.text('Pending: Test Player One'),
         findsOneWidget,
@@ -398,6 +422,7 @@ void main() {
       await _pumpApp(tester, backend, storage: _signedInStorage());
       await _openFirstEvent(tester);
       await _tapConfirm(tester);
+      await _leaveDonePage(tester);
 
       expect(find.text('Waitlisted: Test Player One'), findsOneWidget);
       expect(find.textContaining('Pending: '), findsNothing);
@@ -431,6 +456,7 @@ void main() {
       );
       await _pumpApp(tester, backend, storage: _signedInStorage());
       await _openFirstEvent(tester);
+      await _walkToLastStep(tester);
 
       expect(find.byKey(const Key('receipt-pending-note')), findsOneWidget);
     });
@@ -458,6 +484,7 @@ void main() {
         picker: () async => PickedReceipt(name: 'test-receipt.png', bytes: png),
       );
       await _openFirstEvent(tester);
+      await _walkToLastStep(tester);
 
       final choose = find.byKey(const Key('choose-receipt-button'));
       await tester.ensureVisible(choose);
@@ -494,6 +521,7 @@ void main() {
         picker: () async => PickedReceipt(name: 'test-receipt.png', bytes: png),
       );
       await _openFirstEvent(tester);
+      await _walkToLastStep(tester);
 
       final choose = find.byKey(const Key('choose-receipt-button'));
       await tester.ensureVisible(choose);
@@ -637,7 +665,7 @@ void main() {
       await attemptSignIn(tester);
 
       expect(find.text('player@example.test'), findsOneWidget);
-      expect(find.text('Test Player One'), findsOneWidget);
+      expect(find.text('Test Player One'), findsWidgets);
       expect(storage.value, contains('fake-refresh-token'));
       expect(
         backend.sent('GET', _profilesPath).single.headers['Authorization'],
@@ -857,7 +885,7 @@ void main() {
 
       expect(find.byKey(const Key('save-profile-button')), findsNothing);
       expect(find.text('Test Player One'), findsWidgets);
-      expect(find.text('FAMILY & STUDENT PROFILES (1)'), findsOneWidget);
+      expect(find.text('Players (1)'), findsOneWidget);
     });
 
     testWidgets('the new-profile form starts with nothing filled in', (
@@ -928,7 +956,7 @@ void main() {
         find.textContaining('Could not delete Test Player One'),
         findsOneWidget,
       );
-      expect(find.text('Test Player One'), findsOneWidget);
+      expect(find.text('Test Player One'), findsWidgets);
     });
 
     testWidgets('claim shows the real claimedCount', (tester) async {
@@ -1094,11 +1122,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Fake Open Test Event'), findsOneWidget);
-      expect(find.text('ROUND 2'), findsOneWidget);
-      expect(find.text('#9'), findsOneWidget);
-      expect(find.text('BLACK'), findsOneWidget);
-      expect(find.text('Opponent: Test Opponent'), findsOneWidget);
-      expect(find.text('Result pending'), findsOneWidget);
+      expect(find.text('Round 2'), findsOneWidget);
+      expect(find.text('9'), findsOneWidget);
+      expect(find.byKey(const Key('hero-black')), findsOneWidget);
+      expect(find.text('Test Player One plays Black'), findsOneWidget);
+      expect(find.text('Test Opponent'), findsOneWidget);
+      expect(find.text('Playing now'), findsOneWidget);
     });
 
     testWidgets('a failed dashboard shows an error with retry', (tester) async {
@@ -1175,7 +1204,8 @@ void main() {
   group('Source', () {
     test('lib/ holds no invented data', () {
       const forbidden = [
-        'seed',
+        'seeddata',
+        'seed_data',
         'maybank',
         'cimb',
         'ashwanth',

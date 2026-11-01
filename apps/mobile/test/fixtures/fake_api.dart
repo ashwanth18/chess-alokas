@@ -1,7 +1,10 @@
 import 'dart:convert';
 
 import 'package:chess_alokas_mobile/config.dart';
+import 'package:chess_alokas_mobile/services/local_store.dart';
+import 'package:chess_alokas_mobile/services/preferences.dart';
 import 'package:chess_alokas_mobile/services/session_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -155,6 +158,55 @@ class InMemorySessionStorage implements SessionStorage {
 
   @override
   Future<void> delete() async => value = null;
+}
+
+class InMemoryLocalStore implements LocalStore {
+  final Map<String, String> texts = {};
+  final Map<String, Uint8List> blobs = {};
+
+  @override
+  Future<String?> read(String key) async => texts[key];
+
+  @override
+  Future<void> write(String key, String value) async => texts[key] = value;
+
+  @override
+  Future<Uint8List?> readBytes(String key) async => blobs[key];
+
+  @override
+  Future<void> writeBytes(String key, Uint8List bytes) async =>
+      blobs[key] = bytes;
+
+  @override
+  Future<void> delete(String key) async {
+    texts.remove(key);
+    blobs.remove(key);
+  }
+
+  @override
+  Future<List<String>> keysWithPrefix(String prefix) async => [
+    ...texts.keys,
+    ...blobs.keys,
+  ].where((k) => k.startsWith(prefix)).toList();
+}
+
+class MemoryPreferences implements AppPreferences {
+  String? city;
+  String? theme;
+
+  MemoryPreferences([this.city]);
+
+  @override
+  Future<String?> readCityId() async => city;
+
+  @override
+  Future<void> writeCityId(String id) async => city = id;
+
+  @override
+  Future<String?> readThemeName() async => theme;
+
+  @override
+  Future<void> writeThemeName(String name) async => theme = name;
 }
 
 typedef FakeHandler = http.Response Function(http.Request request);

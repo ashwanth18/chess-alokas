@@ -7,6 +7,7 @@ import '../services/alokas_api.dart';
 import '../services/file_gateway.dart';
 import '../theme/alokas_theme.dart';
 import '../widgets/message_card.dart';
+import '../widgets/player_name.dart';
 
 class CareerScreen extends StatelessWidget {
   final bool isSignedIn;
@@ -51,17 +52,8 @@ class CareerScreen extends StatelessWidget {
     PlayerCertificate certificate,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
-    void say(String text) {
-      messenger.showSnackBar(
-        SnackBar(
-          backgroundColor: AlokasColors.forestElevated,
-          content: Text(
-            text,
-            style: const TextStyle(color: AlokasColors.creamIvory),
-          ),
-        ),
-      );
-    }
+    void say(String text) =>
+        messenger.showSnackBar(SnackBar(content: Text(text)));
 
     final result = await onDownloadCertificate(certificate.id);
     switch (result) {
@@ -80,11 +72,9 @@ class CareerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
-      color: AlokasColors.warmGold,
-      backgroundColor: AlokasColors.forestCard,
       onRefresh: onRefresh,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: _buildContent(context),
       ),
     );
@@ -96,7 +86,6 @@ class CareerScreen extends StatelessWidget {
     if (!isSignedIn) {
       return [
         MessageCard(
-          icon: Icons.login,
           title: 'Sign in to see your career',
           message: 'Ratings, results and certificates appear here.',
           actionLabel: 'Go to Sign In',
@@ -104,24 +93,14 @@ class CareerScreen extends StatelessWidget {
         ),
       ];
     }
-    if (current == null && loading) {
-      return const [
-        Padding(
-          padding: EdgeInsets.all(32),
-          child: Center(
-            child: CircularProgressIndicator(color: AlokasColors.warmGold),
-          ),
-        ),
-      ];
-    }
+    if (current == null && loading) return const [LoadingLine()];
     final problem = error;
     if (problem != null && (current == null || profile == null)) {
       return [
         MessageCard(
-          icon: Icons.cloud_off,
-          accent: AlokasColors.crimsonDanger,
+          isProblem: true,
           title: 'Could not load this career',
-          message: error,
+          message: problem,
           actionLabel: 'Retry',
           onAction: onRefresh,
         ),
@@ -130,7 +109,6 @@ class CareerScreen extends StatelessWidget {
     if (profile == null) {
       return [
         MessageCard(
-          icon: Icons.person_add_alt_1,
           title: 'No player profile yet',
           message: 'Add a player profile to see their career here.',
           actionLabel: 'Go to Profiles',
@@ -145,458 +123,255 @@ class CareerScreen extends StatelessWidget {
           lastLoadedAt: dashboardUpdatedAt,
           onRetry: onRefresh,
         ),
-      _buildProfileSelector(),
-      const SizedBox(height: 12),
-      _buildRatingsGrid(profile),
-      const SizedBox(height: 14),
-      _buildPerformanceCard(current?.stats),
+      PlayerPicker(
+        profiles: profiles,
+        selectedId: selectedProfileId,
+        onSelect: onSelectProfile,
+      ),
       const SizedBox(height: 16),
-      _buildCertificateSection(context, current?.certificates ?? const []),
+      _buildRatings(context, profile),
+      const SizedBox(height: 24),
+      _buildPerformance(context, current?.stats),
+      const SizedBox(height: 24),
+      _buildCertificates(context, current?.certificates ?? const []),
+      const SizedBox(height: 24),
+      _buildTournaments(context, current?.tournaments ?? const []),
       const SizedBox(height: 16),
-      _buildTournamentsSection(current?.tournaments ?? const []),
-      const SizedBox(height: 16),
-      const Text(
+      Text(
         'Rating history charts are not available yet.',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12),
+        style: atype(14, color: context.pal.ink2),
       ),
     ];
   }
 
-  Widget _buildProfileSelector() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: profiles.map((p) {
-          final selected = p.id == selectedProfileId;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              selected: selected,
-              selectedColor: AlokasColors.warmGold,
-              backgroundColor: AlokasColors.forestCard,
-              label: Text(
-                p.username == null
-                    ? p.fullName
-                    : '${p.fullName} (@${p.username})',
-              ),
-              labelStyle: TextStyle(
-                color: selected
-                    ? AlokasColors.deepForest
-                    : AlokasColors.creamIvory,
-                fontWeight: FontWeight.w700,
-                fontSize: 12.5,
-              ),
-              onSelected: (_) => onSelectProfile(p.id),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
   String _rating(int? value) => value == null ? 'None' : '$value';
 
-  Widget _buildRatingsGrid(MobilePlayerProfile profile) {
-    // Rows sized by their content, so large system fonts cannot overflow.
-    Widget row(Widget left, Widget right) => IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: left),
-          const SizedBox(width: 10),
-          Expanded(child: right),
-        ],
-      ),
-    );
-    return Column(
-      children: [
-        row(
-          _ratingTile(
-            'ALOKAS RATING',
-            _rating(profile.alokasRating),
-            'On this profile',
-            AlokasColors.brightGold,
-          ),
-          _ratingTile(
-            'FIDE RAPID',
-            _rating(profile.fideRapid),
-            profile.fideId == null
-                ? 'No FIDE ID saved'
-                : 'FIDE ID: ${profile.fideId}',
-            AlokasColors.emeraldSuccess,
-          ),
-        ),
-        const SizedBox(height: 10),
-        row(
-          _ratingTile(
-            'FIDE STANDARD',
-            _rating(profile.fideStandard),
-            'Classical',
-            AlokasColors.skyInfo,
-          ),
-          _ratingTile(
-            'FIDE BLITZ',
-            _rating(profile.fideBlitz),
-            'Blitz',
-            AlokasColors.warmGold,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _ratingTile(
-    String label,
-    String value,
-    String subtitle,
-    Color accent,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+  Widget _buildRatings(BuildContext context, MobilePlayerProfile profile) {
+    final p = context.pal;
+    Widget line(String label, String value, String? note) => Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-        color: AlokasColors.forestCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AlokasColors.goldBorder),
+        border: Border(bottom: BorderSide(color: p.rule)),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: AlokasColors.mutedSage,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              color: accent,
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          Text(
-            subtitle,
-            style: const TextStyle(
-              color: AlokasColors.creamIvory,
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPerformanceCard(PlayerCareerStats? stats) {
-    final games = stats?.gamesPlayed;
-    final wins = stats?.wins;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(15),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Expanded(
-                  child: Text(
-                    'CAREER PERFORMANCE',
-                    style: TextStyle(
-                      color: AlokasColors.warmGold,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.7,
-                    ),
-                  ),
-                ),
-                if (games != null && games > 0 && wins != null) ...[
-                  const SizedBox(width: 8),
-                  AlokasBadge(
-                    text:
-                        '${((wins / games) * 100).round()}% Win Rate (${pluralize(games, 'Game')})',
-                    color: AlokasColors.emeraldSuccess,
-                  ),
-                ],
+                Text(label, style: atype(16, weight: 600, color: p.ink)),
+                if (note != null)
+                  Text(note, style: atype(14, color: p.ink2)),
               ],
             ),
-            const SizedBox(height: 10),
-            if (stats == null || (games ?? 0) == 0)
-              const Text(
-                'No completed games on record for this player.',
-                style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12.5),
-              )
-            else
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _statCol(
-                    'EVENTS',
-                    '${stats.tournamentsCount ?? '–'}',
-                    AlokasColors.creamIvory,
-                  ),
-                  _statCol(
-                    'WINS',
-                    '${stats.wins ?? '–'}',
-                    AlokasColors.emeraldSuccess,
-                  ),
-                  _statCol(
-                    'DRAWS',
-                    '${stats.draws ?? '–'}',
-                    AlokasColors.amberWarning,
-                  ),
-                  _statCol(
-                    'LOSSES',
-                    '${stats.losses ?? '–'}',
-                    AlokasColors.crimsonDanger,
-                  ),
-                  _statCol(
-                    'POINTS',
-                    stats.totalPoints?.toStringAsFixed(1) ?? '–',
-                    AlokasColors.warmGold,
-                  ),
-                ],
-              ),
-          ],
-        ),
+          ),
+          Text(
+            value,
+            style: atype(24, weight: 800, color: p.ink, tabular: true),
+          ),
+        ],
       ),
     );
-  }
-
-  Widget _statCol(String label, String val, Color color) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          val,
-          style: TextStyle(
-            color: color,
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-          ),
+        const SheetHeading('Ratings'),
+        line('Alokas', _rating(profile.alokasRating), 'On this profile'),
+        line(
+          'FIDE Rapid',
+          _rating(profile.fideRapid),
+          profile.fideId == null
+              ? 'No FIDE ID saved'
+              : 'FIDE ID: ${profile.fideId}',
         ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: const TextStyle(
-            color: AlokasColors.mutedSage,
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        line('FIDE Standard', _rating(profile.fideStandard), null),
+        line('FIDE Blitz', _rating(profile.fideBlitz), null),
       ],
     );
   }
 
-  Widget _buildCertificateSection(
+  Widget _buildPerformance(BuildContext context, PlayerCareerStats? stats) {
+    final p = context.pal;
+    final games = stats?.gamesPlayed;
+    final wins = stats?.wins;
+    Widget stat(String label, String value) => Column(
+      children: [
+        Text(
+          value,
+          style: atype(24, weight: 800, color: p.ink, tabular: true),
+        ),
+        Text(label, style: atype(13, color: p.ink2)),
+      ],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SheetHeading('Career'),
+        const SizedBox(height: 8),
+        if (stats == null || (games ?? 0) == 0)
+          Text(
+            'No completed games on record for this player.',
+            style: atype(16, color: p.ink2),
+          )
+        else ...[
+          if (games != null && wins != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: AlokasBadge(
+                text:
+                    '${((wins / games) * 100).round()}% Win Rate (${pluralize(games, 'Game')})',
+              ),
+            ),
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              stat('Events', '${stats.tournamentsCount ?? '–'}'),
+              stat('Wins', '${stats.wins ?? '–'}'),
+              stat('Draws', '${stats.draws ?? '–'}'),
+              stat('Losses', '${stats.losses ?? '–'}'),
+              stat('Points', stats.totalPoints?.toStringAsFixed(1) ?? '–'),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCertificates(
     BuildContext context,
     List<PlayerCertificate> certificates,
   ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    final p = context.pal;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SheetHeading(
+          'Certificates',
+          trailing: Text(
+            '${certificates.length} issued',
+            style: atype(14, color: p.ink2),
+          ),
+        ),
+        if (certificates.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'No certificates issued to this player yet.',
+              style: atype(16, color: p.ink2),
+            ),
+          ),
+        for (final cert in certificates)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: p.rule)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
-                  Icons.workspace_premium,
-                  color: AlokasColors.brightGold,
-                  size: 20,
+                Text(
+                  cert.tournamentName ?? 'Unnamed tournament',
+                  style: atype(16, weight: 700, color: p.ink, height: 1.25),
                 ),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'CERTIFICATES',
-                    style: TextStyle(
-                      color: AlokasColors.warmGold,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
+                if (cert.recipientName != null)
+                  PlayerName(cert.recipientName!, weight: 400, color: p.ink),
+                const SizedBox(height: 4),
+                Text(
+                  [
+                    cert.type == 'winner'
+                        ? (cert.rank == null
+                              ? 'Winner'
+                              : 'Winner, rank ${cert.rank}')
+                        : 'Participation',
+                    ?formatDateForPeople(cert.tournamentDate),
+                    ?cert.serial,
+                  ].join(' · '),
+                  style: atype(14, color: p.ink2),
                 ),
-                AlokasBadge(
-                  text: '${certificates.length} Issued',
-                  color: AlokasColors.warmGold,
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: () => _download(context, cert),
+                  child: const Text('Download PDF'),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            if (certificates.isEmpty)
-              const Text(
-                'No certificates issued to this player yet.',
-                style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12.5),
-              ),
-            ...certificates.map((cert) {
-              final details = [
-                cert.recipientName,
-                formatDateForPeople(cert.tournamentDate),
-              ].whereType<String>().join(' • ');
-              final rank = cert.rank;
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AlokasColors.forestSurface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AlokasColors.goldBorder),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        if (cert.serial != null)
-                          AlokasBadge(
-                            text: cert.serial!,
-                            color: AlokasColors.brightGold,
-                          ),
-                        AlokasBadge(
-                          text: cert.type == 'winner'
-                              ? (rank == null
-                                    ? 'Winner'
-                                    : 'Winner • Rank #$rank')
-                              : 'Participation',
-                          color: cert.type == 'winner'
-                              ? AlokasColors.emeraldSuccess
-                              : AlokasColors.skyInfo,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      cert.tournamentName ?? 'Unnamed tournament',
-                      style: const TextStyle(
-                        color: AlokasColors.creamIvory,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                      ),
-                    ),
-                    if (details.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        details,
-                        style: const TextStyle(
-                          color: AlokasColors.mutedSage,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _download(context, cert),
-                        icon: const Icon(Icons.download, size: 16),
-                        label: const Text('Download PDF'),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 
-  Widget _buildTournamentsSection(List<PlayerTournamentHistoryItem> items) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'TOURNAMENTS',
-              style: TextStyle(
-                color: AlokasColors.warmGold,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.8,
-              ),
+  Widget _buildTournaments(
+    BuildContext context,
+    List<PlayerTournamentHistoryItem> items,
+  ) {
+    final p = context.pal;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SheetHeading('Tournaments'),
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'No tournaments linked to this player. If they have played '
+              'before, try "Claim Past Tournaments" on the Account tab.',
+              style: atype(16, color: p.ink2),
             ),
-            const SizedBox(height: 10),
-            if (items.isEmpty)
-              const Text(
-                'No tournaments linked to this player. If they have played before, try "Claim Past Tournaments" on the Family & Auth tab.',
-                style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12.5),
-              ),
-            ...items.map((t) {
-              final score = t.score;
-              final rounds = t.rounds;
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AlokasColors.forestSurface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AlokasColors.goldBorder),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            t.tournamentName ?? 'Unnamed tournament',
-                            style: const TextStyle(
-                              color: AlokasColors.creamIvory,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13.5,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            formatDateForPeople(t.tournamentDate) ??
-                                'Date not listed',
-                            style: const TextStyle(
-                              color: AlokasColors.mutedSage,
-                              fontSize: 11.5,
-                            ),
-                          ),
-                        ],
+          ),
+        for (final t in items)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: p.rule)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        t.tournamentName ?? 'Unnamed tournament',
+                        style: atype(16, weight: 600, color: p.ink, height: 1.25),
                       ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        if (score != null)
-                          Text(
-                            rounds == null ? '$score pts' : '$score / $rounds',
-                            style: const TextStyle(
-                              color: AlokasColors.brightGold,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                            ),
-                          ),
-                        Text(
-                          'W${t.wins ?? '–'} D${t.draws ?? '–'} L${t.losses ?? '–'}',
-                          style: const TextStyle(
-                            color: AlokasColors.mutedSage,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                          ),
+                      Text(
+                        formatDateForPeople(t.tournamentDate) ??
+                            'Date not listed',
+                        style: atype(14, color: p.ink2),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (t.score != null)
+                      Text(
+                        t.rounds == null
+                            ? '${t.score} pts'
+                            : '${t.score} / ${t.rounds}',
+                        style: atype(
+                          16,
+                          weight: 800,
+                          color: p.ink,
+                          tabular: true,
                         ),
-                      ],
+                      ),
+                    Text(
+                      'W${t.wins ?? '–'} D${t.draws ?? '–'} L${t.losses ?? '–'}',
+                      style: atype(14, color: p.ink2, tabular: true),
                     ),
                   ],
                 ),
-              );
-            }),
-          ],
-        ),
-      ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

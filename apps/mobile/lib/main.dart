@@ -1,14 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'models/draft.dart';
+import 'models/live.dart';
 import 'models/models.dart';
 import 'screens/career_screen.dart';
 import 'screens/discover_screen.dart';
 import 'screens/matchday_screen.dart';
 import 'screens/profiles_screen.dart';
+import 'screens/register_screen.dart';
 import 'services/alokas_api.dart';
+import 'services/device_location.dart' as device;
 import 'services/file_gateway.dart';
+import 'services/local_store.dart';
 import 'services/preferences.dart';
 import 'theme/alokas_theme.dart';
+import 'widgets/message_card.dart';
+import 'widgets/player_name.dart';
 
 void main() {
   runApp(const ChessAlokasMobileApp());
@@ -19,6 +28,12 @@ class ChessAlokasMobileApp extends StatefulWidget {
   final ReceiptPicker receiptPicker;
   final CertificateSaver certificateSaver;
   final AppPreferences preferences;
+  final LocalStore localStore;
+  final device.DeviceLocator locateDevice;
+  final device.SettingsOpener openLocationSettings;
+
+  /// How often an open Matchday or live page checks for news.
+  final Duration pollInterval;
 
   const ChessAlokasMobileApp({
     super.key,
@@ -26,6 +41,10 @@ class ChessAlokasMobileApp extends StatefulWidget {
     this.receiptPicker = pickReceiptFile,
     this.certificateSaver = saveCertificateFile,
     this.preferences = const SecureAppPreferences(),
+    this.localStore = const FileLocalStore(),
+    this.locateDevice = device.locateDevice,
+    this.openLocationSettings = device.openLocationSettings,
+    this.pollInterval = const Duration(seconds: 30),
   });
 
   @override
@@ -34,13 +53,18 @@ class ChessAlokasMobileApp extends StatefulWidget {
 
 class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     with WidgetsBindingObserver {
+  static const int _discoverTab = 0;
   static const int _matchdayTab = 1;
   static const int _careerTab = 2;
   static const int _accountTab = 3;
-  static const int _discoverTab = 0;
 
   late final AlokasApiClient _api;
+  late final OfflineCache _cache;
+  late final DraftStore _drafts;
   int _currentTabIndex = 0;
+  AlokasThemeChoice _theme = AlokasThemeChoice.system;
+  bool _inForeground = true;
+  Timer? _pollTimer;
 
   LocationPreset _selectedLocation = locationPresets.first;
   List<MobileEventItem> _events = const [];
@@ -58,8 +82,10 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
   String? _profilesError;
   DateTime? _profilesUpdatedAt;
   String? _selectedProfileId;
+  List<RegistrationRecord>? _registrations;
   Map<String, List<RegistrationRecord>> _registrationsByEvent = const {};
   bool _registrationsLoaded = false;
+  final Map<String, String> _eventNames = {};
 
   PlayerDashboard? _dashboard;
   bool _dashboardLoading = false;
@@ -67,14 +93,42 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
   DateTime? _dashboardUpdatedAt;
   int _dashboardRequestId = 0;
 
+  final Map<String, LiveSnapshot> _live = {};
+  final Map<String, DateTime> _liveAt = {};
+
+  List<RegistrationDraft> _draftList = const [];
+
   @override
   void initState() {
     super.initState();
     _api = widget.apiClient ?? AlokasApiClient();
+    _cache = OfflineCache(widget.localStore);
+    _drafts = DraftStore(widget.localStore);
     WidgetsBinding.instance.addObserver(this);
     _api.session.addListener(_onSessionChanged);
+    _restoreTheme();
     _restoreCityThenFetchEvents();
     _api.restoreSession();
+  }
+
+  Future<void> _restoreTheme() async {
+    try {
+      final name = await widget.preferences.readThemeName().timeout(
+        const Duration(seconds: 2),
+      );
+      if (mounted) setState(() => _theme = AlokasThemeChoice.fromName(name));
+    } on Object {
+      // Falls back to following the phone's own setting.
+    }
+  }
+
+  Future<void> _chooseTheme(AlokasThemeChoice choice) async {
+    setState(() => _theme = choice);
+    try {
+      await widget.preferences.writeThemeName(choice.name);
+    } on Object {
+      // The choice works for this run but will not be remembered.
+    }
   }
 
   /// A storage problem only means the first city is used; events still load.
@@ -91,12 +145,29 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     for (final preset in locationPresets) {
       if (preset.id == savedId) _selectedLocation = preset;
     }
+    await _showCachedEvents();
     await _fetchEvents();
+  }
+
+  Future<void> _showCachedEvents() async {
+    final cached = await _cache.loadEvents();
+    final rows = cached?.value;
+    if (!mounted || rows is! List || _events.isNotEmpty) return;
+    final events = rows
+        .whereType<Map<String, dynamic>>()
+        .map(MobileEventItem.tryFromJson)
+        .whereType<MobileEventItem>()
+        .toList();
+    setState(() {
+      _events = events;
+      _eventsUpdatedAt = cached!.savedAt;
+    });
   }
 
   Future<void> _chooseLocation(LocationPreset location) async {
     setState(() => _selectedLocation = location);
     _refreshEvents();
+    if (location.id == LocationPreset.deviceId) return;
     try {
       await widget.preferences.writeCityId(location.id);
     } on Object {
@@ -106,6 +177,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _api.session.removeListener(_onSessionChanged);
     super.dispose();
@@ -113,7 +185,22 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refreshTab(_currentTabIndex);
+    final foreground = state == AppLifecycleState.resumed;
+    if (foreground == _inForeground) return;
+    _inForeground = foreground;
+    if (foreground) _refreshTab(_currentTabIndex);
+    _syncPolling();
+  }
+
+  /// Only an open Matchday in the foreground polls, to spare battery and data.
+  void _syncPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    if (_inForeground && _currentTabIndex == _matchdayTab && _api.isSignedIn) {
+      _pollTimer = Timer.periodic(widget.pollInterval, (_) {
+        if (!_dashboardLoading) _loadDashboard();
+      });
+    }
   }
 
   /// After a failed start there is no profile to ask about, so the profiles
@@ -169,17 +256,100 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
       _selectedProfileId = null;
       _profilesError = null;
       _profilesUpdatedAt = null;
+      _registrations = null;
       _registrationsByEvent = const {};
       _registrationsLoaded = false;
       _dashboard = null;
       _dashboardError = null;
       _dashboardUpdatedAt = null;
       _dashboardLoading = false;
+      _live.clear();
+      _liveAt.clear();
+      _draftList = const [];
     });
+    _syncPolling();
     if (key != null) {
-      _loadProfiles();
-      _loadRegistrations();
+      _startAccount(key);
     }
+  }
+
+  /// What this phone last saw appears at once, with its time, and the server is
+  /// asked straight after. With no signal the saved copy stays on screen.
+  Future<void> _startAccount(String key) async {
+    await _reloadDrafts();
+    await _showCachedAccount(key);
+    if (!mounted || key != _loadedAccountKey) return;
+    _loadProfiles();
+    _loadRegistrations();
+  }
+
+  Future<void> _reloadDrafts() async {
+    final key = _loadedAccountKey;
+    if (key == null) return;
+    final drafts = await _drafts.loadAll(key);
+    if (mounted && key == _loadedAccountKey) {
+      setState(() => _draftList = drafts);
+    }
+  }
+
+  Future<void> _showCachedAccount(String key) async {
+    final cached = await _cache.loadProfiles(key);
+    if (!mounted || key != _loadedAccountKey) return;
+    final rows = cached?.value;
+    if (rows is List && _profiles.isEmpty) {
+      final profiles = MobilePlayerProfile.listFromJson(rows);
+      final saved = await _cache.loadSelectedProfile(key);
+      if (!mounted || key != _loadedAccountKey) return;
+      setState(() {
+        _profiles = profiles;
+        _profilesUpdatedAt = cached!.savedAt;
+        _selectedProfileId = _pickSelected(profiles, saved?.value as String?);
+      });
+      await _showCachedDashboard(key, _selectedProfileId);
+    }
+  }
+
+  Future<void> _showCachedDashboard(String key, String? profileId) async {
+    if (profileId == null) return;
+    final cached = await _cache.loadDashboard(key, profileId);
+    final json = cached?.value;
+    if (!mounted ||
+        key != _loadedAccountKey ||
+        profileId != _selectedProfileId ||
+        _dashboard != null ||
+        json is! Map<String, dynamic>) {
+      return;
+    }
+    final dashboard = PlayerDashboard.fromJson(json);
+    final tokens = _tokensIn(dashboard);
+    for (final token in tokens) {
+      final live = await _cache.loadLive(key, token);
+      final value = live?.value;
+      if (value is Map<String, dynamic>) {
+        final snapshot = LiveSnapshot.tryFromJson(value);
+        if (snapshot != null) {
+          _live[token] = snapshot;
+          _liveAt[token] = live!.savedAt;
+        }
+      }
+    }
+    if (!mounted ||
+        key != _loadedAccountKey ||
+        profileId != _selectedProfileId ||
+        _dashboard != null) {
+      return;
+    }
+    setState(() {
+      _dashboard = dashboard;
+      _dashboardUpdatedAt = cached!.savedAt;
+    });
+  }
+
+  /// Signing out removes the children's data this phone has kept.
+  Future<void> _signOut() async {
+    await _cache.clearAccounts();
+    await _drafts.clearAll();
+    await _api.signOut();
   }
 
   Future<void> _refreshEvents() {
@@ -208,6 +378,13 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
           _events = value;
           _eventsError = null;
           _eventsUpdatedAt = DateTime.now();
+          _cache.saveEvents(
+            value.map((e) => e.raw).toList(),
+            _eventsUpdatedAt!,
+          );
+          for (final event in value) {
+            if (event.name != null) _eventNames[event.id] = event.name!;
+          }
         case ApiFailure(:final message):
           // Events already on screen stay; a failed refresh says nothing
           // about whether they still exist.
@@ -224,19 +401,33 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     final key = _loadedAccountKey;
     final result = await _api.fetchProfiles();
     if (!mounted || key != _loadedAccountKey) return;
+    var selectionChanged = false;
     setState(() {
       _profilesLoading = false;
       switch (result) {
         case ApiSuccess(:final value):
           _profiles = value;
           final selected = _pickSelected(value, _selectedProfileId);
-          if (selected != _selectedProfileId) _dashboard = null;
+          if (selected != _selectedProfileId) {
+            _dashboard = null;
+            selectionChanged = true;
+          }
           _selectedProfileId = selected;
           _profilesUpdatedAt = DateTime.now();
+          if (key != null) {
+            _cache.saveProfiles(
+              key,
+              value.map((p) => p.raw).toList(),
+              _profilesUpdatedAt!,
+            );
+          }
         case ApiFailure(:final message):
           _profilesError = message;
       }
     });
+    if (selectionChanged && key != null) {
+      await _showCachedDashboard(key, _selectedProfileId);
+    }
     _loadDashboard();
   }
 
@@ -261,20 +452,47 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
           final eventId = record.tournamentId;
           if (eventId != null) (grouped[eventId] ??= []).add(record);
         }
+        _registrations = value;
         _registrationsByEvent = grouped;
         _registrationsLoaded = true;
       });
+      _lookUpEventNames(value);
     }
   }
 
+  /// `GET /player/registrations` holds no event names, so a closed event that
+  /// is no longer in the feed is looked up by id.
+  Future<void> _lookUpEventNames(List<RegistrationRecord> records) async {
+    final missing = records
+        .map((r) => r.tournamentId)
+        .whereType<String>()
+        .where((id) => !_eventNames.containsKey(id))
+        .toSet();
+    for (final id in missing) {
+      final result = await _api.fetchEventDetail(id);
+      if (!mounted) return;
+      if (result case ApiSuccess(:final value)) {
+        final name = value.event.name;
+        if (name != null) setState(() => _eventNames[id] = name);
+      }
+    }
+  }
+
+  Set<String> _tokensIn(PlayerDashboard dashboard) => dashboard.liveMatches
+      .map((m) => m.publicToken)
+      .whereType<String>()
+      .toSet();
+
   Future<void> _loadDashboard() async {
-    if (!_api.isSignedIn || _selectedProfileId == null) return;
+    final profileId = _selectedProfileId;
+    if (!_api.isSignedIn || profileId == null) return;
+    final key = _loadedAccountKey;
     final requestId = ++_dashboardRequestId;
     setState(() {
       _dashboardLoading = true;
       _dashboardError = null;
     });
-    final result = await _api.fetchDashboard(_selectedProfileId);
+    final result = await _api.fetchDashboard(profileId);
     if (!mounted || requestId != _dashboardRequestId) return;
     setState(() {
       _dashboardLoading = false;
@@ -282,11 +500,43 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         case ApiSuccess(:final value):
           _dashboard = value;
           _dashboardUpdatedAt = DateTime.now();
+          if (key != null) {
+            _cache.saveDashboard(
+              key,
+              profileId,
+              value.raw,
+              _dashboardUpdatedAt!,
+            );
+          }
         case ApiFailure(:final message):
           // A matchday board already on screen stays, with a notice.
           _dashboardError = message;
       }
     });
+    if (result case ApiSuccess(:final value)) {
+      for (final token in _tokensIn(value)) {
+        _loadLive(token);
+      }
+    }
+  }
+
+  /// A failed live load changes nothing: standings already known stay, with
+  /// the time they were fetched.
+  Future<void> _loadLive(String token) async {
+    final result = await _api.fetchLive(token);
+    if (!mounted) return;
+    if (result case ApiSuccess(:final value)) _rememberLive(token, value);
+  }
+
+  void _rememberLive(String token, LiveSnapshot snapshot) {
+    if (!mounted) return;
+    final at = DateTime.now();
+    setState(() {
+      _live[token] = snapshot;
+      _liveAt[token] = at;
+    });
+    final key = _loadedAccountKey;
+    if (key != null) _cache.saveLive(key, token, snapshot.raw, at);
   }
 
   void _selectProfile(String id) {
@@ -296,6 +546,11 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
       _dashboard = null;
       _dashboardUpdatedAt = null;
     });
+    final key = _loadedAccountKey;
+    if (key != null) {
+      _cache.saveSelectedProfile(key, id, DateTime.now());
+      _showCachedDashboard(key, id);
+    }
     _loadDashboard();
   }
 
@@ -303,6 +558,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     if (index == _currentTabIndex) return;
     setState(() => _currentTabIndex = index);
     _refreshTab(index);
+    _syncPolling();
   }
 
   /// Registrations still active for a player; null when they are not known.
@@ -336,6 +592,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         profile: selection.profile,
         categoryId: selection.categoryId,
         receipt: receipt,
+        customAnswers: selection.customAnswers,
       );
       attempts.add(
         RegistrationAttempt(profile: selection.profile, result: result),
@@ -346,6 +603,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
       final updated = Map<String, List<RegistrationRecord>>.of(
         _registrationsByEvent,
       );
+      final all = [...?_registrations];
       for (final attempt in attempts) {
         if (attempt.result case ApiSuccess(:final value)) {
           final record = RegistrationRecord(
@@ -358,11 +616,26 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
             hasReceipt: value.hasReceipt,
           );
           updated[event.id] = [...?updated[event.id], record];
+          all.add(record);
         }
       }
       _registrationsByEvent = updated;
+      _registrations = all;
+      if (event.name != null) _eventNames[event.id] = event.name!;
     });
     return attempts;
+  }
+
+  Future<ApiResult<RegistrationRecord>> _uploadReceipt(
+    RegistrationRecord record,
+    ReceiptFile receipt,
+  ) async {
+    final result = await _api.uploadReceipt(
+      registrationId: record.id!,
+      receipt: receipt,
+    );
+    if (result is ApiSuccess<RegistrationRecord>) await _loadRegistrations();
+    return result;
   }
 
   Future<ApiResult<void>> _createProfile(Map<String, dynamic> fields) async {
@@ -431,16 +704,22 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         profilesUnavailable: _profiles.isNotEmpty
             ? null
             : _profilesLoading
-            ? 'Still loading. Please close this and try again in a moment.'
+            ? 'Still loading. Please go back and try again in a moment.'
             : _profilesError,
         registrationsByEvent: _registrationsByEvent,
         selectedLocation: _selectedLocation,
         onLocationChanged: _chooseLocation,
+        locateDevice: widget.locateDevice,
+        openSettings: widget.openLocationSettings,
         loadEventDetail: _api.fetchEventDetail,
         onRegister: _handleRegister,
         onRefresh: _refreshEvents,
         onGoToAccount: () => _selectTab(_accountTab),
         receiptPicker: widget.receiptPicker,
+        drafts: _draftList,
+        draftStore: _drafts,
+        accountKey: _loadedAccountKey,
+        onDraftsChanged: _reloadDrafts,
       ),
       MatchdayScreen(
         isSignedIn: signedIn,
@@ -453,6 +732,11 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         dashboard: _dashboard,
         onRefresh: _refreshDashboard,
         onGoToAccount: () => _selectTab(_accountTab),
+        liveByToken: _live,
+        liveUpdatedAt: _liveAt,
+        loadLive: _api.fetchLive,
+        onLiveLoaded: _rememberLive,
+        pollInterval: widget.pollInterval,
       ),
       CareerScreen(
         isSignedIn: signedIn,
@@ -469,7 +753,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         certificateSaver: widget.certificateSaver,
       ),
       ProfilesScreen(
-        isAuthConfigured: _api.config.isAuthConfigured,
+        isAuthConfigured: _api.auth.isConfigured,
         signedInEmail: signedIn ? (session.email ?? 'Signed in') : null,
         profiles: _profiles,
         profilesLoading: _profilesLoading,
@@ -483,110 +767,91 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         onClaimPastTournaments: _claimPastTournaments,
         onSignIn: (email, password) =>
             _api.signInWithPassword(email: email, password: password),
-        onSignOut: _api.signOut,
+        onSignUp: (email, password) =>
+            _api.signUp(email: email, password: password),
+        onResendConfirmation: _api.auth.resendConfirmation,
+        onRequestPasswordReset: _api.auth.requestPasswordReset,
+        onSignOut: _signOut,
+        themeChoice: _theme,
+        onThemeChanged: _chooseTheme,
+        registrations: _registrations,
+        eventNameFor: (id) => id == null ? null : _eventNames[id],
+        receiptPicker: widget.receiptPicker,
+        onUploadReceipt: _uploadReceipt,
       ),
     ];
-
-    final String subtitle;
-    if (!signedIn) {
-      subtitle = 'Not signed in';
-    } else if (activeProfile != null) {
-      subtitle =
-          'Active: ${activeProfile.fullName} (${activeProfile.relationshipLabel})';
-    } else {
-      subtitle = 'Signed in';
-    }
 
     return MaterialApp(
       title: 'Chess Alokas',
       debugShowCheckedModeBanner: false,
-      theme: AlokasTheme.darkTheme,
-      home: Scaffold(
-        appBar: AppBar(
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: AlokasColors.warmGold,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.emoji_events,
-                  color: AlokasColors.deepForest,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Chess Alokas',
-                      style: TextStyle(
-                        color: AlokasColors.creamIvory,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 17,
-                      ),
+      theme: AlokasTheme.of(_theme, Brightness.light),
+      darkTheme: AlokasTheme.of(_theme, Brightness.dark),
+      themeMode: _theme == AlokasThemeChoice.system
+          ? ThemeMode.system
+          : ThemeMode.light,
+      themeAnimationDuration: Duration.zero,
+      home: Builder(
+        builder: (context) {
+          final p = context.pal;
+          return Scaffold(
+            appBar: AppBar(
+              titleSpacing: 16,
+              title: Row(
+                children: [
+                  const BrandMark(),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Chess Alokas',
+                          style: atype(18, weight: 800, color: p.ink),
+                        ),
+                        Text(
+                          !signedIn
+                              ? 'Not signed in'
+                              : activeProfile == null
+                              ? 'Signed in'
+                              : splitPlayerName(activeProfile.fullName).given,
+                          style: atype(13, weight: 600, color: p.ink2),
+                        ),
+                      ],
                     ),
-                    Text(
-                      subtitle,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AlokasColors.warmGold,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            if (signedIn && _profiles.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Center(
-                  child: AlokasBadge(
-                    text: _profiles.length == 1
-                        ? '1 Profile'
-                        : '${_profiles.length} Profiles',
-                    color: AlokasColors.brightGold,
-                    icon: Icons.family_restroom,
                   ),
-                ),
+                ],
               ),
-          ],
-        ),
-        body: pages[_currentTabIndex],
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _currentTabIndex,
-          onDestinationSelected: _selectTab,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.explore_outlined),
-              selectedIcon: Icon(Icons.explore),
-              label: 'Discover',
             ),
-            NavigationDestination(
-              icon: Icon(Icons.sports_esports_outlined),
-              selectedIcon: Icon(Icons.sports_esports),
-              label: 'Matchday',
+            body: pages[_currentTabIndex],
+            bottomNavigationBar: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: p.rule)),
+              ),
+              child: NavigationBar(
+                selectedIndex: _currentTabIndex,
+                onDestinationSelected: _selectTab,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.search),
+                    label: 'Discover',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.grid_view),
+                    label: 'Matchday',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.history),
+                    label: 'Career',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.person_outline),
+                    label: 'Account',
+                  ),
+                ],
+              ),
             ),
-            NavigationDestination(
-              icon: Icon(Icons.workspace_premium_outlined),
-              selectedIcon: Icon(Icons.workspace_premium),
-              label: 'Career',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.people_outline),
-              selectedIcon: Icon(Icons.people),
-              label: 'Account',
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

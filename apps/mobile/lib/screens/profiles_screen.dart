@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../services/alokas_api.dart';
+import '../services/file_gateway.dart';
 import '../theme/alokas_theme.dart';
 import '../widgets/message_card.dart';
+import '../widgets/player_name.dart';
 
 class ProfilesScreen extends StatelessWidget {
   final bool isAuthConfigured;
@@ -29,7 +31,23 @@ class ProfilesScreen extends StatelessWidget {
   onClaimPastTournaments;
   final Future<ApiResult<AuthSession>> Function(String email, String password)
   onSignIn;
+  final Future<ApiResult<SignUpOutcome>> Function(String email, String password)
+  onSignUp;
+  final Future<ApiResult<void>> Function(String email) onResendConfirmation;
+  final Future<ApiResult<void>> Function(String email) onRequestPasswordReset;
   final Future<void> Function() onSignOut;
+  final AlokasThemeChoice themeChoice;
+  final ValueChanged<AlokasThemeChoice> onThemeChanged;
+
+  /// Everything this account has sent; null until it has loaded.
+  final List<RegistrationRecord>? registrations;
+  final String? Function(String? tournamentId) eventNameFor;
+  final ReceiptPicker receiptPicker;
+  final Future<ApiResult<RegistrationRecord>> Function(
+    RegistrationRecord record,
+    ReceiptFile receipt,
+  )
+  onUploadReceipt;
 
   const ProfilesScreen({
     super.key,
@@ -46,21 +64,22 @@ class ProfilesScreen extends StatelessWidget {
     required this.onDeleteProfile,
     required this.onClaimPastTournaments,
     required this.onSignIn,
+    required this.onSignUp,
+    required this.onResendConfirmation,
+    required this.onRequestPasswordReset,
     required this.onSignOut,
+    required this.themeChoice,
+    required this.onThemeChanged,
+    required this.registrations,
+    required this.eventNameFor,
+    required this.receiptPicker,
+    required this.onUploadReceipt,
   });
 
   bool get _signedIn => signedInEmail != null;
 
   void _say(BuildContext context, String text) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: AlokasColors.forestElevated,
-        content: Text(
-          text,
-          style: const TextStyle(color: AlokasColors.creamIvory),
-        ),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   void _openProfileDialog(
@@ -83,33 +102,22 @@ class ProfilesScreen extends StatelessWidget {
     BuildContext context,
     MobilePlayerProfile profile,
   ) async {
+    final name = displayPlayerName(profile.fullName);
     final active = activeRegistrationsFor(profile.id);
     final message = active == null
         ? 'This removes the profile from your account. Any registrations it has '
               'stay with the organizers and are not withdrawn.'
         : active == 0
         ? 'This removes the profile from your account.'
-        : 'This removes the profile from your account. ${profile.fullName} '
+        : 'This removes the profile from your account. $name '
               'has ${pluralize(active, 'active registration')}, which will '
               'stay with the organizers and not be withdrawn. Contact them '
               'to withdraw.';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AlokasColors.forestSurface,
-        title: Text(
-          'Delete ${profile.fullName}?',
-          style: const TextStyle(
-            color: AlokasColors.creamIvory,
-            fontWeight: FontWeight.w800,
-            fontSize: 17,
-          ),
-        ),
-        content: Text(
-          message,
-          key: const Key('delete-profile-message'),
-          style: const TextStyle(color: AlokasColors.mutedSage),
-        ),
+        title: Text('Delete $name?'),
+        content: Text(message, key: const Key('delete-profile-message')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -128,9 +136,9 @@ class ProfilesScreen extends StatelessWidget {
     if (!context.mounted) return;
     switch (result) {
       case ApiSuccess():
-        _say(context, 'Deleted ${profile.fullName}.');
+        _say(context, 'Deleted $name.');
       case ApiFailure(:final message):
-        _say(context, 'Could not delete ${profile.fullName}: $message');
+        _say(context, 'Could not delete $name: $message');
     }
   }
 
@@ -154,25 +162,54 @@ class ProfilesScreen extends StatelessWidget {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AlokasColors.forestSurface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      builder: (_) => _AuthSheet(
+        isAuthConfigured: isAuthConfigured,
+        onSignIn: onSignIn,
+        onSignUp: onSignUp,
+        onResendConfirmation: onResendConfirmation,
+        onRequestPasswordReset: onRequestPasswordReset,
       ),
-      builder: (_) =>
-          _SignInSheet(isAuthConfigured: isAuthConfigured, onSignIn: onSignIn),
     );
+  }
+
+  Future<void> _addLateReceipt(
+    BuildContext context,
+    RegistrationRecord record,
+  ) async {
+    final PickedReceipt? picked;
+    try {
+      picked = await receiptPicker();
+    } on Object {
+      if (context.mounted) _say(context, 'The file picker could not be opened.');
+      return;
+    }
+    if (picked == null || !context.mounted) return;
+    final (receipt, error) = ReceiptFile.validate(picked);
+    if (receipt == null) {
+      _say(context, error ?? 'That file could not be used.');
+      return;
+    }
+    final result = await onUploadReceipt(record, receipt);
+    if (!context.mounted) return;
+    switch (result) {
+      case ApiSuccess():
+        _say(context, 'Receipt sent. The organizer will check it.');
+      case ApiFailure(:final message):
+        _say(context, message);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final list = ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
-        _buildAccountCard(context),
+        _buildAccount(context),
         const SizedBox(height: 16),
+        _buildTheme(context),
+        const SizedBox(height: 24),
         if (!_signedIn)
           MessageCard(
-            icon: Icons.login,
             title: 'Sign in to manage player profiles',
             message: isAuthConfigured
                 ? 'You can browse events without an account. Registering a player and managing profiles need sign-in.'
@@ -181,42 +218,27 @@ class ProfilesScreen extends StatelessWidget {
             onAction: isAuthConfigured ? () => _openSignInSheet(context) : null,
           )
         else ...[
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  profiles.isEmpty && (profilesError != null || profilesLoading)
-                      ? 'FAMILY & STUDENT PROFILES'
-                      : 'FAMILY & STUDENT PROFILES (${profiles.length})',
-                  style: const TextStyle(
-                    color: AlokasColors.warmGold,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton.icon(
-                key: const Key('open-add-profile-button'),
-                onPressed: () => _openProfileDialog(context),
-                icon: const Icon(Icons.person_add_alt_1, size: 16),
-                label: const Text('+ Add Profile'),
-              ),
-            ],
+          ..._buildRegistrations(context),
+          SheetHeading(
+            profiles.isEmpty && (profilesError != null || profilesLoading)
+                ? 'Players'
+                : 'Players (${profiles.length})',
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              key: const Key('open-add-profile-button'),
+              onPressed: () => _openProfileDialog(context),
+              child: const Text('Add a player'),
+            ),
+          ),
+          const SizedBox(height: 8),
           if (profilesLoading && profiles.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                child: CircularProgressIndicator(color: AlokasColors.warmGold),
-              ),
-            )
+            const LoadingLine()
           else if (profilesError != null && profiles.isEmpty)
             MessageCard(
-              icon: Icons.cloud_off,
-              accent: AlokasColors.crimsonDanger,
+              isProblem: true,
               title: 'Could not load profiles',
               message: profilesError,
               actionLabel: 'Retry',
@@ -224,7 +246,6 @@ class ProfilesScreen extends StatelessWidget {
             )
           else if (profiles.isEmpty)
             const MessageCard(
-              icon: Icons.person_outline,
               title: 'No player profiles yet',
               message:
                   'Add yourself or a family member to register for events.',
@@ -236,219 +257,222 @@ class ProfilesScreen extends StatelessWidget {
                 lastLoadedAt: profilesUpdatedAt,
                 onRetry: onRetryProfiles,
               ),
-            ...profiles.map(
-              (prof) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _buildProfileCard(context, prof),
-              ),
-            ),
+            for (final profile in profiles) _buildProfile(context, profile),
           ],
         ],
       ],
     );
     if (!_signedIn) return list;
-    return RefreshIndicator(
-      color: AlokasColors.warmGold,
-      backgroundColor: AlokasColors.forestCard,
-      onRefresh: onRetryProfiles,
-      child: list,
+    return RefreshIndicator(onRefresh: onRetryProfiles, child: list);
+  }
+
+  Widget _buildAccount(BuildContext context) {
+    final p = context.pal;
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AlokasBadge(
+                text: _signedIn ? 'Signed in' : 'Not signed in',
+                tone: _signedIn ? ChipTone.go : ChipTone.wait,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                signedInEmail ?? 'Browsing events only',
+                style: atype(16, weight: 700, color: p.ink, height: 1.25),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        if (_signedIn)
+          OutlinedButton(
+            key: const Key('sign-out-button'),
+            onPressed: onSignOut,
+            child: const Text('Sign Out'),
+          )
+        else
+          OutlinedButton(
+            key: const Key('open-sign-in-button'),
+            onPressed: () => _openSignInSheet(context),
+            child: const Text('Sign In'),
+          ),
+      ],
     );
   }
 
-  Widget _buildAccountCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AlokasColors.forestElevated, AlokasColors.forestCard],
+  Widget _buildTheme(BuildContext context) {
+    final p = context.pal;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Display', style: atype(14, weight: 600, color: p.ink2)),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final choice in AlokasThemeChoice.values)
+              ChoiceBox.text(
+                key: Key('theme-${choice.name}'),
+                label: choice.label,
+                selected: themeChoice == choice,
+                onTap: () => onThemeChanged(choice),
+              ),
+          ],
         ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AlokasColors.warmGold),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: AlokasColors.warmGold.withValues(alpha: 0.2),
-            child: Icon(
-              _signedIn ? Icons.person : Icons.person_off_outlined,
-              color: AlokasColors.brightGold,
-              size: 26,
-            ),
+      ],
+    );
+  }
+
+  List<Widget> _buildRegistrations(BuildContext context) {
+    final p = context.pal;
+    final rows = registrations;
+    if (rows == null || rows.isEmpty) return const [];
+    return [
+      const SheetHeading('Registrations'),
+      for (final record in rows)
+        Container(
+          key: Key('registration-${record.id}'),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: p.rule)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AlokasBadge(
-                  text: _signedIn ? 'Signed in' : 'Not signed in',
-                  color: _signedIn
-                      ? AlokasColors.emeraldSuccess
-                      : AlokasColors.amberWarning,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  signedInEmail ?? 'Browsing events only',
-                  style: const TextStyle(
-                    color: AlokasColors.creamIvory,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                  ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                eventNameFor(record.tournamentId) ?? 'Event name not available',
+                style: atype(16, weight: 700, color: p.ink, height: 1.25),
+              ),
+              if (record.playerName != null)
+                PlayerName(record.playerName!, weight: 400, color: p.ink),
+              const SizedBox(height: 2),
+              Text(
+                [record.statusLabel, ?record.paymentLabel].join(' · '),
+                style: atype(14, color: p.ink2),
+              ),
+              if (record.needsReceipt && record.id != null) ...[
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  key: Key('add-receipt-${record.id}'),
+                  onPressed: () => _addLateReceipt(context, record),
+                  child: const Text('Add receipt'),
                 ),
               ],
-            ),
+            ],
           ),
-          if (_signedIn)
-            OutlinedButton(
-              key: const Key('sign-out-button'),
-              onPressed: onSignOut,
-              child: const Text('Sign Out'),
-            )
-          else
-            OutlinedButton(
-              key: const Key('open-sign-in-button'),
-              onPressed: () => _openSignInSheet(context),
-              child: const Text('Sign In'),
-            ),
-        ],
-      ),
-    );
+        ),
+      const SizedBox(height: 24),
+    ];
   }
 
-  Widget _buildProfileCard(BuildContext context, MobilePlayerProfile prof) {
+  Widget _buildProfile(BuildContext context, MobilePlayerProfile prof) {
+    final p = context.pal;
     final born = prof.yearOfBirth;
     final details = [
       born == null ? 'Birth year not set' : 'Born $born (Age ${prof.age})',
       if (prof.gender != null) 'Gender: ${prof.gender}',
       prof.fideId == null ? 'No FIDE ID' : 'FIDE ID: ${prof.fideId}',
-    ].join(' • ');
+    ].join(' · ');
     final affiliation = prof.affiliationLabel;
+    final ratings = [
+      if (prof.alokasRating != null) 'Alokas ${prof.alokasRating}',
+      if (prof.fideRapid != null) 'FIDE Rapid ${prof.fideRapid}',
+      if (prof.fideStandard != null) 'FIDE Std ${prof.fideStandard}',
+    ];
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                AlokasBadge(
-                  text: prof.relationshipLabel,
-                  color: prof.isPrimary
-                      ? AlokasColors.brightGold
-                      : AlokasColors.skyInfo,
-                  icon: prof.isPrimary ? Icons.star : Icons.family_restroom,
-                ),
-                if (prof.username != null)
-                  Text(
-                    '@${prof.username}',
-                    style: const TextStyle(
-                      color: AlokasColors.warmGold,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: p.rule)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          PlayerName(
+            prof.fullName,
+            size: 18,
+            weight: 700,
+            color: p.ink,
+            detail: prof.relationshipLabel,
+          ),
+          if (prof.username != null)
+            Text('@${prof.username}', style: atype(14, color: p.ink2)),
+          const SizedBox(height: 4),
+          Text(details, style: atype(14, color: p.ink2, height: 1.3)),
+          if (affiliation != null)
+            Text(affiliation, style: atype(14, color: p.ink2, height: 1.3)),
+          if (ratings.isNotEmpty)
             Text(
-              prof.fullName,
-              style: const TextStyle(
-                color: AlokasColors.creamIvory,
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-              ),
+              ratings.join(' · '),
+              style: atype(14, weight: 600, color: p.ink, tabular: true),
             ),
-            const SizedBox(height: 4),
-            Text(
-              details,
-              style: const TextStyle(
-                color: AlokasColors.mutedSage,
-                fontSize: 12.5,
-              ),
-            ),
-            if (affiliation != null) ...[
-              const SizedBox(height: 3),
-              Text(
-                affiliation,
-                style: const TextStyle(
-                  color: AlokasColors.mutedSage,
-                  fontSize: 12.5,
-                ),
-              ),
-            ],
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                if (prof.alokasRating != null)
-                  AlokasBadge(
-                    text: 'Alokas: ${prof.alokasRating}',
-                    color: AlokasColors.warmGold,
-                  ),
-                if (prof.fideRapid != null)
-                  AlokasBadge(
-                    text: 'FIDE Rapid: ${prof.fideRapid}',
-                    color: AlokasColors.emeraldSuccess,
-                  ),
-                if (prof.fideStandard != null)
-                  AlokasBadge(
-                    text: 'FIDE Std: ${prof.fideStandard}',
-                    color: AlokasColors.skyInfo,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              OutlinedButton(
                 key: Key('claim-${prof.id}'),
                 onPressed: () => _claim(context, prof),
-                icon: const Icon(Icons.history_edu, size: 17),
-                label: const Text('Claim Past Tournaments'),
+                child: const Text('Claim Past Tournaments'),
               ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  key: Key('edit-${prof.id}'),
-                  onPressed: () => _openProfileDialog(context, existing: prof),
-                  child: const Text('Edit'),
-                ),
-                TextButton(
-                  key: Key('delete-${prof.id}'),
-                  onPressed: () => _confirmDelete(context, prof),
-                  child: const Text('Delete'),
-                ),
-              ],
-            ),
-          ],
-        ),
+              TextButton(
+                key: Key('edit-${prof.id}'),
+                onPressed: () => _openProfileDialog(context, existing: prof),
+                child: const Text('Edit'),
+              ),
+              TextButton(
+                key: Key('delete-${prof.id}'),
+                onPressed: () => _confirmDelete(context, prof),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-class _SignInSheet extends StatefulWidget {
+enum _AuthMode { signIn, signUp, reset, checkEmail, resetSent }
+
+/// Email sign-in, creating an account, the confirmation-email state, and asking
+/// for a password reset. Everything goes through callbacks to the auth service.
+class _AuthSheet extends StatefulWidget {
   final bool isAuthConfigured;
   final Future<ApiResult<AuthSession>> Function(String email, String password)
   onSignIn;
+  final Future<ApiResult<SignUpOutcome>> Function(String email, String password)
+  onSignUp;
+  final Future<ApiResult<void>> Function(String email) onResendConfirmation;
+  final Future<ApiResult<void>> Function(String email) onRequestPasswordReset;
 
-  const _SignInSheet({required this.isAuthConfigured, required this.onSignIn});
+  const _AuthSheet({
+    required this.isAuthConfigured,
+    required this.onSignIn,
+    required this.onSignUp,
+    required this.onResendConfirmation,
+    required this.onRequestPasswordReset,
+  });
 
   @override
-  State<_SignInSheet> createState() => _SignInSheetState();
+  State<_AuthSheet> createState() => _AuthSheetState();
 }
 
-class _SignInSheetState extends State<_SignInSheet> {
+class _AuthSheetState extends State<_AuthSheet> {
+  static const int minPasswordLength = 8;
+
   final TextEditingController _email = TextEditingController();
   final TextEditingController _password = TextEditingController();
+  _AuthMode _mode = _AuthMode.signIn;
   bool _busy = false;
   String? _error;
+  String? _notice;
+  bool _unconfirmed = false;
 
   @override
   void dispose() {
@@ -457,7 +481,20 @@ class _SignInSheetState extends State<_SignInSheet> {
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  void _switchTo(_AuthMode mode) {
+    setState(() {
+      _mode = mode;
+      _error = null;
+      _notice = null;
+      _unconfirmed = false;
+      _busy = false;
+    });
+  }
+
+  bool _looksLikeEmail(String value) =>
+      RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
+
+  Future<void> _submitSignIn() async {
     if (_email.text.trim().isEmpty || _password.text.isEmpty) {
       setState(() => _error = 'Enter your email and password.');
       return;
@@ -465,6 +502,8 @@ class _SignInSheetState extends State<_SignInSheet> {
     setState(() {
       _busy = true;
       _error = null;
+      _notice = null;
+      _unconfirmed = false;
     });
     final result = await widget.onSignIn(_email.text, _password.text);
     if (!mounted) return;
@@ -475,98 +514,303 @@ class _SignInSheetState extends State<_SignInSheet> {
         setState(() {
           _busy = false;
           _error = message;
+          _unconfirmed = message == emailNotConfirmedMessage;
         });
+    }
+  }
+
+  Future<void> _submitSignUp() async {
+    if (!_looksLikeEmail(_email.text)) {
+      setState(() => _error = 'Enter a valid email address.');
+      return;
+    }
+    if (_password.text.length < minPasswordLength) {
+      setState(
+        () => _error =
+            'Use a password of at least $minPasswordLength characters.',
+      );
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final result = await widget.onSignUp(_email.text, _password.text);
+    if (!mounted) return;
+    switch (result) {
+      case ApiSuccess(value: SignedUpWithSession()):
+        Navigator.of(context).pop();
+      case ApiSuccess(value: ConfirmationRequired()):
+        _password.clear();
+        _switchTo(_AuthMode.checkEmail);
+      case ApiFailure(:final message):
+        setState(() {
+          _busy = false;
+          _error = message;
+        });
+    }
+  }
+
+  Future<void> _submitReset() async {
+    if (!_looksLikeEmail(_email.text)) {
+      setState(() => _error = 'Enter a valid email address.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final result = await widget.onRequestPasswordReset(_email.text);
+    if (!mounted) return;
+    switch (result) {
+      case ApiSuccess():
+        _switchTo(_AuthMode.resetSent);
+      case ApiFailure(:final message):
+        setState(() {
+          _busy = false;
+          _error = message;
+        });
+    }
+  }
+
+  Future<void> _resend() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    final result = await widget.onResendConfirmation(_email.text);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      switch (result) {
+        case ApiSuccess():
+          _notice = 'Sent again to ${_email.text.trim()}.';
+        case ApiFailure(:final message):
+          _error = message;
+      }
+    });
+  }
+
+  Widget _emailField() => TextField(
+    key: const Key('sign-in-email'),
+    controller: _email,
+    keyboardType: TextInputType.emailAddress,
+    autocorrect: false,
+    autofillHints: const [AutofillHints.email],
+    decoration: const InputDecoration(labelText: 'Email'),
+  );
+
+  Widget _passwordField(bool isNew) => TextField(
+    key: const Key('sign-in-password'),
+    controller: _password,
+    obscureText: true,
+    autofillHints: [
+      isNew ? AutofillHints.newPassword : AutofillHints.password,
+    ],
+    decoration: InputDecoration(
+      labelText: 'Password',
+      helperText: isNew ? 'At least $minPasswordLength characters' : null,
+    ),
+  );
+
+  Widget _primary(Key key, String label, String busyLabel, VoidCallback onTap) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        key: key,
+        onPressed: _busy ? null : onTap,
+        child: Text(_busy ? busyLabel : label),
+      ),
+    );
+  }
+
+  List<Widget> _feedback() {
+    final p = context.pal;
+    return [
+      if (_error != null) ...[
+        const SizedBox(height: 8),
+        Text(
+          _error!,
+          key: const Key('sign-in-error'),
+          style: atype(16, weight: 600, color: p.flag, height: 1.3),
+        ),
+      ],
+      if (_notice != null) ...[
+        const SizedBox(height: 8),
+        Text(
+          _notice!,
+          key: const Key('sign-in-notice'),
+          style: atype(16, weight: 600, color: p.go, height: 1.3),
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _body() {
+    final p = context.pal;
+    switch (_mode) {
+      case _AuthMode.signIn:
+        return [
+          _emailField(),
+          const SizedBox(height: 12),
+          _passwordField(false),
+          ..._feedback(),
+          if (_unconfirmed)
+            TextButton(
+              key: const Key('resend-confirmation'),
+              onPressed: _busy ? null : _resend,
+              child: const Text('Send the confirmation email again'),
+            ),
+          const SizedBox(height: 16),
+          _primary(
+            const Key('sign-in-submit'),
+            'Sign In',
+            'Signing In...',
+            _submitSignIn,
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton(
+                key: const Key('open-sign-up'),
+                onPressed: () => _switchTo(_AuthMode.signUp),
+                child: const Text('Create an account'),
+              ),
+              TextButton(
+                key: const Key('open-reset'),
+                onPressed: () => _switchTo(_AuthMode.reset),
+                child: const Text('Forgot password?'),
+              ),
+            ],
+          ),
+        ];
+      case _AuthMode.signUp:
+        return [
+          _emailField(),
+          const SizedBox(height: 12),
+          _passwordField(true),
+          ..._feedback(),
+          const SizedBox(height: 16),
+          _primary(
+            const Key('sign-up-submit'),
+            'Create account',
+            'Creating...',
+            _submitSignUp,
+          ),
+          const SizedBox(height: 4),
+          TextButton(
+            key: const Key('back-to-sign-in'),
+            onPressed: () => _switchTo(_AuthMode.signIn),
+            child: const Text('I already have an account'),
+          ),
+        ];
+      case _AuthMode.reset:
+        return [
+          Text(
+            'We email you a link to choose a new password.',
+            style: atype(16, color: p.ink2, height: 1.35),
+          ),
+          const SizedBox(height: 12),
+          _emailField(),
+          ..._feedback(),
+          const SizedBox(height: 16),
+          _primary(
+            const Key('reset-submit'),
+            'Send reset link',
+            'Sending...',
+            _submitReset,
+          ),
+          const SizedBox(height: 4),
+          TextButton(
+            key: const Key('back-to-sign-in'),
+            onPressed: () => _switchTo(_AuthMode.signIn),
+            child: const Text('Back to sign in'),
+          ),
+        ];
+      case _AuthMode.checkEmail:
+        return [
+          Text(
+            'If ${_email.text.trim()} is new, a confirmation link is on its way. '
+            'Open it, then come back and sign in.',
+            key: const Key('check-email-message'),
+            style: atype(16, color: p.ink, height: 1.35),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'If this email already has an account, no link is sent: sign in, or '
+            'reset your password.',
+            style: atype(16, color: p.ink2, height: 1.35),
+          ),
+          ..._feedback(),
+          const SizedBox(height: 16),
+          _primary(
+            const Key('back-to-sign-in'),
+            'Go to sign in',
+            'Please wait...',
+            () => _switchTo(_AuthMode.signIn),
+          ),
+          TextButton(
+            key: const Key('resend-confirmation'),
+            onPressed: _busy ? null : _resend,
+            child: const Text('Send the email again'),
+          ),
+        ];
+      case _AuthMode.resetSent:
+        return [
+          Text(
+            'If an account exists for ${_email.text.trim()}, a reset link is on '
+            'its way. After choosing a new password, come back and sign in.',
+            key: const Key('reset-sent-message'),
+            style: atype(16, color: p.ink, height: 1.35),
+          ),
+          const SizedBox(height: 16),
+          _primary(
+            const Key('back-to-sign-in'),
+            'Go to sign in',
+            'Please wait...',
+            () => _switchTo(_AuthMode.signIn),
+          ),
+        ];
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    final p = context.pal;
+    const titles = {
+      _AuthMode.signIn: 'Sign In',
+      _AuthMode.signUp: 'Create an account',
+      _AuthMode.reset: 'Reset your password',
+      _AuthMode.checkEmail: 'Check your email',
+      _AuthMode.resetSent: 'Check your email',
+    };
+    return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(
-        20,
-        20,
-        20,
-        MediaQuery.of(context).viewInsets.bottom + 28,
+        16,
+        16,
+        16,
+        MediaQuery.of(context).viewInsets.bottom + 24,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Sign In',
-            style: TextStyle(
-              color: AlokasColors.creamIvory,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
+          Text(
+            widget.isAuthConfigured ? titles[_mode]! : 'Sign In',
+            key: const Key('auth-title'),
+            style: atype(24, weight: 800, width: 108, color: p.ink),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 12),
           if (!widget.isAuthConfigured)
-            const Text(
+            Text(
               notConfiguredMessage,
-              key: Key('sign-in-not-configured'),
-              style: TextStyle(
-                color: AlokasColors.amberWarning,
-                fontSize: 12.5,
-              ),
+              key: const Key('sign-in-not-configured'),
+              style: atype(16, weight: 600, color: p.wait, height: 1.35),
             )
-          else ...[
-            const Text(
-              'Use your Chess Alokas account. Accounts are created on the website; the app cannot create one yet.',
-              style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12.5),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              key: const Key('sign-in-email'),
-              controller: _email,
-              keyboardType: TextInputType.emailAddress,
-              autocorrect: false,
-              style: const TextStyle(color: AlokasColors.creamIvory),
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                prefixIcon: Icon(
-                  Icons.email_outlined,
-                  color: AlokasColors.warmGold,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              key: const Key('sign-in-password'),
-              controller: _password,
-              obscureText: true,
-              style: const TextStyle(color: AlokasColors.creamIvory),
-              decoration: const InputDecoration(
-                labelText: 'Password',
-                prefixIcon: Icon(
-                  Icons.lock_outline,
-                  color: AlokasColors.warmGold,
-                ),
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _error!,
-                key: const Key('sign-in-error'),
-                style: const TextStyle(
-                  color: AlokasColors.crimsonDanger,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                key: const Key('sign-in-submit'),
-                onPressed: _busy ? null : _submit,
-                icon: const Icon(Icons.login),
-                label: Text(_busy ? 'Signing In...' : 'Sign In'),
-              ),
-            ),
-          ],
+          else
+            ..._body(),
         ],
       ),
     );
@@ -791,7 +1035,6 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
         focusNode: _focus[field],
         keyboardType: keyboardType,
         scrollPadding: const EdgeInsets.all(72),
-        style: const TextStyle(color: AlokasColors.creamIvory),
         onChanged: (_) {
           if (_fieldErrors.containsKey(field)) {
             setState(() {
@@ -810,20 +1053,9 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    const fieldStyle = TextStyle(color: AlokasColors.creamIvory);
     return AlertDialog(
-      backgroundColor: AlokasColors.forestSurface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: AlokasColors.warmGold),
-      ),
       title: Text(
         widget.existing == null ? 'Add Player Profile' : 'Edit Player Profile',
-        style: const TextStyle(
-          color: AlokasColors.creamIvory,
-          fontWeight: FontWeight.w800,
-          fontSize: 17,
-        ),
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -857,8 +1089,6 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
                         child: DropdownButtonFormField<String>(
                           isExpanded: true,
                           initialValue: _relationship,
-                          dropdownColor: AlokasColors.forestCard,
-                          style: fieldStyle,
                           decoration: const InputDecoration(
                             labelText: 'Relationship',
                           ),
@@ -890,8 +1120,6 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
                         child: DropdownButtonFormField<String?>(
                           isExpanded: true,
                           initialValue: _gender,
-                          dropdownColor: AlokasColors.forestCard,
-                          style: fieldStyle,
                           decoration: const InputDecoration(
                             labelText: 'Gender',
                           ),
@@ -953,11 +1181,7 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
             Text(
               _error!,
               key: const Key('profile-form-error'),
-              style: const TextStyle(
-                color: AlokasColors.crimsonDanger,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-              ),
+              style: atype(16, weight: 600, color: context.pal.flag, height: 1.3),
             ),
           ],
         ],
