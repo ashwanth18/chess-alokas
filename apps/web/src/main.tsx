@@ -51,6 +51,7 @@ const LivePage = lazy(() => import('./pages/LivePage'));
 const LiveTvPage = lazy(() => import('./pages/LiveTvPage'));
 const PrivacyPage = lazy(() => import('./pages/legal/PrivacyPage'));
 const TermsPage = lazy(() => import('./pages/legal/TermsPage'));
+const MobileAppPage = lazy(() => import('./pages/mobile-app/MobileAppPage'));
 
 if (import.meta.env.VITE_DESKTOP !== '1') {
   void import('./pwaRegister');
@@ -109,6 +110,7 @@ function AppRoot() {
             <Route path="/invite/:token" element={<InvitePage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
+            <Route path="/mobile-app" element={<MobileAppPage />} />
             <Route
               element={
                 <RequireAuth>
