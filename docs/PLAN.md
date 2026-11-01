@@ -15,7 +15,7 @@ Last updated: 2026-11-01. This covers order and gaps. Details stay in `docs/desi
 
 | # | Workstream | Status | Depends on | Size |
 |---|---|---|---|---|
-| A | Auth (email, Google) and staff invites | Running | Custom SMTP and Google client (founder) to work for real | M |
+| A | Auth (email only) and staff invites | Running | Custom SMTP (founder) to work for real | M |
 | B | Redesign foundation, steps 0-2 | Running | None | M |
 | C | Landing page | Running | Founder signs off claims and prices | S |
 | D | Flutter app | Running, tested on founder's phone | Production deploy, since its routes returned 404 on production (`apps/mobile/README.md`) | Ongoing |
@@ -33,7 +33,7 @@ Last updated: 2026-11-01. This covers order and gaps. Details stay in `docs/desi
 
 | Milestone | When (estimate) | What ships | Done when |
 |---|---|---|---|
-| **M0 Production is real** | Week 1 | Backup, `028`/`029`, then E. SMTP and Google live. CI and uptime alert | Sign-in, token refresh, OAuth, RLS, Storage and real email all pass on real Supabase. The handoff says none of these has been tested yet |
+| **M0 Production is real** | Week 1 | Backup, `028`/`029`, then E. SMTP live. CI and uptime alert | Sign-in, token refresh, RLS, Storage and real email all pass on real Supabase. The handoff says none of these has been tested yet |
 | **M1 Pilot ready** | Weeks 2-3 | J, new Floor, restore rehearsal, runbook, rating export if the pilot is rated | A friendly organizer agrees to a date |
 | **M2 First paid event** | Weeks 4-6 | Pilot run free, K, Matchday/Live, Hall TV. Second event invoiced manually | One organizer has paid for a second event |
 | **M3 Public launch** | Weeks 8-12 | Register, Discover, public landing with prices, abuse basics, Android if ready | Section 5 all true |
@@ -135,7 +135,7 @@ Prices are **my estimates to test with the first five organizers**, not market f
 ## 5. Exit criteria for public launch
 
 - [ ] A real paid event has run on production, with no data loss and every result correct against arbiter records
-- [ ] Sign-in, Google, invites, RLS, Storage and email pass on real Supabase
+- [ ] Sign-in, invites, RLS, Storage and email pass on real Supabase
 - [ ] Restore rehearsed from backup, with the time recorded; backups running and off the VPS
 - [ ] Privacy notice, terms and parental consent live, and reviewed by a lawyer
 - [ ] Account deletion works, including purge, and the retention rule is published
@@ -154,7 +154,6 @@ Android in the Play Store is wanted but isn't a gate, because parents can use we
 **This week (blocks M0):**
 
 - [ ] Supabase paid plan: Pro is US$25 a month with 7-day backups [10]. Then confirm the backup exists
-- [ ] Google OAuth client, and publish the consent screen
 - [ ] Custom SMTP: Resend account, verified domain, keys entered in Supabase by you
 - [ ] Approve adding a CI workflow
 
