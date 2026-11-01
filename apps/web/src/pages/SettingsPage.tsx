@@ -202,7 +202,10 @@ export default function SettingsPage() {
           server — this app only uses your login session.
         </p>
         <p className="form-hint">
-          Manage profile and linked providers on the <Link to="/account">Account</Link> page.
+          Manage your profile on the <Link to="/account">Account</Link> page.
+        </p>
+        <p className="form-hint">
+          <Link to="/terms">Terms</Link> · <Link to="/privacy">Privacy Policy</Link>
         </p>
       </section>
     </div>

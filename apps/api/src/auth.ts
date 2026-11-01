@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import postgres, { type Sql } from 'postgres';
+import type { Store } from './db.js';
+import { purgeAfterFrom } from './lib/privacyPurge.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -216,7 +218,22 @@ export interface AuthSessionRow {
   current: boolean;
 }
 
-export const authPlugin: FastifyPluginAsync = async (app) => {
+async function deleteSupabaseUser(userId: string): Promise<{ error?: string }> {
+  const service = getServiceSupabase();
+  if (!service) return { error: 'Auth admin not configured' };
+  const { error } = await service.auth.admin.deleteUser(userId);
+  return error ? { error: error.message } : {};
+}
+
+export interface AuthPluginOptions {
+  store: Store;
+  /** The sign-in account itself. Replaced in tests, which have no Supabase. */
+  deleteAuthUser?: (userId: string) => Promise<{ error?: string }>;
+}
+
+export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (app, opts) => {
+  const deleteAuthUser = opts.deleteAuthUser ?? deleteSupabaseUser;
+
   app.get('/me', { preHandler: requireAuth }, async (request, reply) => {
     if (authEnabled() && (!request.userId || !request.user)) {
       return reply.code(401).send({ error: 'Unauthorized' });
@@ -341,17 +358,19 @@ export const authPlugin: FastifyPluginAsync = async (app) => {
 
   app.delete('/me', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.userId) return reply.code(401).send({ error: 'Unauthorized' });
-    const service = getServiceSupabase();
-    if (!service) return reply.code(503).send({ error: 'Auth admin not configured' });
-
-    const now = new Date().toISOString();
-    await service
-      .from('tournaments')
-      .update({ deleted_at: now, updated_at: now })
-      .eq('owner_id', request.userId);
-
-    const { error } = await service.auth.admin.deleteUser(request.userId);
-    if (error) return reply.code(500).send({ error: error.message });
+    if (!opts.deleteAuthUser && !getServiceSupabase()) {
+      return reply.code(503).send({ error: 'Auth admin not configured' });
+    }
+    // Before the sign-in account goes: its foreign keys would erase the links this needs to follow.
+    // If the next step fails, the person can try again, and this is safe to repeat.
+    const outcome = await opts.store.prepareAccountDeletion(request.userId, purgeAfterFrom());
+    const { error } = await deleteAuthUser(request.userId);
+    if (error) {
+      request.log.error({ userId: request.userId }, 'account deletion: sign-in removal failed');
+      return reply.code(500).send({ error });
+    }
+    // Counts only. This is the record that it happened, and it names nobody.
+    request.log.info({ ...outcome }, 'account deleted');
     return reply.code(204).send();
   });
 };

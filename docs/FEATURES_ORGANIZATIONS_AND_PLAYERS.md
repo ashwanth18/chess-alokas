@@ -140,6 +140,40 @@ Pending changes to a removed tournament are dropped and counted in the notice, w
 
 This limits what the app keeps. It does not guarantee erasure.
 
+### Guardian consent (`032`)
+
+`POST /public/events/:slugOrId/register`, `POST /player/profiles` and `PATCH /player/profiles/:id` take `guardianConsent: true`. Without it, where it is needed, they answer 400 with `code: "guardian_consent_required"`. The rule is `guardianConsentRequired` in `packages/shared/src/guardianConsent.ts`:
+
+- A child profile always needs it.
+- A profile of your own needs it only if it says you are under 18. Sign-up creates one with only a name.
+- Anything else needs it unless the age shows an adult, so leaving the age out doesn't avoid it. A birth year alone counts someone turning 18 this year as under 18.
+
+The server stamps `guardian_consent_at`, `guardian_consent_notice_version` (`PRIVACY_NOTICE_VERSION`) and `guardian_consent_by_user_id`, and ignores anything a client sends for them. A registration asks every time, even with a saved profile, because it goes to a new organizer.
+
+**Roster import:** `POST /tournaments/:id/import` needs a `consentConfirmed=true` field, or answers 400 with `code: "roster_consent_required"`. The web app imports on the device, so it has its own required tick, and sends `rosterConsentConfirmedAt` with the tournament at the next sync. Both end up in `roster_consent_confirmations`, once per confirmation. Sync can't refuse a roster for lacking one, because hand-typed players and older clients arrive the same way, so this records a confirmation rather than enforcing one on every path.
+
+Ages are self-reported and nobody's identity is checked.
+
+### Account deletion (`DELETE /me`)
+
+`prepareAccountDeletion` runs first, in one transaction, then the sign-in account is deleted. If that second step fails, the person sees an error and can retry safely.
+
+- **Registrations** they submitted, or made with their profiles: details and answers removed, open entries cancelled, approved entries keep only the name, payment status and amount stay, and any receipt is scheduled for 30 days.
+- **Player profiles:** deleted, and unlinked from rosters.
+- **Organization tournaments they created:** stay, passing to the organization's owner. This replaces the old behaviour, which soft-deleted them and took the organization's results with them.
+- **Tournaments outside any organization:** hidden now, erased after 30 days.
+- **Last owner of an organization:** the longest-serving admin, or else director, becomes owner. An arbiter is never promoted, because that would hand them player records. With nobody to take over, the organization closes: suspended, tournaments hidden and scheduled, invites withdrawn, arbiters removed. A platform admin can reinstate it by hand during the 30 days. After that its tournaments are erased and its name and contact details removed.
+
+**The purge** is `runPrivacyPurge` in `apps/api/src/lib/privacyPurge.ts`. It runs inside the API process a minute after start, then every 6 hours, with no external scheduler. `PRIVACY_PURGE_DISABLED=1` turns it off. If the API is down it runs late rather than not at all, and a file that can't be removed keeps its row and is retried. There is no alert if it keeps failing, only a log line.
+
+**Not covered:**
+
+- Registrations made without signing in, and rosters typed or imported by an organizer: nothing links them to the account.
+- Certificates, roster entries and results in an organizer's event, and certificate templates.
+- Usage statistics, logs and error reports already sent.
+- The person's own devices, and provider backups.
+- Anyone told about a transfer: the new owner is not notified.
+
 ---
 
 ## 5. API Endpoints Reference

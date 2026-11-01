@@ -6,6 +6,7 @@ import { matchesFilter } from '@chess-alokas/shared';
 import { db, nowIso } from '../db/local';
 import { getTournamentCapabilities, isMixedTournament } from '../lib/tournamentProgress';
 import { useAuth } from '../auth/AuthContext';
+import { PrivacyLink } from '../components/LegalLinks';
 import { defaultKeepIndexes, importAllowance, usePlayerLimit } from '../lib/importLimit';
 import {
   categoryNameMatchesLabel,
@@ -173,6 +174,7 @@ export default function ImportPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [lateConfirmed, setLateConfirmed] = useState(false);
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [keepIndexes, setKeepIndexes] = useState<Set<number>>(new Set());
   const auth = useAuth();
   const playerLimit = usePlayerLimit(Boolean(auth.user));
@@ -378,6 +380,10 @@ export default function ImportPage() {
       setImportError('Confirm that you understand late entries won’t join past rounds.');
       return;
     }
+    if (!consentConfirmed) {
+      setImportError('Confirm that you have permission to upload these players.');
+      return;
+    }
 
     setImporting(true);
     setImportError(null);
@@ -422,6 +428,14 @@ export default function ImportPage() {
           dirty: 1,
         });
       }
+
+      // Saved with the tournament so it reaches the server at the next sync, even from offline.
+      const confirmedAt = nowIso();
+      await db.tournaments.update(tournamentId, {
+        rosterConsentConfirmedAt: confirmedAt,
+        updatedAt: confirmedAt,
+        dirty: 1,
+      });
 
       setImportedCount(parsed.length);
       setTimeout(() => navigate(`/tournaments/${tournamentId}`), 1500);
@@ -621,6 +635,18 @@ export default function ImportPage() {
                 </section>
               )}
 
+              <label className="late-confirm" data-testid="roster-consent">
+                <input
+                  type="checkbox"
+                  checked={consentConfirmed}
+                  onChange={(e) => setConsentConfirmed(e.target.checked)}
+                />{' '}
+                <span>
+                  I confirm I have permission to upload these players’ details, including a parent or
+                  guardian’s consent for anyone under 18, as the <PrivacyLink /> describes.
+                </span>
+              </label>
+
               <div className="form-actions">
                 <button
                   className="btn btn-ghost"
@@ -637,6 +663,7 @@ export default function ImportPage() {
                   onClick={handleImport}
                   disabled={
                     importing ||
+                    !consentConfirmed ||
                     !mapping['name'] ||
                     (requiresLateWarning && !lateConfirmed) ||
                     (overLimit && keepIndexes.size === 0)

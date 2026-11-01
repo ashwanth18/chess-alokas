@@ -990,6 +990,7 @@ export async function apiCreatePlayerProfile(body: {
   country?: string | null;
   email?: string | null;
   phone?: string | null;
+  guardianConsent?: boolean;
 }) {
   return req<{ profile: PlayerProfile }>('/player/profiles', {
     method: 'POST',
@@ -1185,6 +1186,7 @@ export async function apiSubmitEventRegistration(
     phone?: string | null;
     customAnswers?: Record<string, unknown>;
     receiptDataUrl?: string | null;
+    guardianConsent?: boolean;
   },
 ) {
   return req<{ registration: TournamentRegistration }>(

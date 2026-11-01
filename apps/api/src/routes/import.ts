@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyPluginOptions } from 'fastify';
+import { ROSTER_CONSENT_ERROR_CODE } from '@chess-alokas/shared';
 import { ColumnMappingSchema, assignCategories } from '@chess-alokas/shared';
 import type { ParticipantFields } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
@@ -20,6 +21,7 @@ export const importPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts)
    *   file     – CSV or XLSX attachment
    *   mapping  – JSON string matching ColumnMappingSchema
    *   mode     – "append" (default) | "replace"
+   *   consentConfirmed – "true": the organizer confirms they have permission for this data
    */
   app.post<{ Params: { id: string } }>(
     '/tournaments/:id/import',
@@ -39,6 +41,7 @@ export const importPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts)
       let filename = 'upload';
       let mappingRaw = '';
       let mode: 'append' | 'replace' = 'append';
+      let consentConfirmed = false;
 
       const parts = request.parts();
       for await (const part of parts) {
@@ -48,12 +51,19 @@ export const importPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts)
         } else {
           const value = part.value as string;
           if (part.fieldname === 'mapping') mappingRaw = value;
+          else if (part.fieldname === 'consentConfirmed') consentConfirmed = value === 'true';
           else if (part.fieldname === 'mode' && (value === 'append' || value === 'replace')) {
             mode = value;
           }
         }
       }
 
+      if (!consentConfirmed) {
+        return reply.code(400).send({
+          error: 'Confirm that you have permission to upload these players, including a parent or guardian’s consent for anyone under 18.',
+          code: ROSTER_CONSENT_ERROR_CODE,
+        });
+      }
       if (!fileBuffer) {
         return reply.code(400).send({ error: 'No file uploaded' });
       }
@@ -114,6 +124,11 @@ export const importPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts)
       }
 
       const created = await store.upsertParticipants(participants);
+      await store.recordRosterConsent({
+        tournamentId,
+        userId: request.userId ?? null,
+        confirmedAt: now,
+      });
       return reply.code(201).send({ imported: created.length, participants: created });
     },
   );

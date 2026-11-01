@@ -13,6 +13,8 @@ import {
   type PublicEventDetailResponse,
 } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { GuardianConsentField } from '../components/LegalLinks';
+import { guardianConsentRequired } from '@chess-alokas/shared';
 import { trackPageView } from '../lib/pageAnalytics';
 
 const RELATIONSHIP_LABELS: Record<PlayerRelationship, string> = {
@@ -41,6 +43,7 @@ export default function EventRegistrationPage() {
 
   const [name, setName] = useState('');
   const [yearOfBirth, setYearOfBirth] = useState('');
+  const [guardianConsent, setGuardianConsent] = useState(false);
   const [gender, setGender] = useState('');
   const [fideId, setFideId] = useState('');
   const [rating, setRating] = useState('');
@@ -161,6 +164,14 @@ export default function EventRegistrationPage() {
     reader.readAsDataURL(file);
   }
 
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? null;
+  const consentYear = yearOfBirth.trim() ? Number(yearOfBirth.trim()) : null;
+  const needsGuardianConsent = guardianConsentRequired({
+    relationship: selectedProfile?.relationship ?? null,
+    yearOfBirth: consentYear,
+    dateOfBirth: selectedProfile?.dateOfBirth ?? null,
+  });
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!slug || !detail) return;
@@ -193,6 +204,7 @@ export default function EventRegistrationPage() {
       phone: phone.trim() || null,
       customAnswers,
       receiptDataUrl,
+      guardianConsent: needsGuardianConsent ? guardianConsent : undefined,
     });
     setSubmitting(false);
 
@@ -656,6 +668,14 @@ export default function EventRegistrationPage() {
                           <p className="form-hint">Attached: {receiptFileName}</p>
                         )}
                       </div>
+                    )}
+
+                    {needsGuardianConsent && (
+                      <GuardianConsentField
+                        checked={guardianConsent}
+                        onChange={setGuardianConsent}
+                        ageKnown={consentYear != null || Boolean(selectedProfile?.dateOfBirth)}
+                      />
                     )}
 
                     {submitError && <div className="form-error">{submitError}</div>}

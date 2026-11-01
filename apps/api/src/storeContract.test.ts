@@ -20,7 +20,7 @@ import type { Game, Organization, Participant, Tournament } from '@chess-alokas/
 import Fastify, { type FastifyInstance } from 'fastify';
 import postgres, { type Sql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { assertAuthConfiguredForProduction, confirmedEmailOf, requireAuth } from './auth.js';
+import { assertAuthConfiguredForProduction, authPlugin, confirmedEmailOf, requireAuth } from './auth.js';
 import {
   MemoryCertificateIssueStore,
   PostgresCertificateIssueStore,
@@ -31,6 +31,8 @@ import { certificatesPlugin } from './routes/certificates.js';
 import { floorPlugin } from './routes/floor.js';
 import { organizationsPlugin } from './routes/organizations.js';
 import { hashInviteToken, teamPlugin } from './routes/team.js';
+import { runPrivacyPurge } from './lib/privacyPurge.js';
+import { PRIVACY_NOTICE_VERSION } from '@chess-alokas/shared';
 import { pairingPlugin } from './routes/pairing.js';
 import { publicLivePlugin } from './routes/publicLive.js';
 import { playerProfilesPlugin } from './routes/playerProfiles.js';
@@ -72,6 +74,8 @@ interface Backend {
   auditEvents(gameId: string): Promise<Array<{ result: string; note: string | null }>>;
   /** Makes a tournament look last written a day ago, so it sits behind a recent sync cursor. */
   ageTournament(id: string): Promise<void>;
+  /** Deletes the sign-in row, so foreign keys behave as they do in production. */
+  deleteAuthUser(id: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -95,6 +99,7 @@ async function memoryBackend(): Promise<Backend> {
       });
     },
     auditEvents: async (gameId) => internals.resultEvents.filter((e) => e.gameId === gameId),
+    deleteAuthUser: async () => undefined,
     ageTournament: async (id) => {
       internals.tournaments.stamps.set(id, new Date(Date.now() - 86_400_000).toISOString());
     },
@@ -151,6 +156,9 @@ async function postgresBackend(): Promise<Backend> {
       sql<{ result: string; note: string | null }[]>`
         SELECT result, note FROM game_result_events WHERE game_id = ${gameId}
       `,
+    deleteAuthUser: async (id) => {
+      await sql`DELETE FROM auth.users WHERE id = ${id}`;
+    },
     ageTournament: async (id) => {
       // A trigger stamps server_updated_at on every write.
       await sql`ALTER TABLE tournaments DISABLE TRIGGER USER`;
@@ -179,6 +187,8 @@ describe.each([
   let store: Store;
   let app: FastifyInstance;
   let certDir: string;
+  const deletedAuthUsers: string[] = [];
+  let failNextAuthDelete = false;
 
   beforeAll(async () => {
     process.env['AUTH_DISABLED'] = '1';
@@ -200,6 +210,18 @@ describe.each([
     await app.register(publicLivePlugin, { store });
     await app.register(floorPlugin, { store });
     await app.register(organizationsPlugin, { store });
+    await app.register(authPlugin, {
+      store,
+      deleteAuthUser: async (id) => {
+        if (failNextAuthDelete) {
+          failNextAuthDelete = false;
+          return { error: 'auth server down' };
+        }
+        await backend.deleteAuthUser(id);
+        deletedAuthUsers.push(id);
+        return {};
+      },
+    });
     await app.register(teamPlugin, { store });
     await app.register(playerProfilesPlugin, { store });
     await app.register(registrationsPlugin, { store });
@@ -366,6 +388,469 @@ describe.each([
     });
     return updated!;
   }
+
+  describe('guardian consent', () => {
+    async function openEvent() {
+      const owner = await newUser();
+      const t = await seedTournament(owner, { registrationOpen: true });
+      await store.updateTournament(t.id, { registrationOpen: true, updatedAt: iso(-HOUR) });
+      return t;
+    }
+    const registerUrl = (id: string) => `/public/events/${id}/register`;
+    const THIS_YEAR = new Date().getFullYear();
+
+    it('refuses a registration under 18, or with no age, without consent', async () => {
+      const t = await openEvent();
+      for (const body of [
+        { name: 'Young', yearOfBirth: THIS_YEAR - 10 },
+        { name: 'Young', age: 12 },
+        { name: 'No age given' },
+        { name: 'Young', age: 12, guardianConsent: false },
+      ]) {
+        const res = await call(null, 'POST', registerUrl(t.id), body);
+        expect(res.status, JSON.stringify(body)).toBe(400);
+        expect(res.body.code).toBe('guardian_consent_required');
+      }
+      expect(await store.listTournamentRegistrations(t.id)).toEqual([]);
+    });
+
+    it('takes an adult with no consent and records none', async () => {
+      const t = await openEvent();
+      const res = await call(null, 'POST', registerUrl(t.id), {
+        name: 'Adult',
+        yearOfBirth: THIS_YEAR - 40,
+      });
+      expect(res.status).toBe(201);
+      const [saved] = await store.listTournamentRegistrations(t.id);
+      expect(saved?.guardianConsentAt).toBeNull();
+      expect(saved?.guardianConsentNoticeVersion).toBeNull();
+    });
+
+    it('records the time and notice version itself, ignoring what a client claims', async () => {
+      const t = await openEvent();
+      const user = await newUser();
+      const before = Date.now();
+      const res = await call(user, 'POST', registerUrl(t.id), {
+        name: 'Young',
+        age: 12,
+        guardianConsent: true,
+        guardianConsentAt: '2001-01-01T00:00:00.000Z',
+        guardianConsentNoticeVersion: 'made-up',
+      });
+      expect(res.status).toBe(201);
+      const [saved] = await store.listTournamentRegistrations(t.id);
+      expect(Date.parse(saved!.guardianConsentAt!)).toBeGreaterThanOrEqual(before - 1000);
+      expect(saved?.guardianConsentNoticeVersion).toBe(PRIVACY_NOTICE_VERSION);
+      expect(saved?.guardianConsentByUserId).toBe(user);
+    });
+
+    it('asks again when registering a saved child profile', async () => {
+      const t = await openEvent();
+      const parent = await newUser();
+      const child = await call(parent, 'POST', '/player/profiles', {
+        guardianConsent: true,
+        fullName: 'Kid',
+        relationship: 'child',
+      });
+      const id = child.body.profile.id;
+      const refused = await call(parent, 'POST', registerUrl(t.id), { playerProfileId: id });
+      expect(refused.status).toBe(400);
+      const ok = await call(parent, 'POST', registerUrl(t.id), {
+        playerProfileId: id,
+        guardianConsent: true,
+      });
+      expect(ok.status).toBe(201);
+    });
+
+    it('requires it for a child profile, whatever the age says', async () => {
+      const parent = await newUser();
+      const refused = await call(parent, 'POST', '/player/profiles', {
+        fullName: 'Kid',
+        relationship: 'child',
+        yearOfBirth: THIS_YEAR - 40,
+      });
+      expect(refused.status).toBe(400);
+      expect(refused.body.code).toBe('guardian_consent_required');
+      expect(await store.listPlayerProfiles(parent)).toEqual([]);
+
+      const ok = await call(parent, 'POST', '/player/profiles', {
+        fullName: 'Kid',
+        relationship: 'child',
+        guardianConsent: true,
+      });
+      expect(ok.status).toBe(201);
+      expect(ok.body.profile.guardianConsentNoticeVersion).toBe(PRIVACY_NOTICE_VERSION);
+      expect(ok.body.profile.guardianConsentByUserId).toBe(parent);
+      const [stored] = await store.listPlayerProfiles(parent);
+      expect(stored?.guardianConsentAt).toBeTruthy();
+    });
+
+    it('lets sign-up make a name-only profile of your own, but not one saying you are under 18', async () => {
+      const adult = await newUser();
+      expect(
+        (await call(adult, 'POST', '/player/profiles', { fullName: 'Me', relationship: 'self' })).status,
+      ).toBe(201);
+      const teen = await newUser();
+      const res = await call(teen, 'POST', '/player/profiles', {
+        fullName: 'Teen',
+        relationship: 'self',
+        yearOfBirth: THIS_YEAR - 14,
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('asks when an edit makes a profile need it, and only then', async () => {
+      const user = await newUser();
+      const created = await call(user, 'POST', '/player/profiles', {
+        fullName: 'Me',
+        relationship: 'self',
+      });
+      const url = `/player/profiles/${created.body.profile.id}`;
+      expect((await call(user, 'PATCH', url, { school: 'A' })).status).toBe(200);
+      const refused = await call(user, 'PATCH', url, { yearOfBirth: THIS_YEAR - 10 });
+      expect(refused.status).toBe(400);
+      const ok = await call(user, 'PATCH', url, { yearOfBirth: THIS_YEAR - 10, guardianConsent: true });
+      expect(ok.status).toBe(200);
+      const at = ok.body.profile.guardianConsentAt;
+      expect(at).toBeTruthy();
+      const later = await call(user, 'PATCH', url, { school: 'B' });
+      expect(later.status).toBe(200);
+      expect(later.body.profile.guardianConsentAt).toBe(at);
+    });
+
+    it('does not let a stranger probe or edit a profile', async () => {
+      const owner = await newUser();
+      const created = await call(owner, 'POST', '/player/profiles', {
+        fullName: 'Kid',
+        relationship: 'child',
+        guardianConsent: true,
+      });
+      const res = await call(await newUser(), 'PATCH', `/player/profiles/${created.body.profile.id}`, {
+        school: 'X',
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it('records an offline roster confirmation from sync, once', async () => {
+      const owner = await newUser();
+      const org = await verifiedOrg(owner);
+      const id = crypto.randomUUID();
+      const confirmedAt = iso(-HOUR);
+      const first = await push(owner, [
+        tournamentItem(id, { organizationId: org.id, rosterConsentConfirmedAt: confirmedAt }),
+      ]);
+      expect(first.body.rejected).toEqual([]);
+      await tick();
+      await push(owner, [tournamentItem(id, { rosterConsentConfirmedAt: confirmedAt }, iso())]);
+      const records = await store.listRosterConsents(id);
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        userId: owner,
+        confirmedAt,
+        noticeVersion: PRIVACY_NOTICE_VERSION,
+      });
+      expect(Date.parse(records[0]!.recordedAt)).toBeGreaterThan(Date.parse(confirmedAt));
+    });
+
+    it('records nothing for a push the caller may not make', async () => {
+      const owner = await newUser();
+      const t = await seedTournament(owner);
+      const res = await push(await newUser(), [
+        tournamentItem(t.id, { rosterConsentConfirmedAt: iso() }, iso()),
+      ]);
+      expect(res.body.rejected[0].code).toBe('forbidden');
+      expect(await store.listRosterConsents(t.id)).toEqual([]);
+    });
+  });
+
+  describe('account deletion', () => {
+    const DAY = 24 * HOUR;
+    const deleteAccount = (user: string) => call(user, 'DELETE', '/me');
+    const purgeAt = (offsetMs: number, files: string[] = []) =>
+      runPrivacyPurge(store, {
+        now: new Date(Date.now() + offsetMs),
+        deleteReceiptFile: async (f) => void files.push(f),
+        deleteCertificateFile: async (f) => void files.push(f),
+      });
+    const PNG =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+    async function openEvent(organizer?: string) {
+      const owner = organizer ?? (await newUser());
+      const t = await seedTournament(owner, { registrationOpen: true });
+      await store.updateTournament(t.id, { registrationOpen: true, updatedAt: iso(-HOUR) });
+      return { owner, t };
+    }
+
+    it('takes the personal details out of their registrations, and keeps what organizers need', async () => {
+      const { owner, t } = await openEvent();
+      const user = await newUser();
+      const entries = await Promise.all(
+        ['Approved Player', 'Pending Player'].map(async (name) => {
+          const res = await call(user, 'POST', `/public/events/${t.id}/register`, {
+            name,
+            age: 12,
+            guardianConsent: true,
+            email: 'parent@example.test',
+            phone: '012345',
+            school: 'A School',
+            customAnswers: { shirt: 'M' },
+            receiptDataUrl: PNG,
+          });
+          expect(res.status).toBe(201);
+          return res.body.registration.id as string;
+        }),
+      );
+      const approved = await call(owner, 'POST', `/tournaments/${t.id}/registrations/${entries[0]}/review`, {
+        action: 'approve',
+      });
+      expect(approved.status).toBe(200);
+      const participantId = approved.body.participant.id;
+
+      expect((await deleteAccount(user)).status).toBe(204);
+      expect(deletedAuthUsers).toContain(user);
+
+      const rows = await store.listTournamentRegistrations(t.id);
+      const kept = rows.find((r) => r.id === entries[0])!;
+      const open = rows.find((r) => r.id === entries[1])!;
+      expect(kept.status).toBe('approved');
+      expect(kept.playerSnapshot).toEqual({ name: 'Approved Player' });
+      expect(kept.customAnswers).toEqual({});
+      expect(kept.submittedByUserId).toBeNull();
+      expect(kept.participantId).toBe(participantId);
+      expect(open.status).toBe('cancelled');
+      expect(open.playerSnapshot).toEqual({ name: 'Deleted player' });
+      expect(JSON.stringify(rows)).not.toContain('parent@example.test');
+
+      // The result the organizer needs is untouched.
+      expect((await store.listParticipants(t.id)).map((p) => p.name)).toContain('Approved Player');
+      expect((await store.getTournament(t.id))?.deletedAt ?? null).toBeNull();
+    });
+
+    it('keeps a receipt through the grace period, then deletes the file and clears the row', async () => {
+      const { t } = await openEvent();
+      const user = await newUser();
+      const res = await call(user, 'POST', `/public/events/${t.id}/register`, {
+        name: 'Paid Adult',
+        yearOfBirth: new Date().getFullYear() - 40,
+        receiptDataUrl: PNG,
+      });
+      const regId = res.body.registration.id;
+      await deleteAccount(user);
+
+      const early: string[] = [];
+      await purgeAt(29 * DAY, early);
+      expect(early).toEqual([]);
+      const during = (await store.listTournamentRegistrations(t.id)).find((r) => r.id === regId)!;
+      expect(during.receiptStoragePath).toBeTruthy();
+
+      const files: string[] = [];
+      const result = await purgeAt(31 * DAY, files);
+      expect(result.receipts).toBeGreaterThanOrEqual(1);
+      expect(files).toContain(during.receiptStoragePath);
+      const after = (await store.listTournamentRegistrations(t.id)).find((r) => r.id === regId)!;
+      expect(after.receiptStoragePath).toBeNull();
+      expect(after.receiptContentType).toBeNull();
+      expect((await purgeAt(31 * DAY)).receipts).toBe(0);
+    });
+
+    it('tries a receipt again when the file could not be removed', async () => {
+      const { t } = await openEvent();
+      const user = await newUser();
+      const res = await call(user, 'POST', `/public/events/${t.id}/register`, {
+        name: 'Paid Adult',
+        yearOfBirth: new Date().getFullYear() - 40,
+        receiptDataUrl: PNG,
+      });
+      await deleteAccount(user);
+      const failed = await runPrivacyPurge(store, {
+        now: new Date(Date.now() + 31 * DAY),
+        deleteReceiptFile: async () => {
+          throw new Error('storage down');
+        },
+      });
+      expect(failed.failed).toBeGreaterThanOrEqual(1);
+      const row = (await store.listTournamentRegistrations(t.id)).find(
+        (r) => r.id === res.body.registration.id,
+      )!;
+      expect(row.receiptStoragePath).toBeTruthy();
+      const due = await store.listDueReceiptPurges(iso(31 * DAY));
+      expect(due.map((d) => d.registrationId)).toContain(row.id);
+      await purgeAt(31 * DAY);
+    });
+
+    it('leaves a guest’s and another person’s registrations alone', async () => {
+      const { t } = await openEvent();
+      const other = await newUser();
+      await call(other, 'POST', `/public/events/${t.id}/register`, {
+        name: 'Someone Else',
+        age: 12,
+        guardianConsent: true,
+        email: 'other@example.test',
+      });
+      await deleteAccount(await newUser());
+      const [row] = await store.listTournamentRegistrations(t.id);
+      expect(row?.playerSnapshot.email).toBe('other@example.test');
+      expect(row?.status).toBe('pending');
+    });
+
+    it('removes their profiles and unlinks them from rosters', async () => {
+      const user = await newUser();
+      const created = await call(user, 'POST', '/player/profiles', {
+        fullName: 'Kid',
+        relationship: 'child',
+        guardianConsent: true,
+      });
+      await deleteAccount(user);
+      expect(await store.listPlayerProfiles(user)).toEqual([]);
+      expect(await store.getPlayerProfile(created.body.profile.id)).toBeNull();
+    });
+
+    it('keeps an organization’s tournaments when a director leaves this way', async () => {
+      const owner = await newUser();
+      const org = await verifiedOrg(owner);
+      const director = await newUser();
+      await backend.addMember(org.id, director, 'director');
+      const made = await call(director, 'POST', '/tournaments', {
+        name: 'Director event',
+        organizationId: org.id,
+      });
+      const id = made.body.id;
+      await deleteAccount(director);
+      const t = await store.getTournament(id);
+      expect(t?.deletedAt ?? null).toBeNull();
+      expect(t?.ownerId).toBe(owner);
+      expect((await call(owner, 'GET', `/tournaments/${id}`)).status).toBe(200);
+      expect((await purgeAt(40 * DAY)).tournaments >= 0).toBe(true);
+      expect(await store.getTournament(id)).not.toBeNull();
+    });
+
+    it('a last owner hands over to the longest-serving admin, before any director', async () => {
+      const owner = await newUser();
+      const org = await verifiedOrg(owner);
+      const director = await newUser();
+      const admin = await newUser();
+      await backend.addMember(org.id, director, 'director');
+      await tick();
+      await backend.addMember(org.id, admin, 'admin');
+      const t = await seedTournament(owner, { organizationId: org.id });
+      await deleteAccount(owner);
+      expect(await store.getOrganizationMemberRole(org.id, admin)).toBe('owner');
+      expect(await store.getOrganizationMemberRole(org.id, director)).toBe('director');
+      expect((await store.getOrganization(org.id))?.createdBy).toBe(admin);
+      const after = await store.getTournament(t.id);
+      expect(after?.ownerId).toBe(admin);
+      expect(after?.deletedAt ?? null).toBeNull();
+    });
+
+    it('a last owner hands over to a director when there is no admin', async () => {
+      const owner = await newUser();
+      const org = await verifiedOrg(owner);
+      const director = await newUser();
+      const arbiter = await newUser();
+      await backend.addMember(org.id, arbiter, 'arbiter');
+      await backend.addMember(org.id, director, 'director');
+      await deleteAccount(owner);
+      expect(await store.getOrganizationMemberRole(org.id, director)).toBe('owner');
+      expect(await store.getOrganizationMemberRole(org.id, arbiter)).toBe('arbiter');
+    });
+
+    it('another owner staying changes nobody’s role', async () => {
+      const owner = await newUser();
+      const org = await verifiedOrg(owner);
+      const second = await newUser();
+      const admin = await newUser();
+      await backend.addMember(org.id, second, 'owner');
+      await backend.addMember(org.id, admin, 'admin');
+      await deleteAccount(owner);
+      expect(await store.getOrganizationMemberRole(org.id, admin)).toBe('admin');
+      expect((await store.getOrganization(org.id))?.createdBy).toBe(second);
+    });
+
+    it('an organization with nobody to take over closes, and is removed after the grace period', async () => {
+      const owner = await newUser();
+      const org = await verifiedOrg(owner);
+      const arbiter = await newUser();
+      await backend.addMember(org.id, arbiter, 'arbiter');
+      const t = await seedTournament(owner, {
+        organizationId: org.id,
+        registrationOpen: true,
+        publicEnabled: true,
+      });
+      await store.updateTournament(t.id, {
+        registrationOpen: true,
+        publicEnabled: true,
+        updatedAt: iso(-HOUR),
+      });
+      const sent = await call(owner, 'POST', `/organizations/${org.id}/invites`, {
+        email: `${crypto.randomUUID()}@example.com`,
+        role: 'director',
+      });
+      const token = sent.body.inviteUrl.slice(sent.body.inviteUrl.lastIndexOf('/') + 1);
+
+      await deleteAccount(owner);
+
+      const closed = await store.getOrganization(org.id);
+      expect(closed?.verificationStatus).toBe('suspended');
+      expect(closed?.createdBy).toBeNull();
+      const hidden = await store.getTournament(t.id);
+      expect(hidden?.deletedAt).toBeTruthy();
+      expect(hidden?.publicEnabled).toBe(false);
+      expect(hidden?.registrationOpen).toBe(false);
+      expect(await store.getOrganizationMemberRole(org.id, arbiter)).toBeNull();
+      const pulled = await call(arbiter, 'GET', `/sync/pull?since=${encodeURIComponent(iso(HOUR))}`);
+      expect(pulled.body.revokedTournamentIds).toContain(t.id);
+      const preview = await call(null, 'POST', '/public/invites/lookup', { token });
+      expect(preview.body.status).toBe('revoked');
+
+      await purgeAt(29 * DAY);
+      expect(await store.getTournament(t.id)).not.toBeNull();
+      expect((await store.getOrganization(org.id))?.name).toBe(org.name);
+
+      const result = await purgeAt(31 * DAY);
+      expect(result.tournaments).toBeGreaterThanOrEqual(1);
+      expect(result.organizations).toBeGreaterThanOrEqual(1);
+      expect(await store.getTournament(t.id)).toBeNull();
+      const gone = await store.getOrganization(org.id);
+      expect(gone?.name).toBe('Closed organization');
+      expect(gone?.contactEmail).toBeNull();
+    });
+
+    it('a personal tournament is hidden, then removed after the grace period', async () => {
+      const user = await newUser();
+      const id = crypto.randomUUID();
+      await push(user, [tournamentItem(id)]);
+      expect((await store.getTournament(id))?.organizationId ?? null).toBeNull();
+      await deleteAccount(user);
+      const hidden = await store.getTournament(id);
+      expect(hidden?.deletedAt).toBeTruthy();
+      expect(hidden?.ownerId ?? null).toBeNull();
+      await purgeAt(31 * DAY);
+      expect(await store.getTournament(id)).toBeNull();
+    });
+
+    it('never hard-deletes a tournament that was not scheduled', async () => {
+      const t = await seedTournament(await newUser());
+      await store.hardDeleteTournament(t.id);
+      expect(await store.getTournament(t.id)).not.toBeNull();
+    });
+
+    it('is safe to run twice, as a retry after a failed sign-in removal would', async () => {
+      const user = await newUser();
+      expect(await store.prepareAccountDeletion(user, iso(30 * DAY))).toMatchObject({
+        organizationsClosed: 0,
+      });
+      await expect(store.prepareAccountDeletion(user, iso(30 * DAY))).resolves.toBeTruthy();
+    });
+
+    it('reports a sign-in removal failure instead of claiming success', async () => {
+      const user = await newUser();
+      failNextAuthDelete = true;
+      const res = await deleteAccount(user);
+      expect(res.status).toBe(500);
+      expect(deletedAuthUsers).not.toContain(user);
+    });
+  });
 
   describe('team: invites and members', () => {
     const emailOf = (user: string) => `${user}@example.com`;
@@ -1049,7 +1534,7 @@ describe.each([
     it('needs a confirmed email', async () => {
       const user = await newUser();
       const profile = (
-        await call(user, 'POST', '/player/profiles', { fullName: 'P', relationship: 'child' })
+        await call(user, 'POST', '/player/profiles', { guardianConsent: true, fullName: 'P', relationship: 'child' })
       ).body.profile;
       const res = await call(user, 'POST', `/player/profiles/${profile.id}/claim`, {});
       expect(res.status).toBe(403);
@@ -1062,7 +1547,7 @@ describe.each([
       await linkableTournament(victimEmail, fideId, name);
       const user = await newUser();
       const profile = (
-        await call(user, 'POST', '/player/profiles', {
+        await call(user, 'POST', '/player/profiles', { guardianConsent: true,
           fullName: name,
           relationship: 'child',
           fideId,
@@ -1085,7 +1570,7 @@ describe.each([
       const player = await linkableTournament(email);
       const user = await newUser();
       const profile = (
-        await call(user, 'POST', '/player/profiles', { fullName: 'unique  KID', relationship: 'self' })
+        await call(user, 'POST', '/player/profiles', { guardianConsent: true, fullName: 'unique  KID', relationship: 'self' })
       ).body.profile;
       const res = await call(
         user,
@@ -1102,7 +1587,7 @@ describe.each([
       const sibling = await linkableTournament(email, 4243, 'Older Sibling');
       const user = await newUser();
       const profile = (
-        await call(user, 'POST', '/player/profiles', { fullName: 'Younger Sibling', relationship: 'child' })
+        await call(user, 'POST', '/player/profiles', { guardianConsent: true, fullName: 'Younger Sibling', relationship: 'child' })
       ).body.profile;
       const res = await call(
         user,
@@ -1141,7 +1626,7 @@ describe.each([
       const issueId = await issuedCertificate(email);
       const attacker = await newUser();
       const profile = (
-        await call(attacker, 'POST', '/player/profiles', {
+        await call(attacker, 'POST', '/player/profiles', { guardianConsent: true,
           fullName: 'A',
           relationship: 'child',
           email,
@@ -1158,7 +1643,7 @@ describe.each([
       const issueId = await issuedCertificate(email);
       const user = await newUser();
       const profile = (
-        await call(user, 'POST', '/player/profiles', {
+        await call(user, 'POST', '/player/profiles', { guardianConsent: true,
           fullName: 'P',
           relationship: 'self',
           email,
@@ -1479,7 +1964,7 @@ describe.each([
       return { owner, t };
     }
     async function register(tournamentId: string) {
-      const res = await call(null, 'POST', `/public/events/${tournamentId}/register`, {
+      const res = await call(null, 'POST', `/public/events/${tournamentId}/register`, { guardianConsent: true,
         name: `Reg ${crypto.randomUUID()}`,
         email: `${crypto.randomUUID()}@x.test`,
       });
@@ -1565,7 +2050,7 @@ describe.each([
           entryFeeCents: 5000,
           updatedAt: iso(-HOUR),
         });
-        const res = await call(null, 'POST', `/public/events/${t.id}/register`, {
+        const res = await call(null, 'POST', `/public/events/${t.id}/register`, { guardianConsent: true,
           name: `Paid ${crypto.randomUUID()}`,
           ...(receipt
             ? {
@@ -1607,7 +2092,8 @@ describe.each([
     it('flags same-name registrations with no email, and still allows them', async () => {
       const { owner, t } = await openEvent();
       const name = `Twin ${crypto.randomUUID()}`;
-      const post = (body: object) => call(null, 'POST', `/public/events/${t.id}/register`, body);
+      const post = (body: object) =>
+        call(null, 'POST', `/public/events/${t.id}/register`, { guardianConsent: true, ...body });
       expect((await post({ name })).status).toBe(201);
       expect((await post({ name })).status).toBe(201);
       const other = await register(t.id);
@@ -1755,7 +2241,7 @@ describe.each([
     it('ignores a profile link in a sync payload', async () => {
       const victim = await newUser();
       const profile = (
-        await call(victim, 'POST', '/player/profiles', { fullName: 'V', relationship: 'child' })
+        await call(victim, 'POST', '/player/profiles', { guardianConsent: true, fullName: 'V', relationship: 'child' })
       ).body.profile;
       const b = await newUser();
       const tb = await seedTournament(b);
@@ -1774,7 +2260,7 @@ describe.each([
       const player = await seedPlayer(t.id, { email, name: 'Linked Kid' });
       const user = await newUser();
       const profile = (
-        await call(user, 'POST', '/player/profiles', { fullName: 'Linked Kid', relationship: 'self' })
+        await call(user, 'POST', '/player/profiles', { guardianConsent: true, fullName: 'Linked Kid', relationship: 'self' })
       ).body.profile;
       await call(user, 'POST', `/player/profiles/${profile.id}/claim`, {}, { 'x-test-user-email': email });
       await tick();
@@ -1817,7 +2303,7 @@ describe.each([
       const owner = await newUser();
       const t = await seedTournament(owner);
       await store.updateTournament(t.id, { registrationOpen: true, updatedAt: iso(-HOUR) });
-      const res = await call(null, 'POST', `/public/events/${t.id}/register`, {
+      const res = await call(null, 'POST', `/public/events/${t.id}/register`, { guardianConsent: true,
         name: 'Reg',
         selectedCategoryId: victim.category.id,
       });

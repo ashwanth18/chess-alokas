@@ -1,5 +1,13 @@
+# Keeps container logs from growing without limit: at most 50 MB per service, then the oldest goes.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   api:
+    logging: *logging
     build:
       context: ..
       dockerfile: deploy/Dockerfile.api
@@ -21,6 +29,7 @@ services:
       - "3001"
 
   web:
+    logging: *logging
     build:
       context: ..
       dockerfile: deploy/Dockerfile.web

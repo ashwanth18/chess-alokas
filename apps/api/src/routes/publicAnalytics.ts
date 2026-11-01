@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { redactPagePath } from '../lib/logRedaction.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDatabaseSql } from '../auth.js';
@@ -121,7 +122,7 @@ export const publicAnalyticsPlugin: FastifyPluginAsync = async (app) => {
       await sql`
         INSERT INTO page_views (path, route_key, tournament_id, live_token_hash, referrer_host, user_agent)
         VALUES (
-          ${path.slice(0, 500)},
+          ${redactPagePath(path).slice(0, 500)},
           ${routeKey},
           ${tournamentId ?? null}::uuid,
           ${tokenHash},

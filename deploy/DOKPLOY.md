@@ -26,6 +26,7 @@ Create an **A record** (or CNAME) for `chess-manager.alokas.com` pointing at you
 | `SUPABASE_SECRET_KEY` | api only | server secret / service_role |
 | `SUPABASE_ANON_KEY` | api + web build | publishable/anon for JWT verify + client |
 | `RESEND_API_KEY` / `RESEND_FROM` | api | certificate email and team invites. Without it, invites still work: the owner copies the link |
+| `PRIVACY_PURGE_DISABLED` | api | optional, `1` stops the job that finishes account deletions. Not passed through compose by default |
 | `PUBLIC_APP_URL` | api | optional, base of invite links. Defaults to `https://chess-manager.alokas.com` |
 | `SENTRY_DSN` | api | Node/Fastify DSN (free plan) |
 | `VITE_SENTRY_DSN` | web build | React DSN (same or separate project) |

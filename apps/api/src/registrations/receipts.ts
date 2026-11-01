@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getServiceSupabase } from '../auth.js';
@@ -77,6 +77,17 @@ export async function saveReceipt(
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, receipt.bytes);
   return storagePath;
+}
+
+/** Throws if it may still exist, so the purge tries again. A file already gone is fine. */
+export async function deleteReceipt(storagePath: string): Promise<void> {
+  const supabase = getServiceSupabase();
+  if (supabase) {
+    const { error } = await supabase.storage.from(BUCKET).remove([storagePath]);
+    if (error) throw new Error(`Receipt removal failed: ${error.message}`);
+    return;
+  }
+  await rm(path.join(receiptsRoot(), storagePath), { force: true });
 }
 
 export async function readReceipt(storagePath: string): Promise<Uint8Array | null> {

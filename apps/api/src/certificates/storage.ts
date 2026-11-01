@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -96,6 +96,16 @@ export async function saveCertificatePdf(
     return saveSupabase(supabase, tournamentId, issueId, pdf);
   }
   return saveLocal(tournamentId, issueId, pdf);
+}
+
+/** Removes it from cloud and disk, since reading falls back to disk for older files. */
+export async function deleteCertificatePdf(storagePath: string): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  if (supabase) {
+    const { error } = await supabase.storage.from(BUCKET).remove([storagePath]);
+    if (error) throw new Error(`Certificate removal failed: ${error.message}`);
+  }
+  await rm(path.join(certificatesRoot(), storagePath), { force: true });
 }
 
 export async function readCertificatePdf(storagePath: string): Promise<Uint8Array | null> {

@@ -678,6 +678,9 @@ export const PlayerProfileSchema = z.object({
   country: z.string().nullable().optional(),
   email: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
+  guardianConsentAt: z.string().nullable().optional(),
+  guardianConsentNoticeVersion: z.string().nullable().optional(),
+  guardianConsentByUserId: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -834,6 +837,9 @@ export const TournamentRegistrationSchema = z.object({
   reviewerNote: z.string().nullable().optional(),
   reviewedAt: z.string().datetime().nullable().optional(),
   participantId: z.string().uuid().nullable().optional(),
+  guardianConsentAt: z.string().nullable().optional(),
+  guardianConsentNoticeVersion: z.string().nullable().optional(),
+  guardianConsentByUserId: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   /** Organizer list only: another live registration has this name and no email separates them. */

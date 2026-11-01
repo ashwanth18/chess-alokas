@@ -139,7 +139,7 @@ describe('registration security', () => {
     const reg = await app.inject({
       method: 'POST',
       url: `/public/events/${tournamentId}/register`,
-      payload: { name: 'Child Player', yearOfBirth: 2016, school: 'A School', city: 'KL' },
+      payload: { guardianConsent: true, name: 'Child Player', yearOfBirth: 2016, school: 'A School', city: 'KL' },
     });
     const regId = reg.json().registration.id as string;
     await app.inject({
@@ -162,7 +162,7 @@ describe('registration security', () => {
       method: 'POST',
       url: '/player/profiles',
       headers: as(OTHER_USER),
-      payload: {
+      payload: { guardianConsent: true,
         fullName: 'Private Child',
         relationship: 'child',
         email: 'parent@example.com',
@@ -175,7 +175,7 @@ describe('registration security', () => {
     const anonymous = await app.inject({
       method: 'POST',
       url: `/public/events/${tournamentId}/register`,
-      payload: { playerProfileId },
+      payload: { guardianConsent: true, playerProfileId },
     });
     expect(anonymous.statusCode).toBe(401);
     expect(anonymous.body).not.toContain('parent@example.com');
@@ -184,7 +184,7 @@ describe('registration security', () => {
       method: 'POST',
       url: `/public/events/${tournamentId}/register`,
       headers: as(ORGANIZER),
-      payload: { playerProfileId },
+      payload: { guardianConsent: true, playerProfileId },
     });
     expect(wrongAccount.statusCode).toBe(403);
   });
@@ -194,7 +194,7 @@ describe('registration security', () => {
     const lateRes = await app.inject({
       method: 'POST',
       url: `/public/events/${late.tournamentId}/register`,
-      payload: { name: 'Too Late' },
+      payload: { guardianConsent: true, name: 'Too Late' },
     });
     expect(lateRes.statusCode).toBe(400);
 
@@ -202,7 +202,7 @@ describe('registration security', () => {
     const firstReg = await app.inject({
       method: 'POST',
       url: `/public/events/${small.tournamentId}/register`,
-      payload: { name: 'First Player' },
+      payload: { guardianConsent: true, name: 'First Player' },
     });
     expect(firstReg.json().registration.status).toBe('pending');
     await app.inject({
@@ -214,7 +214,7 @@ describe('registration security', () => {
     const secondReg = await app.inject({
       method: 'POST',
       url: `/public/events/${small.tournamentId}/register`,
-      payload: { name: 'Second Player' },
+      payload: { guardianConsent: true, name: 'Second Player' },
     });
     expect(secondReg.json().registration.status).toBe('waitlisted');
     const approveOverCapacity = await app.inject({
@@ -238,7 +238,7 @@ describe('registration security', () => {
       const res = await app.inject({
         method: 'POST',
         url,
-        payload: { name: 'Bad Receipt', receiptDataUrl },
+        payload: { guardianConsent: true, name: 'Bad Receipt', receiptDataUrl },
       });
       expect(res.statusCode).toBe(400);
     }
@@ -246,7 +246,7 @@ describe('registration security', () => {
     const ok = await app.inject({
       method: 'POST',
       url,
-      payload: { name: 'Paid Player', receiptDataUrl: PNG },
+      payload: { guardianConsent: true, name: 'Paid Player', receiptDataUrl: PNG },
     });
     expect(ok.statusCode).toBe(201);
     const registration = ok.json().registration as Record<string, unknown>;

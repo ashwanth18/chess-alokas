@@ -40,6 +40,8 @@ import {
   DEFAULT_CERT_SERIAL_PREFIX,
   formatCertificateSerial,
   normalizeExcludedRounds,
+  DELETED_PLAYER_NAME,
+  PRIVACY_NOTICE_VERSION,
   defaultTournamentOrganization,
   inviteStatus,
   roleRank,
@@ -234,6 +236,21 @@ export interface Store {
   ): Promise<OrganizationMemberRole | null>;
   /** Throws 409 rather than leave no owner. False if they are not a member. */
   removeOrganizationMember(organizationId: string, userId: string): Promise<boolean>;
+
+  // Consent
+  /** Once per tournament and confirmedAt, however often it arrives. */
+  recordRosterConsent(input: RosterConsentInput): Promise<void>;
+  listRosterConsents(tournamentId: string): Promise<RosterConsentRecord[]>;
+
+  // Account deletion
+  /** Everything that must happen before the sign-in account goes. Safe to repeat if that fails. */
+  prepareAccountDeletion(userId: string, purgeAfter: string): Promise<AccountDeletionOutcome>;
+  listDueReceiptPurges(nowIso: string): Promise<DueReceiptPurge[]>;
+  clearPurgedReceipt(registrationId: string): Promise<void>;
+  listTournamentsDuePurge(nowIso: string): Promise<DueTournamentPurge[]>;
+  hardDeleteTournament(id: string): Promise<void>;
+  /** Removes a closed organization's details once its grace period ends. Returns how many. */
+  anonymiseDueOrganizations(nowIso: string): Promise<number>;
   updateOrganization(
     id: string,
     patch: Partial<
@@ -355,6 +372,56 @@ function lastOwnerError(): Error {
 
 function inviteConflict(message: string): Error {
   return Object.assign(new Error(message), { statusCode: 409 });
+}
+
+export interface RosterConsentInput {
+  tournamentId: string;
+  userId: string | null;
+  /** When the organizer confirmed: an offline import reaches the server later. */
+  confirmedAt: string;
+}
+
+export interface RosterConsentRecord extends RosterConsentInput {
+  recordedAt: string;
+  noticeVersion: string;
+}
+
+export interface AccountDeletionOutcome {
+  /** A member became owner because the person was the last one. */
+  organizationsTransferred: number;
+  /** No admin or director could take over. See closeOrganization. */
+  organizationsClosed: number;
+  tournamentsScheduled: number;
+  registrationsAnonymised: number;
+  receiptsScheduled: number;
+}
+
+export interface DueReceiptPurge {
+  registrationId: string;
+  storagePath: string | null;
+}
+
+export interface DueTournamentPurge {
+  id: string;
+  receiptPaths: string[];
+  certificatePaths: string[];
+}
+
+/**
+ * A registration's copy of the player after the person who submitted it deleted their account.
+ * An approved one keeps only the name, which the organizer's roster and results already show.
+ * Anything else has no result depending on it, so the name goes too, and an open entry is cancelled.
+ */
+function anonymisedRegistration(reg: { status: string; playerSnapshot: RegistrationPlayerSnapshot }): {
+  status: TournamentRegistration['status'];
+  playerSnapshot: RegistrationPlayerSnapshot;
+} {
+  const approved = reg.status === 'approved';
+  const open = reg.status === 'pending' || reg.status === 'waitlisted';
+  return {
+    status: open ? 'cancelled' : (reg.status as TournamentRegistration['status']),
+    playerSnapshot: { name: approved ? reg.playerSnapshot.name : DELETED_PLAYER_NAME },
+  };
 }
 
 export interface CreateOrganizationInviteInput {
@@ -561,6 +628,10 @@ export class MemoryStore implements Store {
   >();
   private organizationInvites = new Map<string, OrganizationInvite & { tokenHash: string }>();
   private accessRevocations = new Set<string>();
+  private rosterConsents = new Map<string, RosterConsentRecord>();
+  private receiptPurgeAfter = new Map<string, string>();
+  private tournamentPurgeAfter = new Map<string, string>();
+  private organizationAnonymiseAfter = new Map<string, string>();
   private playerProfiles = new Map<string, PlayerProfile>();
   private certificateIssues = new Map<string, CertificateIssue>();
   private registrations = new Map<string, TournamentRegistration>();
@@ -1149,6 +1220,7 @@ export class MemoryStore implements Store {
         return row ? { tournamentId: row.tournamentId, updatedAt: row.updatedAt } : null;
       },
       getGame: async (id) => this.games.get(id) ?? null,
+      recordRosterConsent: (input) => this.recordRosterConsent(input),
       writeTournament: async ({ item, ownerId: owner, organizationId }) => {
         this.applySyncItem(item, { ownerId: owner, organizationId });
         return this.tournaments.get(item.id)!;
@@ -1583,6 +1655,234 @@ export class MemoryStore implements Store {
       role: existing?.role ?? row.role,
       alreadyMember: Boolean(existing),
     };
+  }
+
+  // ---- Consent ----
+
+  async recordRosterConsent(input: RosterConsentInput): Promise<void> {
+    const key = `${input.tournamentId}:${input.confirmedAt}`;
+    if (this.rosterConsents.has(key)) return;
+    this.rosterConsents.set(key, {
+      ...input,
+      recordedAt: new Date().toISOString(),
+      noticeVersion: PRIVACY_NOTICE_VERSION,
+    });
+  }
+
+  async listRosterConsents(tournamentId: string): Promise<RosterConsentRecord[]> {
+    return [...this.rosterConsents.values()].filter((c) => c.tournamentId === tournamentId);
+  }
+
+  // ---- Account deletion ----
+
+  private successorFor(organizationId: string, userId: string): string | null {
+    for (const role of ['admin', 'director'] as const) {
+      const found = [...this.organizationMembers.values()]
+        .filter((m) => m.organizationId === organizationId && m.role === role && m.userId !== userId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+      if (found) return found.userId;
+    }
+    return null;
+  }
+
+  private scheduleTournamentPurge(t: Tournament, nowIso: string, purgeAfter: string): void {
+    this.tournaments.set(t.id, {
+      ...t,
+      ownerId: null,
+      deletedAt: t.deletedAt ?? nowIso,
+      updatedAt: nowIso,
+      publicEnabled: false,
+      registrationOpen: false,
+      isPublishedGlobal: false,
+    });
+    this.tournamentPurgeAfter.set(t.id, purgeAfter);
+  }
+
+  async prepareAccountDeletion(userId: string, purgeAfter: string): Promise<AccountDeletionOutcome> {
+    const nowIso = new Date().toISOString();
+    const outcome: AccountDeletionOutcome = {
+      organizationsTransferred: 0,
+      organizationsClosed: 0,
+      tournamentsScheduled: 0,
+      registrationsAnonymised: 0,
+      receiptsScheduled: 0,
+    };
+
+    const memberships = [...this.organizationMembers.values()].filter((m) => m.userId === userId);
+    for (const mem of memberships) {
+      const orgId = mem.organizationId;
+      if (mem.role === 'owner' && !this.otherOwner(orgId, userId)) {
+        const successor = this.successorFor(orgId, userId);
+        if (successor) {
+          const next = this.organizationMembers.get(`${orgId}:${successor}`)!;
+          next.role = 'owner';
+          next.accessChangedAt = nowIso;
+          outcome.organizationsTransferred += 1;
+        } else {
+          // See PostgresStore.closeOrganization.
+          const org = this.organizations.get(orgId);
+          if (org) {
+            this.organizations.set(orgId, {
+              ...org,
+              createdBy: null,
+              verificationStatus: 'suspended',
+              canPublishGlobal: false,
+              canAcceptPaidRegistrations: false,
+              updatedAt: nowIso,
+            });
+          }
+          this.organizationAnonymiseAfter.set(orgId, purgeAfter);
+          for (const t of [...this.tournaments.values()]) {
+            if (t.organizationId === orgId) {
+              this.scheduleTournamentPurge(t, nowIso, purgeAfter);
+              outcome.tournamentsScheduled += 1;
+            }
+          }
+          for (const other of [...this.organizationMembers.values()]) {
+            if (other.organizationId === orgId && other.userId !== userId) {
+              this.recordAccessRevocations(orgId, other.userId);
+              this.organizationMembers.delete(`${orgId}:${other.userId}`);
+            }
+          }
+          for (const invite of this.organizationInvites.values()) {
+            if (invite.organizationId === orgId && !invite.acceptedAt && !invite.revokedAt) {
+              invite.revokedAt = nowIso;
+            }
+          }
+          outcome.organizationsClosed += 1;
+        }
+      }
+      this.handOverOrganizationAccess(orgId, userId);
+      this.organizationMembers.delete(`${orgId}:${userId}`);
+    }
+
+    for (const org of this.organizations.values()) {
+      if (org.createdBy === userId) this.organizations.set(org.id, { ...org, createdBy: null });
+    }
+    for (const t of [...this.tournaments.values()]) {
+      if (t.ownerId !== userId) continue;
+      if (t.organizationId) {
+        this.tournaments.set(t.id, { ...t, ownerId: null });
+      } else {
+        this.scheduleTournamentPurge(t, nowIso, purgeAfter);
+        outcome.tournamentsScheduled += 1;
+      }
+    }
+
+    const profileIds = new Set(
+      [...this.playerProfiles.values()].filter((p) => p.accountUserId === userId).map((p) => p.id),
+    );
+    for (const reg of [...this.registrations.values()]) {
+      const theirs =
+        reg.submittedByUserId === userId ||
+        (reg.playerProfileId != null && profileIds.has(reg.playerProfileId));
+      if (!theirs) continue;
+      const hasReceipt = Boolean(reg.receiptStoragePath || reg.receiptDataUrl);
+      this.registrations.set(reg.id, {
+        ...reg,
+        ...anonymisedRegistration(reg),
+        customAnswers: {},
+        submittedByUserId: null,
+        playerProfileId: null,
+        guardianConsentByUserId: null,
+        updatedAt: nowIso,
+      });
+      if (hasReceipt) {
+        this.receiptPurgeAfter.set(reg.id, purgeAfter);
+        outcome.receiptsScheduled += 1;
+      }
+      outcome.registrationsAnonymised += 1;
+    }
+    for (const p of [...this.participants.values()]) {
+      if (p.playerProfileId && profileIds.has(p.playerProfileId)) {
+        this.participants.set(p.id, { ...p, playerProfileId: null });
+      }
+    }
+    for (const id of profileIds) this.playerProfiles.delete(id);
+    return outcome;
+  }
+
+  async listDueReceiptPurges(nowIso: string): Promise<DueReceiptPurge[]> {
+    const due: DueReceiptPurge[] = [];
+    for (const [registrationId, after] of this.receiptPurgeAfter) {
+      if (after <= nowIso) {
+        due.push({
+          registrationId,
+          storagePath: this.registrations.get(registrationId)?.receiptStoragePath ?? null,
+        });
+      }
+    }
+    return due;
+  }
+
+  async clearPurgedReceipt(registrationId: string): Promise<void> {
+    const reg = this.registrations.get(registrationId);
+    if (reg) {
+      this.registrations.set(registrationId, {
+        ...reg,
+        receiptDataUrl: null,
+        receiptStoragePath: null,
+        receiptContentType: null,
+      });
+    }
+    this.receiptPurgeAfter.delete(registrationId);
+  }
+
+  async listTournamentsDuePurge(nowIso: string): Promise<DueTournamentPurge[]> {
+    const due: DueTournamentPurge[] = [];
+    for (const [id, after] of this.tournamentPurgeAfter) {
+      if (after > nowIso) continue;
+      due.push({
+        id,
+        receiptPaths: [...this.registrations.values()]
+          .filter((r) => r.tournamentId === id && r.receiptStoragePath)
+          .map((r) => r.receiptStoragePath!),
+        certificatePaths: [...this.certificateIssues.values()]
+          .filter((c) => c.tournamentId === id && c.storagePath)
+          .map((c) => c.storagePath),
+      });
+    }
+    return due;
+  }
+
+  async hardDeleteTournament(id: string): Promise<void> {
+    if (!this.tournamentPurgeAfter.has(id)) return;
+    this.tournaments.delete(id);
+    for (const map of [this.categories, this.participants, this.games, this.registrations, this.certificateIssues] as Array<
+      Map<string, { tournamentId: string }>
+    >) {
+      for (const [key, row] of map) {
+        if (row.tournamentId === id) map.delete(key);
+      }
+    }
+    this.tournamentPurgeAfter.delete(id);
+  }
+
+  async anonymiseDueOrganizations(nowIso: string): Promise<number> {
+    let count = 0;
+    for (const [id, after] of this.organizationAnonymiseAfter) {
+      if (after > nowIso) continue;
+      const org = this.organizations.get(id);
+      if (org) {
+        this.organizations.set(id, {
+          ...org,
+          name: 'Closed organization',
+          slug: `closed-${id}`,
+          logoUrl: null,
+          description: null,
+          website: null,
+          contactEmail: null,
+          contactPhone: null,
+          city: null,
+          state: null,
+          paymentInstructions: null,
+          paymentQrStoragePath: null,
+        });
+      }
+      this.organizationAnonymiseAfter.delete(id);
+      count += 1;
+    }
+    return count;
   }
 
   private otherOwner(organizationId: string, userId: string): string | null {
@@ -2528,7 +2828,7 @@ interface TournamentRow {
   deleted_at: Date | string | null;
 }
 
-interface TournamentRegistrationRow {
+interface TournamentRegistrationRow extends GuardianConsentColumns {
   id: string;
   tournament_id: string;
   player_profile_id: string | null;
@@ -2578,7 +2878,13 @@ interface OrganizationRow {
   updated_at: Date | string;
 }
 
-interface PlayerProfileRow {
+interface GuardianConsentColumns {
+  guardian_consent_at?: Date | string | null;
+  guardian_consent_notice_version?: string | null;
+  guardian_consent_by_user_id?: string | null;
+}
+
+interface PlayerProfileRow extends GuardianConsentColumns {
   id: string;
   account_user_id: string;
   is_primary: boolean;
@@ -2770,6 +3076,9 @@ function rowToTournamentRegistration(row: TournamentRegistrationRow): Tournament
     receiptDataUrl: row.receipt_data_url ?? null,
     receiptStoragePath: row.receipt_storage_path ?? null,
     receiptContentType: row.receipt_content_type ?? null,
+    guardianConsentAt: toIso(row.guardian_consent_at ?? null),
+    guardianConsentNoticeVersion: row.guardian_consent_notice_version ?? null,
+    guardianConsentByUserId: row.guardian_consent_by_user_id ?? null,
     amountCents: Number(row.amount_cents ?? 0),
     status: (row.status as RegistrationStatus) ?? 'pending',
     reviewerNote: row.reviewer_note ?? null,
@@ -2910,6 +3219,9 @@ function rowToPlayerProfile(row: PlayerProfileRow): PlayerProfile {
     country: row.country ?? null,
     email: row.email ?? null,
     phone: row.phone ?? null,
+    guardianConsentAt: toIso(row.guardian_consent_at ?? null),
+    guardianConsentNoticeVersion: row.guardian_consent_notice_version ?? null,
+    guardianConsentByUserId: row.guardian_consent_by_user_id ?? null,
     createdAt: toIso(row.created_at)!,
     updatedAt: toIso(row.updated_at)!,
   };
@@ -3958,6 +4270,7 @@ export class PostgresStore implements Store {
         const [row] = await s<GameRow[]>`SELECT * FROM games WHERE id = ${id}`;
         return row ? rowToGame(row) : null;
       },
+      recordRosterConsent: (input) => this.recordRosterConsent(input, s),
       writeTournament: ({ item, ownerId, organizationId }) =>
         this.writeSyncTournament(s, item, ownerId, organizationId),
       writeChild: (entity, item) =>
@@ -4504,6 +4817,247 @@ export class PostgresStore implements Store {
     });
   }
 
+  // ---- Consent ----
+
+  async recordRosterConsent(input: RosterConsentInput, s: Sql = this.sql): Promise<void> {
+    await s`
+      INSERT INTO roster_consent_confirmations (
+        tournament_id, confirmed_by_user_id, confirmed_at, notice_version
+      )
+      VALUES (
+        ${input.tournamentId}, ${input.userId}, ${input.confirmedAt}, ${PRIVACY_NOTICE_VERSION}
+      )
+      ON CONFLICT (tournament_id, confirmed_at) DO NOTHING
+    `;
+  }
+
+  async listRosterConsents(tournamentId: string): Promise<RosterConsentRecord[]> {
+    const rows = await this.sql<
+      {
+        tournament_id: string;
+        confirmed_by_user_id: string | null;
+        confirmed_at: Date | string;
+        recorded_at: Date | string;
+        notice_version: string;
+      }[]
+    >`
+      SELECT tournament_id::text AS tournament_id, confirmed_by_user_id::text AS confirmed_by_user_id,
+             confirmed_at, recorded_at, notice_version
+      FROM roster_consent_confirmations
+      WHERE tournament_id = ${tournamentId}
+    `;
+    return rows.map((r) => ({
+      tournamentId: r.tournament_id,
+      userId: r.confirmed_by_user_id,
+      confirmedAt: inviteTime(r.confirmed_at) ?? '',
+      recordedAt: inviteTime(r.recorded_at) ?? '',
+      noticeVersion: r.notice_version,
+    }));
+  }
+
+  // ---- Account deletion ----
+
+  /**
+   * No owner, and no admin or director to take over. The organization stops: it is suspended, its
+   * tournaments are hidden and scheduled for removal, its invites are withdrawn, and any arbiters
+   * lose access. A platform admin can still reinstate it during the grace period, after which
+   * anonymiseDueOrganizations removes its details.
+   */
+  private async closeOrganization(
+    s: Sql,
+    organizationId: string,
+    userId: string,
+    purgeAfter: string,
+  ): Promise<number> {
+    await s`
+      UPDATE organizations
+      SET created_by = NULL, verification_status = 'suspended', can_publish_global = false,
+          can_accept_paid_registrations = false, closed_at = now(),
+          anonymise_after = ${purgeAfter}, updated_at = now()
+      WHERE id = ${organizationId}
+    `;
+    const scheduled = await this.scheduleTournamentPurge(
+      s,
+      s`organization_id = ${organizationId}`,
+      purgeAfter,
+    );
+    const others = await s<{ user_id: string }[]>`
+      SELECT user_id::text AS user_id FROM organization_members
+      WHERE organization_id = ${organizationId} AND user_id <> ${userId}
+    `;
+    for (const other of others) {
+      await this.recordAccessRevocations(s, organizationId, other.user_id);
+    }
+    await s`
+      DELETE FROM organization_members
+      WHERE organization_id = ${organizationId} AND user_id <> ${userId}
+    `;
+    await s`
+      UPDATE organization_invites SET revoked_at = now()
+      WHERE organization_id = ${organizationId} AND accepted_at IS NULL AND revoked_at IS NULL
+    `;
+    return scheduled;
+  }
+
+  private async scheduleTournamentPurge(
+    s: Sql,
+    where: ReturnType<Sql>,
+    purgeAfter: string,
+  ): Promise<number> {
+    const rows = await s`
+      UPDATE tournaments
+      SET owner_id = NULL, deleted_at = COALESCE(deleted_at, now()), updated_at = now(),
+          public_enabled = false, registration_open = false, is_published_global = false,
+          purge_after = ${purgeAfter}
+      WHERE ${where}
+      RETURNING id
+    `;
+    return rows.length;
+  }
+
+  async prepareAccountDeletion(userId: string, purgeAfter: string): Promise<AccountDeletionOutcome> {
+    return this.tx(async (s) => {
+      const outcome: AccountDeletionOutcome = {
+        organizationsTransferred: 0,
+        organizationsClosed: 0,
+        tournamentsScheduled: 0,
+        registrationsAnonymised: 0,
+        receiptsScheduled: 0,
+      };
+
+      const memberships = await s<{ organization_id: string; role: string }[]>`
+        SELECT organization_id::text AS organization_id, role FROM organization_members
+        WHERE user_id = ${userId}
+        ORDER BY organization_id
+      `;
+      for (const mem of memberships) {
+        const orgId = mem.organization_id;
+        await this.lockOrganization(s, orgId);
+        if (mem.role === 'owner' && !(await this.otherOwner(s, orgId, userId))) {
+          const [successor] = await s<{ user_id: string }[]>`
+            SELECT user_id::text AS user_id FROM organization_members
+            WHERE organization_id = ${orgId} AND user_id <> ${userId} AND role IN ('admin', 'director')
+            ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, created_at ASC
+            LIMIT 1
+          `;
+          if (successor) {
+            await s`
+              UPDATE organization_members SET role = 'owner', access_changed_at = now()
+              WHERE organization_id = ${orgId} AND user_id = ${successor.user_id}
+            `;
+            outcome.organizationsTransferred += 1;
+          } else {
+            outcome.tournamentsScheduled += await this.closeOrganization(s, orgId, userId, purgeAfter);
+            outcome.organizationsClosed += 1;
+          }
+        }
+        await this.handOverOrganizationAccess(s, orgId, userId);
+        await s`
+          DELETE FROM organization_members WHERE organization_id = ${orgId} AND user_id = ${userId}
+        `;
+      }
+
+      await s`UPDATE organizations SET created_by = NULL WHERE created_by = ${userId}`;
+      // Theirs alone: nothing else depends on a tournament outside any organization.
+      outcome.tournamentsScheduled += await this.scheduleTournamentPurge(
+        s,
+        s`owner_id = ${userId} AND organization_id IS NULL`,
+        purgeAfter,
+      );
+      await s`UPDATE tournaments SET owner_id = NULL WHERE owner_id = ${userId}`;
+
+      const regs = await s<
+        {
+          id: string;
+          status: string;
+          player_snapshot: RegistrationPlayerSnapshot;
+          has_receipt: boolean;
+        }[]
+      >`
+        SELECT id::text AS id, status, player_snapshot,
+               (receipt_storage_path IS NOT NULL OR receipt_data_url IS NOT NULL) AS has_receipt
+        FROM tournament_registrations
+        WHERE submitted_by_user_id = ${userId}
+           OR player_profile_id IN (SELECT id FROM player_profiles WHERE account_user_id = ${userId})
+        FOR UPDATE
+      `;
+      for (const reg of regs) {
+        const next = anonymisedRegistration({ status: reg.status, playerSnapshot: reg.player_snapshot });
+        await s`
+          UPDATE tournament_registrations
+          SET status = ${next.status}, player_snapshot = ${this.j(next.playerSnapshot)},
+              custom_answers = '{}'::jsonb, submitted_by_user_id = NULL, player_profile_id = NULL,
+              guardian_consent_by_user_id = NULL,
+              receipt_purge_after = ${reg.has_receipt ? purgeAfter : null}, updated_at = now()
+          WHERE id = ${reg.id}
+        `;
+        outcome.registrationsAnonymised += 1;
+        if (reg.has_receipt) outcome.receiptsScheduled += 1;
+      }
+      await s`DELETE FROM player_profiles WHERE account_user_id = ${userId}`;
+      return outcome;
+    });
+  }
+
+  async listDueReceiptPurges(nowIso: string): Promise<DueReceiptPurge[]> {
+    const rows = await this.sql<{ id: string; receipt_storage_path: string | null }[]>`
+      SELECT id::text AS id, receipt_storage_path FROM tournament_registrations
+      WHERE receipt_purge_after <= ${nowIso}
+      LIMIT 500
+    `;
+    return rows.map((r) => ({ registrationId: r.id, storagePath: r.receipt_storage_path }));
+  }
+
+  async clearPurgedReceipt(registrationId: string): Promise<void> {
+    await this.sql`
+      UPDATE tournament_registrations
+      SET receipt_data_url = NULL, receipt_storage_path = NULL, receipt_content_type = NULL,
+          receipt_purge_after = NULL
+      WHERE id = ${registrationId}
+    `;
+  }
+
+  async listTournamentsDuePurge(nowIso: string): Promise<DueTournamentPurge[]> {
+    const rows = await this.sql<{ id: string }[]>`
+      SELECT id::text AS id FROM tournaments WHERE purge_after <= ${nowIso} LIMIT 100
+    `;
+    const due: DueTournamentPurge[] = [];
+    for (const { id } of rows) {
+      const receipts = await this.sql<{ path: string }[]>`
+        SELECT receipt_storage_path AS path FROM tournament_registrations
+        WHERE tournament_id = ${id} AND receipt_storage_path IS NOT NULL
+      `;
+      const certificates = await this.sql<{ path: string }[]>`
+        SELECT storage_path AS path FROM certificate_issues
+        WHERE tournament_id = ${id} AND storage_path IS NOT NULL
+      `;
+      due.push({
+        id,
+        receiptPaths: receipts.map((r) => r.path),
+        certificatePaths: certificates.map((c) => c.path),
+      });
+    }
+    return due;
+  }
+
+  /** Only ever a tournament already scheduled, so a mistaken id can't erase a live event. */
+  async hardDeleteTournament(id: string): Promise<void> {
+    await this.sql`DELETE FROM tournaments WHERE id = ${id} AND purge_after IS NOT NULL`;
+  }
+
+  async anonymiseDueOrganizations(nowIso: string): Promise<number> {
+    const rows = await this.sql`
+      UPDATE organizations
+      SET name = 'Closed organization', slug = 'closed-' || id::text, logo_url = NULL,
+          description = NULL, website = NULL, contact_email = NULL, contact_phone = NULL,
+          city = NULL, state = NULL, payment_instructions = NULL, payment_qr_storage_path = NULL,
+          anonymise_after = NULL, updated_at = now()
+      WHERE anonymise_after <= ${nowIso}
+      RETURNING id
+    `;
+    return rows.length;
+  }
+
   /** Serializes membership changes, so two requests can't each remove "the other" owner. */
   private async lockOrganization(s: Sql, organizationId: string): Promise<void> {
     await s`SELECT id FROM organizations WHERE id = ${organizationId} FOR UPDATE`;
@@ -4739,7 +5293,8 @@ export class PostgresStore implements Store {
         id, account_user_id, is_primary, relationship, username, full_name,
         date_of_birth, year_of_birth, gender, national_id, fide_id,
         fide_standard, fide_rapid, fide_blitz, alokas_rating,
-        school, club, city, state, country, email, phone, created_at, updated_at
+        school, club, city, state, country, email, phone, created_at, updated_at,
+        guardian_consent_at, guardian_consent_notice_version, guardian_consent_by_user_id
       )
       VALUES (
         ${profile.id}, ${profile.accountUserId}, ${shouldBePrimary}, ${profile.relationship},
@@ -4751,7 +5306,9 @@ export class PostgresStore implements Store {
         ${profile.school ?? null}, ${profile.club ?? null}, ${profile.city ?? null},
         ${profile.state ?? null}, ${profile.country ?? 'Malaysia'},
         ${profile.email ?? null}, ${profile.phone ?? null},
-        ${profile.createdAt}, ${profile.updatedAt}
+        ${profile.createdAt}, ${profile.updatedAt},
+        ${profile.guardianConsentAt ?? null}, ${profile.guardianConsentNoticeVersion ?? null},
+        ${profile.guardianConsentByUserId ?? null}
       )
       RETURNING *
     `;
@@ -4808,6 +5365,9 @@ export class PostgresStore implements Store {
         country = ${m.country ?? null},
         email = ${m.email ?? null},
         phone = ${m.phone ?? null},
+        guardian_consent_at = ${m.guardianConsentAt ?? null},
+        guardian_consent_notice_version = ${m.guardianConsentNoticeVersion ?? null},
+        guardian_consent_by_user_id = ${m.guardianConsentByUserId ?? null},
         updated_at = ${m.updatedAt}
       WHERE id = ${id} AND account_user_id = ${accountUserId}
       RETURNING *
@@ -5217,7 +5777,8 @@ export class PostgresStore implements Store {
         id, tournament_id, player_profile_id, submitted_by_user_id, selected_category_id,
         player_snapshot, custom_answers, payment_status, receipt_data_url,
         receipt_storage_path, receipt_content_type, amount_cents,
-        status, reviewer_note, reviewed_at, participant_id, created_at, updated_at
+        status, reviewer_note, reviewed_at, participant_id, created_at, updated_at,
+        guardian_consent_at, guardian_consent_notice_version, guardian_consent_by_user_id
       )
       VALUES (
         ${reg.id}, ${reg.tournamentId}, ${reg.playerProfileId ?? null},
@@ -5226,7 +5787,9 @@ export class PostgresStore implements Store {
         ${reg.paymentStatus}, ${reg.receiptDataUrl ?? null},
         ${reg.receiptStoragePath ?? null}, ${reg.receiptContentType ?? null}, ${reg.amountCents ?? 0},
         ${reg.status}, ${reg.reviewerNote ?? null}, ${reg.reviewedAt ?? null},
-        ${reg.participantId ?? null}, ${reg.createdAt}, ${reg.updatedAt}
+        ${reg.participantId ?? null}, ${reg.createdAt}, ${reg.updatedAt},
+        ${reg.guardianConsentAt ?? null}, ${reg.guardianConsentNoticeVersion ?? null},
+        ${reg.guardianConsentByUserId ?? null}
       )
       RETURNING *
     `;

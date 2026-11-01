@@ -57,6 +57,8 @@ export interface LocalTournament {
   currency?: string;
   paymentInstructions?: string | null;
   paymentQrUrl?: string | null;
+  /** When the organizer last confirmed consent for an import. The server records it at sync. */
+  rosterConsentConfirmedAt?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;

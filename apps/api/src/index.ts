@@ -20,6 +20,8 @@ import { teamPlugin } from './routes/team.js';
 import { playerProfilesPlugin } from './routes/playerProfiles.js';
 import { registrationsPlugin } from './routes/registrations.js';
 import { Sentry, sentryEnabled } from './sentry.js';
+import { apiLoggerOptions, redactUrl } from './lib/logRedaction.js';
+import { startPrivacyPurgeSchedule } from './lib/privacyPurge.js';
 
 assertAuthConfiguredForProduction();
 
@@ -27,7 +29,7 @@ const PORT = Number(process.env['PORT'] ?? 3001);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
 
 const app = Fastify({
-  logger: true,
+  logger: apiLoggerOptions(),
   bodyLimit: 50 * 1024 * 1024,
   // Number of reverse proxies in front of the API. Without this, request.ip is the
   // proxy's address and every per-IP rate limit is shared by all clients.
@@ -36,16 +38,14 @@ const app = Fastify({
 
 app.addHook('onRequest', async (request) => {
   if (!sentryEnabled) return;
-  Sentry.setTag('route', request.routeOptions.url ?? request.url);
+  Sentry.setTag('route', request.routeOptions.url ?? redactUrl(request.url));
 });
 
 app.addHook('preHandler', async (request) => {
   if (!sentryEnabled) return;
   if (request.userId) {
-    Sentry.setUser({
-      id: request.userId,
-      email: request.user?.email ?? undefined,
-    });
+    // An opaque id only, as the web and desktop reports do.
+    Sentry.setUser({ id: request.userId });
   } else {
     Sentry.setUser(null);
   }
@@ -91,7 +91,7 @@ await app.register(multipart, {
   },
 });
 
-await app.register(authPlugin);
+await app.register(authPlugin, { store });
 await app.register(tournamentsPlugin, { store });
 await app.register(importPlugin, { store });
 await app.register(pairingPlugin, { store });
@@ -130,4 +130,5 @@ app.listen({ port: PORT, host: HOST }, (err, address) => {
     process.exit(1);
   }
   app.log.info(`chess-alokas api listening at ${address}`);
+  startPrivacyPurgeSchedule(store, app.log);
 });

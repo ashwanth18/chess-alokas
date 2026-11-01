@@ -335,8 +335,36 @@ export default function AccountPage() {
         <section className="account-panel danger">
           <h3>Danger zone</h3>
           <p className="form-hint">
-            Deletes your account and soft-deletes cloud tournaments you own. Local Dexie data on
-            this device is not wiped automatically.
+            This removes your sign-in account and player profiles straight away. It can’t be undone.
+          </p>
+          <ul className="form-hint" style={{ paddingLeft: '1.1rem' }}>
+            <li>
+              <strong>Your registrations</strong> lose their contact details. Open entries are
+              cancelled. An approved entry keeps the player’s name for the organizer.
+            </li>
+            <li>
+              <strong>Receipts</strong> stay for 30 days, so organizers can settle payments, and are
+              then deleted.
+            </li>
+            <li>
+              <strong>Results stay.</strong> Roster entries, games and certificates in an
+              organizer’s event remain with that event.
+            </li>
+            <li>
+              <strong>Tournaments of your own</strong>, outside any organization, are hidden now and
+              erased after 30 days.
+            </li>
+            <li>
+              <strong>If you are an organization’s only owner</strong>, its longest-serving admin or
+              else director becomes owner. If there is neither, it closes: its tournaments are hidden
+              and erased after 30 days.
+            </li>
+            <li>
+              <strong>This device</strong> keeps its local data and backups until you remove them.
+            </li>
+          </ul>
+          <p className="form-hint">
+            See <Link to="/privacy#retention" style={{ textDecoration: 'underline' }}>how long we keep data</Link>.
           </p>
           <label>
             Type <strong>{auth.user.email}</strong> to confirm

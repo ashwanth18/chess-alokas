@@ -77,6 +77,12 @@ export interface SyncBackend {
     id: string,
   ): Promise<{ tournamentId: string; updatedAt: string } | null>;
   getGame(id: string): Promise<Game | null>;
+  /** The organizer confirmed they hold consent for an import. Recorded once per confirmation. */
+  recordRosterConsent(input: {
+    tournamentId: string;
+    userId: string | null;
+    confirmedAt: string;
+  }): Promise<void>;
   writeTournament(input: {
     item: SyncPushItem;
     existing: Tournament | null;
@@ -261,6 +267,12 @@ function quotaProbe(
   };
 }
 
+function rosterConsentTime(item: SyncPushItem, now: Date): string | null {
+  const raw = item.payload['rosterConsentConfirmedAt'];
+  if (typeof raw !== 'string' || Number.isNaN(Date.parse(raw))) return null;
+  return clampSyncTimestamp(new Date(raw).toISOString(), now);
+}
+
 /** The sync rules, in one place so MemoryStore and PostgresStore can't drift apart. */
 export async function runSyncPush(
   backend: SyncBackend,
@@ -335,6 +347,16 @@ export async function runSyncPush(
         continue;
       }
 
+      const consentAt = rosterConsentTime(item, now);
+      // Before the checks below: a confirmation still happened if this edit lost to a newer one.
+      if (existing && consentAt) {
+        await backend.recordRosterConsent({
+          tournamentId: item.id,
+          userId: callerId,
+          confirmedAt: consentAt,
+        });
+      }
+
       if (existing) {
         const incomingTime = Date.parse(updatedAt);
         const existingTime = Date.parse(existing.updatedAt);
@@ -397,6 +419,13 @@ export async function runSyncPush(
 
       const written = await backend.writeTournament({ item, existing, ownerId, organizationId });
       tournaments.set(item.id, written);
+      if (!existing && consentAt) {
+        await backend.recordRosterConsent({
+          tournamentId: item.id,
+          userId: callerId,
+          confirmedAt: consentAt,
+        });
+      }
       accepted++;
       continue;
     }

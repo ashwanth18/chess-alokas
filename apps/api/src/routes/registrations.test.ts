@@ -201,7 +201,7 @@ describe('registrations & GPS discovery routes (Phase 2)', () => {
       method: 'POST',
       url: '/player/profiles',
       headers: { 'x-test-user-id': PARENT_USER },
-      payload: {
+      payload: { guardianConsent: true,
         fullName: 'Aarav Ashwanth',
         relationship: 'child',
         yearOfBirth: new Date().getFullYear() - 10,
@@ -222,7 +222,7 @@ describe('registrations & GPS discovery routes (Phase 2)', () => {
       method: 'POST',
       url: '/public/events/kl-junior-rapid-2026/register',
       headers: { 'x-test-user-id': PARENT_USER },
-      payload: {
+      payload: { guardianConsent: true,
         playerProfileId: childProfile.id,
         receiptDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
       },
@@ -248,7 +248,7 @@ describe('registrations & GPS discovery routes (Phase 2)', () => {
       method: 'POST',
       url: '/public/events/kl-junior-rapid-2026/register',
       headers: { 'x-test-user-id': PARENT_USER },
-      payload: {
+      payload: { guardianConsent: true,
         playerProfileId: childProfile.id,
       },
     });

@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { clearReturnTo, resolveReturnTo } from '../auth/returnTo';
 import AuthShell from '../components/AuthShell';
+import { SignupAgreement } from '../components/LegalLinks';
 import { trackPageView } from '../lib/pageAnalytics';
 import { apiCreateOrganization, apiCreatePlayerProfile } from '../api/client';
 import { supabase } from '../lib/supabase';
@@ -267,6 +268,7 @@ export default function SignupPage() {
               : 'Start Organizer Sandbox Trial'}
         </button>
       </form>
+      <SignupAgreement />
       {error && <div className="form-error">{error}</div>}
       {message && <p className="form-hint">{message}</p>}
       <p className="auth-footer">

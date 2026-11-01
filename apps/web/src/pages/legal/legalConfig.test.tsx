@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { LegalContact } from './LegalLayout';
+import { PRIVACY_NOTICE_VERSION } from '@chess-alokas/shared';
 import {
+  LEGAL_LAST_UPDATED_ISO,
   DEFAULT_OPERATOR,
   NO_CONTACT_TEXT,
   NO_LOCATION_TEXT,
@@ -17,6 +19,12 @@ const render = (node: React.ReactNode) =>
   renderToStaticMarkup(<MemoryRouter>{node}</MemoryRouter>);
 
 const EMPTY_LOCATIONS = { supabase: '', hostinger: '', resend: '', sentry: '', github: '' };
+
+describe('notice version', () => {
+  it('stays equal to the date on the page, so a consent says which notice applied', () => {
+    expect(PRIVACY_NOTICE_VERSION).toBe(LEGAL_LAST_UPDATED_ISO);
+  });
+});
 
 describe('legal details', () => {
   it('prints what is still blank', () => {

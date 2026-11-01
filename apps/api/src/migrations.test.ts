@@ -230,6 +230,27 @@ describe('database migrations', () => {
       ).rejects.toThrow(/check/);
     });
 
+    it('clients can neither read nor write roster consent records', async () => {
+      await expect(asUser(USER_A, 'select * from public.roster_consent_confirmations')).rejects.toThrow(
+        /permission denied/,
+      );
+    });
+
+    it('removes live links and query strings from stored page paths', async () => {
+      await db.exec(`
+        insert into public.page_views (path, route_key) values
+          ('/live/secret-token/tv?x=1', 'live'),
+          ('/discover', 'discover')
+      `);
+      const file = readFileSync(
+        path.join(MIGRATIONS_DIR, '032_consent_and_account_deletion.sql'),
+        'utf8',
+      );
+      await db.exec(file.slice(file.indexOf('update public.page_views')));
+      const { rows } = await db.query<{ path: string }>('select path from public.page_views order by path');
+      expect(rows.map((r) => r.path)).toEqual(['/discover', '/live/[redacted]/tv']);
+    });
+
     it('clients can neither read nor write access revocations', async () => {
       for (const sql of [
         'select * from public.tournament_access_revocations',

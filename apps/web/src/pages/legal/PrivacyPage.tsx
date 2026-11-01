@@ -68,12 +68,20 @@ const SECTIONS: LegalSection[] = [
           guardian, or that you have that person&apos;s permission, and that you accept this page on
           the child&apos;s behalf.
         </p>
+        <p>
+          <strong>What we record.</strong> A registration for someone under 18, or with no age given,
+          and a child&apos;s profile need a tick confirming you are the parent or guardian, or have
+          their permission. We record when that happened and which version of this page applied. An
+          organizer importing a roster must confirm they have permission, and we record who confirmed
+          and when.
+        </p>
         <div className="lg-note">
           <p>
-            <strong>What we don&apos;t do today.</strong> We don&apos;t check ages at sign-up. We
-            don&apos;t record a separate consent when someone registers a child or creates a child
-            profile. A roster imported by an organizer reaches us without any step in Chess Alokas
-            where a parent agrees.
+            <strong>What this doesn&apos;t do.</strong> We don&apos;t check anyone&apos;s age or
+            identity, or that the person ticking really is a parent or guardian. Ages are what people
+            enter. On a roster import, the organizer confirms for the whole list, and no parent takes
+            part in Chess Alokas. A roster typed in by hand, or a registration approved by an organizer,
+            has no separate confirmation step.
           </p>
         </div>
         <p>
@@ -149,12 +157,12 @@ const SECTIONS: LegalSection[] = [
             ],
             [
               'Usage statistics',
-              'Page path (on live pages this includes the live link), page type, the tournament, the referring site, browser details and time. For downloads and the desktop app: event, operating system, app version, language, time zone and a hashed random install ID. These records don’t store your IP address or link to your account.',
+              'Page path (with any live link, invite link or table link removed), a one-way hash of the live link, page type, the tournament, the referring site, browser details and time. For downloads and the desktop app: event, operating system, app version, language, time zone and a hashed random install ID. These records don’t store your IP address or link to your account.',
               'Your browser or app.',
             ],
             [
               'Server logs',
-              'IP address, web address requested and time. Web addresses can include searches and, if you use Near me, your coordinates.',
+              'IP address, web address requested and time. Our application removes coordinates, searches and link secrets from the address before writing it, and limits its logs to about 50 MB per service, overwriting older lines. The proxy in front of our server may record the full address.',
               'Your browser or app.',
             ],
             [
@@ -174,7 +182,8 @@ const SECTIONS: LegalSection[] = [
         <p>
           Near me on the Find a tournament page asks your browser for your location, and only if you
           press it. The coordinates go to our server to sort events by distance. We don&apos;t save
-          them in the database, but they can appear in server logs. The mobile app can do the same with
+          them in the database, and our application removes them from its logs. The proxy in front
+          of our server may still record them. The mobile app can do the same with
           your approximate location, if you allow it. Organizers can publish a venue&apos;s
           address and coordinates.
         </p>
@@ -314,8 +323,9 @@ const SECTIONS: LegalSection[] = [
         <p>
           Reports from the website and desktop app are filtered to remove emails, passwords, tokens,
           live links and home folder names, and carry only an opaque user ID. Reports from our server
-          filter sign-in headers, but when a signed-in request fails they include that person&apos;s
-          account ID and email address.
+          filter sign-in headers and coordinates and searches in the address, and when a signed-in
+          request fails they carry that opaque ID, not an email address. Other text in an error message
+          isn&apos;t filtered on the server.
         </p>
         <h3>Sending data outside Malaysia</h3>
         <p>
@@ -337,10 +347,11 @@ const SECTIONS: LegalSection[] = [
       <>
         <div className="lg-note">
           <p>
-            <strong>We have no fixed retention period yet, and nothing deletes old data on a
-            schedule.</strong> Registrations, receipts, rosters, results, certificates, usage
-            statistics and logs stay until someone removes them by hand. We can&apos;t give you an end
-            date today. We will publish retention periods here once they are set.
+            <strong>We have no general retention period yet.</strong> The only scheduled deletion
+            is what follows a deleted account, below. Otherwise registrations, receipts, rosters,
+            results, certificates and usage statistics stay until someone removes them by hand. We
+            can&apos;t give you an end date today. We will publish retention periods here once they are
+            set.
           </p>
         </div>
         <h3>When you delete your account</h3>
@@ -352,22 +363,41 @@ const SECTIONS: LegalSection[] = [
             ['Sign-in account, display name, team memberships', 'Removed.'],
             ['Player and family profiles on the account', 'Removed.'],
             [
-              'Registrations you submitted, with the copy of the player’s details and the receipt',
-              'Stay, for the organizer. They are no longer linked to your account.',
+              'Registrations you or your profiles made, with the copy of the player’s details',
+              'Contact details, other details and answers are removed straight away. Open entries are cancelled. An approved entry keeps only the player’s name, which the organizer’s roster already shows. Payment status and amount stay.',
             ],
             [
-              'Roster entries, results and certificates in events',
-              'Stay with the event.',
+              'Receipts on those registrations',
+              'Kept for 30 days so the organizer can settle payments, then deleted by a scheduled job. Deletion can run later than day 30, and a failed attempt is tried again.',
             ],
             [
-              'Tournaments you own',
-              'Marked as deleted and hidden from public pages, but not erased.',
+              'Roster entries, results and certificates in an organizer’s event',
+              'Stay with the event. Ask the organizer to change or remove them.',
             ],
-            ['An academy you created', 'Stays, no longer linked to you.'],
+            [
+              'Tournaments you own that belong to an organization',
+              'Stay with the organization, under its owner.',
+            ],
+            [
+              'Tournaments of your own, outside any organization',
+              'Hidden straight away, then erased after 30 days with their rosters, results, registrations, receipts and certificates.',
+            ],
+            [
+              'An organization where you are the only owner',
+              'Its longest-serving admin, or else director, becomes owner. If there is neither, it closes: it is suspended, its tournaments are hidden and any arbiters lose access. After 30 days the tournaments are erased and the organization’s name and contact details are removed.',
+            ],
+            [
+              'Registrations entered without signing in',
+              'Not touched: nothing links them to your account. Contact the organizer or us.',
+            ],
             ['Usage statistics, server logs, error reports', 'Stay.'],
             ['Data on your own devices', 'Stays until you remove it. See section 11.'],
           ]}
         />
+        <p>
+          Deleting removes the sign-in account straight away and can&apos;t be undone. The 30 days are
+          for organizers and don&apos;t let you restore the account.
+        </p>
         <h3>Other deletions</h3>
         <p>
           Deleting a player profile removes that profile, but not past registrations or roster entries.

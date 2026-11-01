@@ -1,6 +1,12 @@
 import type { FastifyPluginAsync, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
-import { PlayerRelationshipSchema, type PlayerProfile } from '@chess-alokas/shared';
+import {
+  GUARDIAN_CONSENT_ERROR_CODE,
+  PRIVACY_NOTICE_VERSION,
+  PlayerRelationshipSchema,
+  guardianConsentRequired,
+  type PlayerProfile,
+} from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth } from '../auth.js';
 
@@ -40,9 +46,15 @@ const CreatePlayerProfileBodySchema = z.object({
   country: z.string().max(100).nullable().optional(),
   email: z.string().email().nullable().optional().or(z.literal('')),
   phone: z.string().max(64).nullable().optional(),
+  guardianConsent: z.boolean().optional(),
 });
 
 const UpdatePlayerProfileBodySchema = CreatePlayerProfileBodySchema.partial();
+
+const CONSENT_REFUSAL = {
+  error: 'A parent or guardian must confirm their consent for a child’s profile.',
+  code: GUARDIAN_CONSENT_ERROR_CODE,
+};
 
 export const playerProfilesPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
   const { store } = opts;
@@ -64,6 +76,14 @@ export const playerProfilesPlugin: FastifyPluginAsync<PluginOptions> = async (ap
       const userId = request.userId ?? DEFAULT_USER_ID;
       const input = parsed.data;
       const nowIso = new Date().toISOString();
+      const needsConsent = guardianConsentRequired({
+        relationship: input.relationship,
+        yearOfBirth: input.yearOfBirth ?? null,
+        dateOfBirth: input.dateOfBirth || null,
+      });
+      if (needsConsent && input.guardianConsent !== true) {
+        return reply.code(400).send(CONSENT_REFUSAL);
+      }
 
       const profile: PlayerProfile = {
         id: crypto.randomUUID(),
@@ -88,6 +108,9 @@ export const playerProfilesPlugin: FastifyPluginAsync<PluginOptions> = async (ap
         country: input.country || 'Malaysia',
         email: input.email || (input.relationship === 'self' ? (request.user?.email ?? null) : null),
         phone: input.phone ?? null,
+        guardianConsentAt: needsConsent ? nowIso : null,
+        guardianConsentNoticeVersion: needsConsent ? PRIVACY_NOTICE_VERSION : null,
+        guardianConsentByUserId: needsConsent ? userId : null,
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -107,9 +130,31 @@ export const playerProfilesPlugin: FastifyPluginAsync<PluginOptions> = async (ap
       if (!parsed.success) {
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
       }
-      const data = parsed.data;
+      const { guardianConsent, ...data } = parsed.data;
+      const existing = await store.getPlayerProfile(id);
+      if (!existing || existing.accountUserId !== userId) {
+        return reply.code(404).send({ error: 'Player profile not found' });
+      }
+      // Editing can turn a profile into one that needs consent, such as adding a birth year.
+      const needsConsent =
+        !existing.guardianConsentAt &&
+        guardianConsentRequired({
+          relationship: data.relationship ?? existing.relationship,
+          yearOfBirth: data.yearOfBirth !== undefined ? data.yearOfBirth : existing.yearOfBirth,
+          dateOfBirth: data.dateOfBirth !== undefined ? data.dateOfBirth || null : existing.dateOfBirth,
+        });
+      if (needsConsent && guardianConsent !== true) {
+        return reply.code(400).send(CONSENT_REFUSAL);
+      }
       const updated = await store.updatePlayerProfile(id, userId, {
         ...data,
+        ...(needsConsent
+          ? {
+              guardianConsentAt: new Date().toISOString(),
+              guardianConsentNoticeVersion: PRIVACY_NOTICE_VERSION,
+              guardianConsentByUserId: userId,
+            }
+          : {}),
         ...(data.username !== undefined
           ? { username: data.username ? data.username.trim().toLowerCase() : null }
           : {}),

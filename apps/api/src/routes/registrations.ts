@@ -1,4 +1,10 @@
 import type { FastifyPluginAsync, FastifyPluginOptions } from 'fastify';
+import {
+  GUARDIAN_CONSENT_ERROR_CODE,
+  PRIVACY_NOTICE_VERSION,
+  guardianConsentRequired,
+  type PlayerProfile,
+} from '@chess-alokas/shared';
 import { z } from 'zod';
 import {
   DEFAULT_REGISTRATION_FORM_CONFIG,
@@ -136,6 +142,7 @@ const PublicRegisterBodySchema = z.object({
   email: z.string().email().nullable().optional().or(z.literal('')),
   phone: z.string().max(64).nullable().optional(),
   customAnswers: z.record(z.unknown()).optional(),
+  guardianConsent: z.boolean().optional(),
   // base64 of MAX_RECEIPT_BYTES, plus the data URL prefix
   receiptDataUrl: z.string().max(7_000_100).nullable().optional(),
 });
@@ -313,6 +320,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       }
       const userId = request.userId ?? null;
       let linkedProfileId: string | null = null;
+      let linkedProfile: PlayerProfile | null = null;
 
       let snapshot: Partial<RegistrationPlayerSnapshot> = {
         name: input.name?.trim() || '',
@@ -344,6 +352,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
           });
         }
         linkedProfileId = profile.id;
+        linkedProfile = profile;
         const bestRating =
           input.rating ??
           profile.fideStandard ??
@@ -380,6 +389,20 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
 
       if (!snapshot.name || !snapshot.name.trim()) {
         return reply.code(400).send({ error: 'Player full name is required.' });
+      }
+
+      // Asked at every registration, even with a saved profile: this entry goes to a new organizer.
+      const needsGuardianConsent = guardianConsentRequired({
+        relationship: linkedProfile?.relationship ?? null,
+        age: snapshot.age ?? null,
+        yearOfBirth: snapshot.yearOfBirth ?? null,
+        dateOfBirth: linkedProfile?.dateOfBirth ?? null,
+      });
+      if (needsGuardianConsent && input.guardianConsent !== true) {
+        return reply.code(400).send({
+          error: 'A parent or guardian must confirm their consent for a player under 18.',
+          code: GUARDIAN_CONSENT_ERROR_CODE,
+        });
       }
 
       const feeCents = tournament.entryFeeCents ?? 0;
@@ -436,6 +459,9 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         reviewerNote: null,
         reviewedAt: null,
         participantId: null,
+        guardianConsentAt: needsGuardianConsent ? nowIso : null,
+        guardianConsentNoticeVersion: needsGuardianConsent ? PRIVACY_NOTICE_VERSION : null,
+        guardianConsentByUserId: needsGuardianConsent ? userId : null,
         createdAt: nowIso,
         updatedAt: nowIso,
       };

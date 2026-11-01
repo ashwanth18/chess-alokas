@@ -52,7 +52,7 @@ export default defineConfig({
     // Electron grants file:// module loading itself; stock Chromium needs telling.
     {
       name: 'desktop',
-      testMatch: /desktop\.spec\.ts/,
+      testMatch: /(desktop|legalLinks)\.spec\.ts/,
       use: { ...viewports[2], launchOptions: { args: ['--allow-file-access-from-files'] } },
     },
   ],

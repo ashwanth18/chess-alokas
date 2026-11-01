@@ -185,7 +185,7 @@ describe('playerProfiles routes, past participation claim & career dashboard', (
       method: 'POST',
       url: '/player/profiles',
       headers: { 'x-test-user-id': PARENT_USER },
-      payload: {
+      payload: { guardianConsent: true,
         fullName: 'Ashwanth Kumar',
         username: 'ashwanth_k',
         relationship: 'self',
@@ -202,7 +202,7 @@ describe('playerProfiles routes, past participation claim & career dashboard', (
       method: 'POST',
       url: '/player/profiles',
       headers: { 'x-test-user-id': PARENT_USER },
-      payload: {
+      payload: { guardianConsent: true,
         fullName: 'Aarav Ashwanth',
         username: 'aarav_chess',
         relationship: 'child',
