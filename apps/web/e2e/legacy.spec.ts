@@ -15,18 +15,22 @@ function contrast(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
-test('legacy text is Archivo, loaded from this origin', async ({ page, mocks }) => {
+test('legacy pages keep their own fonts, now served from this origin', async ({ page, mocks }) => {
   await page.goto('/login');
   await page.locator('form').first().waitFor();
   await settle(page);
-  const family = await page.locator('body').evaluate((el) => getComputedStyle(el).fontFamily);
-  expect(family).toContain('Archivo');
-  expect(await page.evaluate(() => document.fonts.check('16px Archivo'))).toBe(true);
-  expect(mocks.assets.some((p) => /archivo-latin-wdth.*\.woff2$/.test(p))).toBe(true);
+  const body = await page.locator('body').evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(body).toContain('Source Sans 3');
+  const heading = await page.locator('h1, h2').first().evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(heading).toContain('Fraunces');
+  expect(await page.evaluate(() => document.fonts.check('16px "Source Sans 3"'))).toBe(true);
+  expect(mocks.assets.some((p) => /source-sans-3-latin-wght-normal.*\.woff2$/.test(p))).toBe(true);
+  // Archivo is for names and tables in new components. A legacy page shouldn't pay for it.
+  expect(mocks.assets.some((p) => /archivo/.test(p))).toBe(false);
   expect(mocks.external).toEqual([]);
 });
 
-test('index.html has no Google Fonts and the body keeps its legacy gradient', async ({ page }) => {
+test('index.html has no Google Fonts and the body keeps its gradient', async ({ page }) => {
   await page.goto('/login');
   await page.locator('form').first().waitFor();
   expect(await page.locator('link[href*="fonts.g"]').count()).toBe(0);
@@ -34,23 +38,22 @@ test('index.html has no Google Fonts and the body keeps its legacy gradient', as
     const s = getComputedStyle(el);
     return { image: s.backgroundImage, color: s.backgroundColor };
   });
-  // The unlayered splash colour in index.html would have wiped this out.
+  // An unlayered colour in index.html would wipe this out.
   expect(body.image).toContain('radial-gradient');
   expect(body.color).toBe('rgb(15, 61, 46)');
 });
 
-test('the boot splash is paper and the split square, in markup', async ({ request }) => {
+test('the boot splash is the brand green with the mark, not a glyph', async ({ request }) => {
   const html = await (await request.get('/login')).text();
   expect(html).not.toContain('♕');
-  expect(html).not.toContain('#0f3d2e');
-  expect(html).toContain('#F7F5EF');
+  expect(html).toContain('#0f3d2e');
   expect(html).toContain('<rect x="8" y="1"');
 });
 
-test('the PWA manifest uses paper, not green', async ({ request }) => {
+test('the PWA manifest uses the brand green', async ({ request }) => {
   const manifest = await (await request.get('/manifest.webmanifest')).json();
-  expect(manifest.theme_color).toBe('#F7F5EF');
-  expect(manifest.background_color).toBe('#F7F5EF');
+  expect(manifest.theme_color).toBe('#0f3d2e');
+  expect(manifest.background_color).toBe('#0f3d2e');
 });
 
 test('registration labels pass contrast', async ({ page }) => {

@@ -920,7 +920,7 @@ html.is-desktop-linux .desktop-update-banner {
   color: var(--color-fg);
 }
 
-.btn-danger { color: var(--color-danger) !important; }
+.btn-danger { color: var(--color-danger); }
 .btn-danger:hover:not(:disabled) { background: rgba(224,112,112,0.1) !important; }
 
 .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
@@ -3050,6 +3050,10 @@ details[open] .round-summary::before { transform: rotate(90deg); }
   font-weight: 600;
   color: var(--surface-fg);
 }
+/* Gold links and pale tabs on the cream panels measured under 2:1. */
+.account-panel a:not(.btn) { color: var(--surface-accent); }
+.account-panel .btn-outline { color: var(--surface-fg); border-color: var(--surface-border); }
+.auth-card .cat-tab:not(.active) { color: var(--surface-muted); border-color: var(--surface-border); }
 /* The form on a dark admin panel (registration): light-panel ink measured 1.7:1 here. */
 .admin-panel .auth-form label { color: var(--color-fg); }
 .auth-page .input,

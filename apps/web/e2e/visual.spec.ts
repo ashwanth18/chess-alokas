@@ -1,6 +1,9 @@
 import { test, expect, signIn, seedDesk, settle } from './fixtures/mockApi';
 import { EVENT_SLUG, LIVE_TOKEN, TABLE_SLUG, TOURNAMENT_ID, players } from './fixtures/data';
 
+// Full pages in parity mode only: real baselines are committed, and viewport shots keep them small.
+const FULL_PAGE = process.env.E2E_PARITY === '1';
+
 type Shot = { name: string; path: string; ready: string };
 
 const GUEST: Shot[] = [
@@ -26,7 +29,7 @@ for (const shot of GUEST) {
     await page.goto(shot.path);
     await page.locator(shot.ready).first().waitFor();
     await settle(page);
-    await expect(page).toHaveScreenshot(`${shot.name}.png`, { fullPage: true });
+    await expect(page).toHaveScreenshot(`${shot.name}.png`, { fullPage: FULL_PAGE });
   });
 }
 
@@ -37,6 +40,6 @@ for (const shot of DESK) {
     await page.goto(shot.path);
     await page.locator(shot.ready).first().waitFor();
     await settle(page);
-    await expect(page).toHaveScreenshot(`${shot.name}.png`, { fullPage: true });
+    await expect(page).toHaveScreenshot(`${shot.name}.png`, { fullPage: FULL_PAGE });
   });
 }

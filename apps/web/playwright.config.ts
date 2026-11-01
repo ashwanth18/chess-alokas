@@ -48,8 +48,13 @@ export default defineConfig({
   },
   projects: [
     ...viewports.map((v) => ({ name: v.name, testMatch: /visual\.spec\.ts/, use: v })),
-    { name: 'checks', testMatch: /(audit|shells|ui|legacy)\.spec\.ts/, use: viewports[2] },
-    { name: 'desktop', testMatch: /desktop\.spec\.ts/, use: viewports[2] },
+    { name: 'checks', testMatch: /(audit|contrast|shells|ui|legacy)\.spec\.ts/, use: viewports[2] },
+    // Electron grants file:// module loading itself; stock Chromium needs telling.
+    {
+      name: 'desktop',
+      testMatch: /desktop\.spec\.ts/,
+      use: { ...viewports[2], launchOptions: { args: ['--allow-file-access-from-files'] } },
+    },
   ],
   webServer: {
     command: `pnpm exec vite build --mode e2e --outDir dist-e2e --emptyOutDir && pnpm exec vite preview --mode e2e --outDir dist-e2e --port ${PORT} --strictPort`,

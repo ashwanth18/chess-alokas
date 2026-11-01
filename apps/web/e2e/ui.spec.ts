@@ -122,24 +122,26 @@ test('legacy globals do not leak into new components', async ({ page }) => {
     const s = getComputedStyle(el);
     return { font: s.fontFamily, radius: s.borderRadius, h: el.getBoundingClientRect().height };
   });
-  expect(style.font).toContain('Archivo');
-  expect(style.radius).toBe('3px');
+  expect(style.font).toContain('Source Sans 3');
+  expect(style.radius).toBe('4px');
   expect(style.h).toBeGreaterThanOrEqual(36);
   const bg = await page.locator('body').evaluate((el) => getComputedStyle(el).backgroundImage);
   expect(bg).toBe('none');
   const h1 = await page.locator('h1').evaluate((el) => getComputedStyle(el).fontFamily);
-  expect(h1).toContain('Archivo');
+  expect(h1).toContain('Fraunces');
+  const name = await page.locator('.ui-name').first().evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(name).toContain('Archivo');
 });
 
 test('leaving the sheet restores the legacy page', async ({ page }) => {
-  await open(page, '?theme=dark');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await open(page, '?theme=sun');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'sun');
   await page.evaluate(() => {
     window.history.pushState({}, '', '/login');
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
   await page.locator('form').first().waitFor();
-  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'sun');
   await expect(page.locator('html')).not.toHaveAttribute('data-surface');
   expect(await page.locator('body').evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('gradient');
 });
@@ -157,9 +159,9 @@ test('the sheet opens as a real modal dialog and closes with Esc', async ({ page
   await expect(dialog).toBeHidden();
 });
 
-for (const theme of ['light', 'dark', 'sun', 'tv']) {
+for (const theme of ['forest', 'light', 'sun', 'tv']) {
   test(`axe finds nothing on the sheet in ${theme}`, async ({ page }) => {
-    await open(page, `?theme=${theme}`);
+    await open(page, theme === 'forest' ? '' : `?theme=${theme}`);
     const results = await new AxeBuilder({ page }).include('.ui-root').analyze();
     expect(results.violations.map((v) => `${v.id}: ${v.nodes[0]?.target}`)).toEqual([]);
   });
@@ -172,9 +174,9 @@ test('no console errors or outside requests on the sheet', async ({ page, mocks 
 });
 
 for (const [label, query] of [
-  ['light', '?theme=light'],
-  ['dark', '?theme=dark'],
+  ['forest', ''],
   ['sun', '?theme=sun'],
+  ['light', '?theme=light'],
 ] as const) {
   for (const width of [390, 1366]) {
     test(`screenshot ${label} ${width}`, async ({ page }) => {

@@ -140,7 +140,7 @@ export default function UiGallery() {
         </h1>
 
         <Section title="PlayerName, narrowing then wrapping">
-          <div data-testid="names" style={{ display: 'grid', gap: 'var(--s4)' }}>
+          <div data-testid="names" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 'var(--s4)' }}>
             {[480, 320, 240, 160].map((width) => (
               <div key={width} data-testid={`names-${width}`} style={{ width, maxWidth: '100%', border: '1px solid var(--rule)', padding: 'var(--s2)' }}>
                 <div className="ui-faint" style={{ fontSize: 'var(--t-xs)' }}>

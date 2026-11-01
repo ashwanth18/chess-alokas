@@ -22,6 +22,7 @@ test.beforeAll(() => {
 });
 
 test('the build keeps relative URLs, no service worker, no crossorigin', () => {
+  // Fonts are copied beside the CSS with relative URLs, or they'd break under file://.
   const html = readFileSync(join(OUT, 'index.html'), 'utf8');
   expect(html).toContain('./assets/');
   expect(html).not.toMatch(/(src|href)="\/assets/);
@@ -33,7 +34,7 @@ test('the build keeps relative URLs, no service worker, no crossorigin', () => {
   expect(main).toMatch(/url\(["']?\.?\/?archivo-latin/);
 });
 
-test('over file:// it boots to sign-in with drag regions and Archivo', async ({ page, context }) => {
+test('over file:// it boots to sign-in with drag regions and self-hosted fonts', async ({ page, context }) => {
   const external: string[] = [];
   await context.route(/^https?:/, (route) => {
     external.push(route.request().url());
@@ -51,6 +52,9 @@ test('over file:// it boots to sign-in with drag regions and Archivo', async ({ 
       getApiBaseUrl: () => 'http://127.0.0.1:9',
       getUserDataPath: () => '',
       onUpdateStatus: () => () => undefined,
+      getUpdateStatus: async () => ({ status: 'idle', currentVersion: '0.0.0-test', canInstall: false }),
+      getLastError: () => null,
+      reportBootIssue: () => undefined,
     };
   });
 
@@ -63,9 +67,9 @@ test('over file:// it boots to sign-in with drag regions and Archivo', async ({ 
   expect(page.url()).toContain('#/login');
 
   await page.evaluate(() => document.fonts.ready);
-  expect(await page.evaluate(() => document.fonts.check('16px Archivo'))).toBe(true);
+  expect(await page.evaluate(() => document.fonts.check('16px "Source Sans 3"'))).toBe(true);
   const family = await page.locator('body').evaluate((el) => getComputedStyle(el).fontFamily);
-  expect(family).toContain('Archivo');
+  expect(family).toContain('Source Sans 3');
   expect(errors).toEqual([]);
 });
 

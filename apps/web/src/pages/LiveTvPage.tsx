@@ -289,7 +289,7 @@ export default function LiveTvPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.2rem' }}>
             <span
               style={{
-                background: '#d97706',
+                background: '#b45309',
                 color: '#fff',
                 fontWeight: 700,
                 fontSize: '0.78rem',
@@ -379,7 +379,7 @@ export default function LiveTvPage() {
                   type="button"
                   onClick={() => selectClockMinutes(m)}
                   style={{
-                    background: clockDurationMin === m ? '#3b82f6' : '#0f172a',
+                    background: clockDurationMin === m ? '#1d4ed8' : '#0f172a',
                     color: '#e2e8f0',
                     border: '1px solid #334155',
                     borderRadius: '6px',

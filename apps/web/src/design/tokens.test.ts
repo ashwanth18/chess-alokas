@@ -102,8 +102,8 @@ describe('one place for the look', () => {
       const label = file.split(/[\\/]/).pop();
       expect(text, `${label}: hard-coded colour`).not.toMatch(/#[0-9a-fA-F]{3,8}\b(?!\w)|\brgba?\(|\bhsla?\(/);
       if (file.endsWith('.css')) {
-        expect(text, `${label}: hard-coded shadow`).not.toMatch(/box-shadow:\s*(?!var\(|inset 3px 0 0 var\(|none)/);
-        expect(text, `${label}: hard-coded radius`).not.toMatch(/border-radius:\s*(?!var\(|0\b)[^;]*\d/);
+        expect(text, `${label}: hard-coded shadow`).not.toMatch(/box-shadow:\s*(?!\s|var\(|inset 3px 0 0 var\(|none)/);
+        expect(text, `${label}: hard-coded radius`).not.toMatch(/border-radius:\s*(?!\s|var\(|0\b)[^;]*\d/);
       }
     }
   });

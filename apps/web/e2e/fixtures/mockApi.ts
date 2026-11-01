@@ -17,6 +17,9 @@ const API = 'http://localhost:3999';
 const SUPABASE = 'http://localhost:3998';
 const AUTH_KEY = 'sb-localhost-auth-token';
 
+/** The landing page reads the latest desktop release to link the installer. Nothing else may leave. */
+export const ALLOWED_EXTERNAL = 'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
+
 export type Mocks = {
   /** Every request that left the app's own origin and wasn't one of the two fake backends. */
   external: string[];
@@ -31,7 +34,9 @@ function json(body: unknown, status = 200) {
     status,
     contentType: 'application/json',
     headers: {
-      'access-control-allow-origin': '*',
+      // The analytics beacon sends credentials, which a wildcard origin would refuse.
+      'access-control-allow-origin': 'http://localhost:4179',
+      'access-control-allow-credentials': 'true',
       'access-control-allow-headers': '*',
       'access-control-allow-methods': '*',
     },
@@ -83,7 +88,7 @@ async function installMocks(page: Page, mocks: Mocks) {
       return route.continue();
     }
     if (url.startsWith('data:') || url.startsWith('blob:')) return route.continue();
-    mocks.external.push(url);
+    if (url !== ALLOWED_EXTERNAL) mocks.external.push(url);
     return route.abort();
   });
   await page.routeWebSocket(/.*/, () => {

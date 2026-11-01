@@ -55,6 +55,7 @@
   --piece-black: #000000;
 
   /* Shape and elevation */
+  --r-piece: 1px;
   --r-sm: 4px;
   --r: 8px;
   --r-lg: 14px;

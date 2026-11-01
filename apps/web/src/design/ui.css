@@ -68,7 +68,7 @@
 .ui-piece {
   display: inline-block; flex: none;
   width: 0.86em; height: 0.86em; min-width: 11px; min-height: 11px;
-  border: var(--border-control) solid var(--ink); border-radius: var(--r-sm); vertical-align: -0.06em;
+  border: var(--border-control) solid var(--ink); border-radius: var(--r-piece); vertical-align: -0.06em;
 }
 .ui-piece--white { background: var(--piece-white); }
 .ui-piece--black { background: var(--piece-black); }
