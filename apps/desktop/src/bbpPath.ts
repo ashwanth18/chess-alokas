@@ -22,6 +22,7 @@ export function resolveDesktopBbpBinary(): string | null {
     candidates.push(path.join(repoRoot, 'vendor', 'bbp-pairings', 'win-x64', exeName));
   } else if (process.platform === 'linux') {
     candidates.push(path.join(repoRoot, 'vendor', 'bbp-pairings', 'linux-x64', exeName));
+    candidates.push(path.join(repoRoot, 'vendor', 'bbp-pairings', 'linux-x64', 'bbpPairings'));
   }
 
   for (const p of candidates) {

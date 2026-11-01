@@ -60,6 +60,11 @@ export function clearBootIssue() {
   } catch {
     /* ignore */
   }
+  try {
+    window.desktop?.clearLastError?.();
+  } catch {
+    /* ignore */
+  }
   emit();
 }
 

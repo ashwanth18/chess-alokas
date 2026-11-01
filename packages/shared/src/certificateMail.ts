@@ -58,11 +58,10 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Plain text → simple HTML paragraphs; pass through if it already looks like HTML. */
+/** Plain text → simple HTML paragraphs with all HTML special characters escaped. */
 export function certBodyToHtml(body: string): string {
   const trimmed = body.trim();
   if (!trimmed) return '<p></p>';
-  if (/<[a-z][\s\S]*>/i.test(trimmed)) return trimmed;
   return trimmed
     .split(/\n{2,}/)
     .map((block) => `<p>${escapeHtml(block).replace(/\n/g, '<br/>')}</p>`)

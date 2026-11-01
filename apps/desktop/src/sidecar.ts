@@ -107,7 +107,9 @@ function resolveApiEntry(): { command: string; args: string[]; cwd: string; elec
     };
   }
 
-  const tsxCli = path.join(repoRootFromDev(), 'node_modules/tsx/dist/cli.mjs');
+  const apiTsx = path.join(apiPkg, 'node_modules/tsx/dist/cli.mjs');
+  const rootTsx = path.join(repoRootFromDev(), 'node_modules/tsx/dist/cli.mjs');
+  const tsxCli = fs.existsSync(apiTsx) ? apiTsx : rootTsx;
   const srcEntry = path.join(apiPkg, 'src/index.ts');
   return {
     command,

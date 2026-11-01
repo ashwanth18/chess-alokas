@@ -77,7 +77,9 @@ export function subscribeTournamentGames(
       },
       (payload) => {
         if (!alive) return;
-        const row = (payload.new ?? payload.old) as GameRow | null;
+        const row = (
+          payload.eventType === 'DELETE' ? payload.old : (payload.new ?? payload.old)
+        ) as GameRow | null;
         if (!row?.id) return;
         if (payload.eventType === 'DELETE') {
           void db.games.update(row.id, {

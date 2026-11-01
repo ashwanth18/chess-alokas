@@ -1,4 +1,5 @@
-import type { PairingBoard, PairingInput, PastGame, PlayerId } from '../swiss.js';
+import type { EnginePlayer, PairingBoard, PairingInput, PastGame, PlayerId } from '../swiss.js';
+import { compareRosterOrder } from '../roster.js';
 import { isPlayedResult } from './state.js';
 
 const BBP_VERSION = '6.0.0';
@@ -92,12 +93,35 @@ function gameForRound(
  * Players listed are those to pair; anyone missing a current-round cell is treated as present.
  */
 export function buildTrf(input: PairingInput): TrfBuildResult {
-  const sorted = [...input.players].sort((a, b) => {
-    const sa = a.seed ?? Number.MAX_SAFE_INTEGER;
-    const sb = b.seed ?? Number.MAX_SAFE_INTEGER;
+  const presentIds = new Set(input.players.map((p) => p.id));
+  const sortedPresent = [...input.players].sort((a, b) => {
+    const sa = a.seed != null && a.seed > 0 ? a.seed : Number.MAX_SAFE_INTEGER;
+    const sb = b.seed != null && b.seed > 0 ? b.seed : Number.MAX_SAFE_INTEGER;
     if (sa !== sb) return sa - sb;
-    return a.name.localeCompare(b.name);
+    return compareRosterOrder(a, b);
   });
+
+  const withdrawnStubs: EnginePlayer[] = [];
+  const knownIds = new Set(presentIds);
+
+  // Include any past opponents who are absent/withdrawn in `input.round` so
+  // their earlier games have valid opponent pairing numbers in the TRF table,
+  // and mark their current round cell with `0000 - Z` so bbpPairings skips them.
+  for (const g of input.pastGames) {
+    if (g.round >= input.round) continue;
+    for (const pid of [g.whiteId, g.blackId]) {
+      if (pid && !knownIds.has(pid)) {
+        knownIds.add(pid);
+        withdrawnStubs.push({
+          id: pid,
+          name: `Withdrawn ${withdrawnStubs.length + 1}`,
+          rating: 0,
+        });
+      }
+    }
+  }
+
+  const sorted = [...sortedPresent, ...withdrawnStubs];
 
   const pairingById = new Map<PlayerId, number>();
   const idByPairing = new Map<number, PlayerId>();
@@ -136,7 +160,11 @@ export function buildTrf(input: PairingInput): TrfBuildResult {
     const pid = pairingById.get(p.id)!;
     const pts = scoreOf(p.id, input.pastGames);
     const rating = Math.max(0, Math.min(9999, Math.round(p.rating ?? 0)));
-    const games = rounds.map((r) => gameForRound(p.id, r, input.pastGames, pairingById)).join('');
+    const pastCells = rounds
+      .map((r) => gameForRound(p.id, r, input.pastGames, pairingById))
+      .join('');
+    const currentRoundAbsentCell = presentIds.has(p.id) ? '' : gameCell(0, '-', 'Z');
+    const games = pastCells + currentRoundAbsentCell;
     const buf = Array.from({ length: 91 }, () => ' ');
     put(buf, 0, '001');
     put(buf, 4, String(pid).padStart(4, ' '));

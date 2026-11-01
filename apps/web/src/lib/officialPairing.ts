@@ -14,9 +14,23 @@ export async function pairRoundForUi(
     return pairRound(style, input);
   }
 
+  if (input.players.length === 0) {
+    return { boards: [], byePlayerId: null };
+  }
+  if (input.players.length === 1) {
+    const lone = input.players[0]!;
+    return {
+      boards: [{ board: 1, whiteId: lone.id, blackId: null, isBye: true }],
+      byePlayerId: lone.id,
+    };
+  }
+  if (input.totalRounds == null) {
+    throw new Error(`Dutch pairing requires totalRounds (got round ${input.round} with none set)`);
+  }
+
   const payload = {
     ...input,
-    totalRounds: input.totalRounds ?? input.round,
+    totalRounds: input.totalRounds,
   };
 
   const desktop = typeof window !== 'undefined' ? window.desktop : undefined;

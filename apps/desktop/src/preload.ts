@@ -40,6 +40,7 @@ export interface DesktopBridge {
     at: string;
     details?: string;
   } | null;
+  clearLastError: () => void;
   reportBootIssue: (issue: {
     code: string;
     message: string;
@@ -77,6 +78,9 @@ const bridge: DesktopBridge = {
   getLastError: () =>
     (ipcRenderer.sendSync('desktop:get-last-error') as ReturnType<DesktopBridge['getLastError']>) ??
     null,
+  clearLastError: () => {
+    ipcRenderer.send('desktop:clear-last-error');
+  },
   reportBootIssue: (issue) => {
     ipcRenderer.send('desktop:report-boot-issue', issue);
   },

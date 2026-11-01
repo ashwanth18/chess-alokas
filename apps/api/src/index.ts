@@ -37,6 +37,8 @@ app.addHook('preHandler', async (request) => {
       id: request.userId,
       email: request.user?.email ?? undefined,
     });
+  } else {
+    Sentry.setUser(null);
   }
 });
 

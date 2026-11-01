@@ -120,6 +120,7 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   function clearDirtyIfUnchanged<T extends { id: string; updatedAt: string; dirty: 1 | 0 }>(
     table: { where(index: string): { anyOf(keys: string[]): { modify(fn: (rec: T) => void): Promise<number> } } },
     snapshot: T[],
+    onCleared?: (rec: T) => void,
   ) {
     if (snapshot.length === 0) return Promise.resolve(0);
     const byId = new Map(snapshot.map((r) => [r.id, r.updatedAt]));
@@ -129,6 +130,7 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
       .modify((rec) => {
         if (byId.get(rec.id) === rec.updatedAt) {
           rec.dirty = 0;
+          onCleared?.(rec);
         }
       });
   }
@@ -140,13 +142,17 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
     }
     pushed = pushResult.data.accepted;
 
-    await clearDirtyIfUnchanged(db.tournaments, dirtyTournaments);
+    await clearDirtyIfUnchanged(db.tournaments, tournamentsToPush, (rec) => {
+      if (currentUserId && !rec.ownerId) {
+        rec.ownerId = currentUserId;
+      }
+    });
     await clearDirtyIfUnchanged(db.categories, dirtyCategories);
     await clearDirtyIfUnchanged(db.participants, dirtyParticipants);
     await clearDirtyIfUnchanged(db.games, dirtyGames);
   }
 
-  const since = (await getLastSyncAt()) ?? '1970-01-01T00:00:00.000Z';
+  const since = (await getLastSyncAt(currentUserId)) ?? '1970-01-01T00:00:00.000Z';
   const pullResult = await apiSyncPull(since);
 
   if (!pullResult.ok) {
@@ -157,7 +163,11 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
 
   for (const remote of tournaments) {
     const local = await db.tournaments.get(remote.id);
-    if (!local || remote.updatedAt > local.updatedAt) {
+    if (
+      !local ||
+      (local.dirty !== 1 &&
+        (remote.updatedAt > local.updatedAt || Boolean(remote.ownerId && !local.ownerId)))
+    ) {
       const prev = local;
       await db.tournaments.put({
         ...remote,
@@ -184,7 +194,7 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   }
   for (const remote of categories) {
     const local = await db.categories.get(remote.id);
-    if (!local || remote.updatedAt > local.updatedAt) {
+    if (!local || (local.dirty !== 1 && remote.updatedAt > local.updatedAt)) {
       await db.categories.put({
         ...remote,
         prizePlaces: remote.prizePlaces ?? null,
@@ -196,7 +206,7 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   }
   for (const remote of participants) {
     const local = await db.participants.get(remote.id);
-    if (!local || remote.updatedAt > local.updatedAt) {
+    if (!local || (local.dirty !== 1 && remote.updatedAt > local.updatedAt)) {
       const remoteRating =
         remote.rating != null && Number(remote.rating) > 0 ? Number(remote.rating) : null;
       const remoteFideId =
@@ -217,7 +227,7 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   }
   for (const remote of games) {
     const local = await db.games.get(remote.id);
-    if (!local || remote.updatedAt > local.updatedAt) {
+    if (!local || (local.dirty !== 1 && remote.updatedAt > local.updatedAt)) {
       await db.games.put({
         ...remote,
         resultLockedAt: remote.resultLockedAt ?? null,
@@ -234,7 +244,7 @@ async function syncOnlineImpl(): Promise<{ pushed: number; pulled: number }> {
   // Clean empty shell duplicates created by the old dual create (local UUID + POST /tournaments).
   await softDeleteEmptyDuplicateTournaments();
 
-  await setLastSyncAt(serverTime ?? new Date().toISOString());
+  await setLastSyncAt(serverTime ?? new Date().toISOString(), currentUserId);
 
   return { pushed, pulled };
 }

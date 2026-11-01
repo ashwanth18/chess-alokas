@@ -19,7 +19,7 @@ const RELEASES_API =
 
 const RELEASE_BASE =
   import.meta.env.VITE_DOWNLOAD_RELEASE_BASE ??
-  'https://github.com/ashwanth18/chess-alokas/releases/download/v0.1.7';
+  'https://github.com/ashwanth18/chess-alokas/releases/latest/download';
 
 interface DownloadOptionDef {
   id: OptionId;
@@ -78,8 +78,11 @@ const DOWNLOAD_OPTIONS: DownloadOptionDef[] = [
     platform: 'linux',
     label: 'AppImage',
     detail: 'Most distributions · x86_64',
-    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-linux-x86_64.AppImage`,
-    match: (n) => n.includes('appimage') || (n.includes('linux') && n.endsWith('.appimage')),
+    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-linux-x64.AppImage`,
+    match: (n) =>
+      (n.includes('appimage') || (n.includes('linux') && n.endsWith('.appimage'))) &&
+      !n.includes('blockmap') &&
+      !n.endsWith('.zsync'),
   },
 ];
 

@@ -583,7 +583,6 @@ export default function ImportPage() {
                   disabled={
                     importing ||
                     !mapping['name'] ||
-                    !mapping['age'] ||
                     (requiresLateWarning && !lateConfirmed)
                   }
                 >

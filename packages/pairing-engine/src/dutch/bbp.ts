@@ -79,6 +79,17 @@ export function bbpPairingsAvailable(): boolean {
 }
 
 export async function pairDutchWithBbp(input: PairingInput): Promise<PairingOutput> {
+  if (input.players.length === 0) {
+    return { boards: [], byePlayerId: null };
+  }
+  if (input.players.length === 1) {
+    const lone = input.players[0]!;
+    return {
+      boards: [{ board: 1, whiteId: lone.id, blackId: null, isBye: true }],
+      byePlayerId: lone.id,
+    };
+  }
+
   const exe = resolveBbpBinary();
   if (!exe) {
     throw new BbpPairingsError(

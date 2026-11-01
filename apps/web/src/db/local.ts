@@ -255,13 +255,15 @@ export async function getOrCreateClientId(): Promise<string> {
   return id;
 }
 
-export async function getLastSyncAt(): Promise<string | null> {
-  const rec = await db.meta.get('lastSyncAt');
+export async function getLastSyncAt(userId?: string | null): Promise<string | null> {
+  const key = userId ? `lastSyncAt:${userId}` : 'lastSyncAt';
+  const rec = await db.meta.get(key);
   return rec?.value ?? null;
 }
 
-export async function setLastSyncAt(ts: string): Promise<void> {
-  await db.meta.put({ key: 'lastSyncAt', value: ts });
+export async function setLastSyncAt(ts: string, userId?: string | null): Promise<void> {
+  const key = userId ? `lastSyncAt:${userId}` : 'lastSyncAt';
+  await db.meta.put({ key, value: ts });
 }
 
 export function nowIso(): string {

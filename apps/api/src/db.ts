@@ -223,7 +223,10 @@ export class MemoryStore implements Store {
   async upsertParticipants(participants: Participant[]): Promise<Participant[]> {
     for (const p of participants) {
       const existing = this.participants.get(p.id);
-      if (!existing || p.updatedAt > existing.updatedAt) {
+      if (
+        !existing ||
+        (existing.tournamentId === p.tournamentId && p.updatedAt > existing.updatedAt)
+      ) {
         this.participants.set(p.id, p);
       }
     }
@@ -506,11 +509,9 @@ export class MemoryStore implements Store {
 
   async pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void> {
     for (const item of items) {
-      if (item.entity === 'tournament' && ownerId) {
-        item.payload = { ...item.payload, ownerId };
-      }
-      if (item.entity !== 'tournament' && ownerId) {
-        const tid = String(item.payload['tournamentId'] ?? '');
+      if (ownerId) {
+        const tid =
+          item.entity === 'tournament' ? item.id : String(item.payload['tournamentId'] ?? '');
         const existing = this.tournaments.get(tid);
         // Soft-deleted rows are reclaimable by sync; only block a live tournament owned by someone else.
         if (
@@ -521,6 +522,9 @@ export class MemoryStore implements Store {
         ) {
           throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
         }
+        if (item.entity === 'tournament') {
+          item.payload = { ...item.payload, ownerId };
+        }
       }
       this.applySyncItem(item);
     }
@@ -529,12 +533,16 @@ export class MemoryStore implements Store {
   private applySyncItem(item: SyncPushItem): void {
     const { entity, id, payload, updatedAt, deletedAt } = item;
 
-    function applyIfNewer<T extends { updatedAt: string }>(
+    function applyIfNewer<T extends { updatedAt: string; tournamentId?: string }>(
       store: Map<string, T>,
       incoming: T,
     ): void {
       const existing = store.get(id);
-      if (!existing || incoming.updatedAt > existing.updatedAt) {
+      if (
+        !existing ||
+        (existing.tournamentId === incoming.tournamentId &&
+          incoming.updatedAt > existing.updatedAt)
+      ) {
         store.set(id, incoming);
       }
     }
@@ -580,6 +588,12 @@ export class MemoryStore implements Store {
       // Preserve server-owned live fields when client sync omits them.
       const prev = this.tournaments.get(id);
       if (prev) {
+        if (!prev.deletedAt && prev.ownerId && t.ownerId && prev.ownerId !== t.ownerId) {
+          return;
+        }
+        t.ownerId = prev.ownerId ?? t.ownerId ?? null;
+        t.arbiterPinRound = t.arbiterPinRound ?? prev.arbiterPinRound ?? null;
+        t.tableCount = Math.max(prev.tableCount ?? 0, t.tableCount ?? 0);
         t.publicToken = prev.publicToken ?? null;
         t.publicEnabled = prev.publicEnabled ?? false;
         t.certSerialNext = Math.max(prev.certSerialNext ?? 1, t.certSerialNext ?? 1);
@@ -970,11 +984,12 @@ export class PostgresStore implements Store {
 
   async createTournament(t: Tournament): Promise<Tournament> {
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, public_token, public_enabled, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, arbiter_pin_round, table_count, public_token, public_enabled, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
               ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
               ${t.tiebreakOrder ? this.j(t.tiebreakOrder) : null}, ${t.sharedPlaces ?? true},
-              ${t.ownerId ?? null}, ${t.publicToken ?? null}, ${t.publicEnabled ?? false},
+              ${t.ownerId ?? null}, ${t.arbiterPinRound ?? null}, ${Math.max(0, t.tableCount ?? 0)},
+              ${t.publicToken ?? null}, ${t.publicEnabled ?? false},
               ${t.certEmailSubject ?? null}, ${t.certEmailBody ?? null},
               ${t.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX},
               ${t.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD},
@@ -1004,6 +1019,8 @@ export class PostgresStore implements Store {
         tiebreak_order = ${m.tiebreakOrder ? this.j(m.tiebreakOrder) : null},
         shared_places = ${m.sharedPlaces ?? true},
         owner_id = ${m.ownerId ?? null},
+        arbiter_pin_round = ${m.arbiterPinRound ?? null},
+        table_count = GREATEST(COALESCE(tournaments.table_count, 0), ${Math.max(0, m.tableCount ?? 0)}),
         public_token = ${m.publicToken ?? null},
         public_enabled = ${m.publicEnabled ?? false},
         cert_email_subject = ${m.certEmailSubject ?? null},
@@ -1133,6 +1150,7 @@ export class PostgresStore implements Store {
           withdrawn_from_round = EXCLUDED.withdrawn_from_round,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
+          AND participants.tournament_id = EXCLUDED.tournament_id
         RETURNING *
       `;
       const row = rows[0];
@@ -1516,11 +1534,9 @@ export class PostgresStore implements Store {
     // ownership lookup per tournament id instead of one SELECT per item.
     const tournamentCache = new Map<string, Tournament | null>();
     for (const item of sorted) {
-      if (ownerId && item.entity === 'tournament') {
-        item.payload = { ...item.payload, ownerId };
-      }
-      if (ownerId && item.entity !== 'tournament') {
-        const tid = String(item.payload['tournamentId'] ?? '');
+      if (ownerId) {
+        const tid =
+          item.entity === 'tournament' ? item.id : String(item.payload['tournamentId'] ?? '');
         let existing = tournamentCache.get(tid);
         if (existing === undefined) {
           existing = await this.getTournament(tid);
@@ -1535,6 +1551,9 @@ export class PostgresStore implements Store {
           existing.ownerId !== ownerId
         ) {
           throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
+        }
+        if (item.entity === 'tournament') {
+          item.payload = { ...item.payload, ownerId };
         }
       }
       await this.applySyncItem(item);
@@ -1569,8 +1588,11 @@ export class PostgresStore implements Store {
         Math.max(1, Number(p['certSerialPad'] ?? DEFAULT_CERT_SERIAL_PAD) || DEFAULT_CERT_SERIAL_PAD),
       );
       const certNext = Math.max(1, Number(p['certSerialNext'] ?? 1) || 1);
+      const arbiterPinRound =
+        p['arbiterPinRound'] == null ? null : Number(p['arbiterPinRound']);
+      const tableCount = Math.max(0, Number(p['tableCount'] ?? 0) || 0);
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, arbiter_pin_round, table_count, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
@@ -1581,6 +1603,8 @@ export class PostgresStore implements Store {
                 ${p['tiebreakOrder'] ? this.j(p['tiebreakOrder']) : null},
                 ${p['sharedPlaces'] == null ? true : Boolean(p['sharedPlaces'])},
                 ${(p['ownerId'] as string) ?? null},
+                ${arbiterPinRound},
+                ${tableCount},
                 ${(p['certEmailSubject'] as string) ?? null},
                 ${(p['certEmailBody'] as string) ?? null},
                 ${certPrefix}, ${certPad}, ${certNext},
@@ -1595,7 +1619,9 @@ export class PostgresStore implements Store {
           award_scope = EXCLUDED.award_scope,
           tiebreak_order = EXCLUDED.tiebreak_order,
           shared_places = EXCLUDED.shared_places,
-          owner_id = COALESCE(EXCLUDED.owner_id, tournaments.owner_id),
+          owner_id = COALESCE(tournaments.owner_id, EXCLUDED.owner_id),
+          arbiter_pin_round = COALESCE(EXCLUDED.arbiter_pin_round, tournaments.arbiter_pin_round),
+          table_count = GREATEST(COALESCE(tournaments.table_count, 0), EXCLUDED.table_count),
           cert_email_subject = EXCLUDED.cert_email_subject,
           cert_email_body = EXCLUDED.cert_email_body,
           cert_serial_prefix = EXCLUDED.cert_serial_prefix,
@@ -1609,6 +1635,7 @@ export class PostgresStore implements Store {
             ELSE NULL
           END
         WHERE EXCLUDED.updated_at > tournaments.updated_at
+          AND (tournaments.owner_id IS NULL OR tournaments.owner_id = EXCLUDED.owner_id OR tournaments.deleted_at IS NOT NULL)
       `;
       // public_token / public_enabled are server-owned (enable/rotate/disable API only).
     } else if (entity === 'category') {
@@ -1625,6 +1652,7 @@ export class PostgresStore implements Store {
           prize_places = EXCLUDED.prize_places,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > categories.updated_at
+          AND categories.tournament_id = EXCLUDED.tournament_id
       `;
     } else if (entity === 'participant') {
       const customFields = (p['customFields'] as Record<string, unknown>) ?? {};
@@ -1663,6 +1691,7 @@ export class PostgresStore implements Store {
           withdrawn_from_round = EXCLUDED.withdrawn_from_round,
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
+          AND participants.tournament_id = EXCLUDED.tournament_id
       `;
     } else if (entity === 'game') {
       const enteredRole = p['resultEnteredByRole'];
@@ -1693,6 +1722,7 @@ export class PostgresStore implements Store {
           result_override_count = GREATEST(EXCLUDED.result_override_count, games.result_override_count),
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > games.updated_at
+          AND games.tournament_id = EXCLUDED.tournament_id
       `;
     }
   }

@@ -62,14 +62,14 @@ async function extractTarGz(archive, destDir) {
   await execFileAsync('tar', ['-xzf', archive, '-C', destDir]);
 }
 
-function findExe(dir, name) {
+function findFile(dir, allowedNames) {
   const stack = [dir];
   while (stack.length) {
     const cur = stack.pop();
     for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
       const p = path.join(cur, ent.name);
       if (ent.isDirectory()) stack.push(p);
-      else if (ent.name === name || ent.name === 'bbpPairings') return p;
+      else if (allowedNames.includes(ent.name)) return p;
     }
   }
   return null;
@@ -91,7 +91,7 @@ for (const key of keys) {
     await extractTarGz(archivePath, spec.destDir);
   }
 
-  const found = findExe(spec.destDir, spec.exeName);
+  const found = findFile(spec.destDir, [spec.exeName, 'bbpPairings']);
   if (!found) {
     throw new Error(`Could not find ${spec.exeName} after extracting ${archivePath}`);
   }
@@ -99,7 +99,7 @@ for (const key of keys) {
   if (path.resolve(found) !== path.resolve(dest)) {
     fs.copyFileSync(found, dest);
   }
-  const license = findExe(spec.destDir, 'LICENSE.txt') ?? findExe(spec.destDir, 'Apache-2.0.txt');
+  const license = findFile(spec.destDir, ['LICENSE.txt', 'Apache-2.0.txt']);
   if (license) {
     fs.copyFileSync(license, path.join(spec.destDir, 'LICENSE.txt'));
   }

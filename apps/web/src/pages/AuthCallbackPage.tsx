@@ -14,28 +14,52 @@ export default function AuthCallbackPage() {
       setError('Auth is not configured');
       return;
     }
+    const params = new URLSearchParams(window.location.search);
+    const errParam = params.get('error_description') || params.get('error');
+    if (errParam) {
+      reportBootIssue('AUTH_SESSION_FAILED', errParam);
+      setError(errParam);
+      return;
+    }
+
+    let settled = false;
+    const finishSuccess = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      navigate('/app', { replace: true });
+    };
+
     const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
       reportBootIssue(
         'AUTH_CALLBACK_TIMEOUT',
         'Sign-in callback did not finish within 12 seconds.',
       );
       setError('Sign-in is taking too long. Try again, or open chess-manager.alokas.com.');
     }, 12_000);
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) finishSuccess();
+    });
+
     void supabase.auth.getSession().then(({ data, error: err }) => {
-      window.clearTimeout(timer);
+      if (settled) return;
       if (err) {
+        settled = true;
+        window.clearTimeout(timer);
         reportBootIssue('AUTH_SESSION_FAILED', err.message);
         setError(err.message);
-      } else if (data.session) navigate('/app', { replace: true });
-      else {
-        reportBootIssue(
-          'AUTH_SESSION_FAILED',
-          'No session returned after sign-in redirect.',
-        );
-        setError('No session returned. Try signing in again.');
+      } else if (data.session) {
+        finishSuccess();
       }
     });
-    return () => window.clearTimeout(timer);
+    return () => {
+      settled = true;
+      window.clearTimeout(timer);
+      sub.subscription.unsubscribe();
+    };
   }, [navigate]);
 
   return (

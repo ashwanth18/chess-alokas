@@ -8,6 +8,7 @@ const FLAG = 'alokas-sw-cleared';
  */
 async function clearServiceWorkers(): Promise<boolean> {
   if (!('serviceWorker' in navigator)) return false;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return false;
   const regs = await navigator.serviceWorker.getRegistrations();
   await Promise.all(regs.map((r) => r.unregister()));
   if ('caches' in window) {

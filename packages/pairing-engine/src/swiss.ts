@@ -416,15 +416,19 @@ export function pairSwissRound(input: PairingInput): PairingOutput {
   let boardNum = 1;
 
   allPairs.sort((x, y) => {
+    const maxX = Math.max(x[0].score, x[1].score);
+    const maxY = Math.max(y[0].score, y[1].score);
+    if (maxY !== maxX) return maxY - maxX;
     const sx = x[0].score + x[1].score;
     const sy = y[0].score + y[1].score;
     if (sy !== sx) return sy - sx;
     if (isFirstRound(input)) {
       return Math.min(x[0].seed, x[1].seed) - Math.min(y[0].seed, y[1].seed);
     }
-    return (
-      Math.max(x[0].rating, x[1].rating) - Math.max(y[0].rating, y[1].rating)
-    );
+    const rx = Math.max(x[0].rating, x[1].rating);
+    const ry = Math.max(y[0].rating, y[1].rating);
+    if (ry !== rx) return ry - rx;
+    return Math.min(x[0].seed, x[1].seed) - Math.min(y[0].seed, y[1].seed);
   });
 
   for (const [a, b] of allPairs) {

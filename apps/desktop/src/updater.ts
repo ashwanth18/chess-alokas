@@ -238,7 +238,7 @@ function preferredInstallerName(): string {
       ? 'Chess-Alokas-mac-arm64.dmg'
       : 'Chess-Alokas-mac-x64.dmg';
   }
-  return 'Chess-Alokas-linux-x86_64.AppImage';
+  return 'Chess-Alokas-linux-x64.AppImage';
 }
 
 function pickInstallerAsset(assets: GithubReleaseAsset[] | undefined): GithubReleaseAsset | null {
@@ -271,8 +271,14 @@ function send(
     Partial<Pick<UpdateStatusPayload, 'canInstall' | 'previousVersion'>>,
   updater: AppUpdater | null,
 ) {
+  const preserveVersion =
+    payload.status === 'downloading' ||
+    payload.status === 'downloaded' ||
+    payload.status === 'available' ||
+    payload.status === 'error';
   lastStatus = {
     ...payload,
+    version: payload.version ?? (preserveVersion ? lastStatus.version : undefined),
     currentVersion: app.getVersion(),
     canInstall: payload.canInstall ?? canAutoInstall(updater),
     installerUrl: payload.installerUrl ?? pendingInstallerUrl ?? undefined,
@@ -436,6 +442,13 @@ async function downloadInstallerFile(
     await pipeline(nodeReadable, fileStream);
     if (fs.existsSync(dest)) fs.unlinkSync(dest);
     fs.renameSync(tmp, dest);
+    if (process.platform === 'linux') {
+      try {
+        fs.chmodSync(dest, 0o755);
+      } catch {
+        /* ignore */
+      }
+    }
 
     pendingLocalInstaller = dest;
     if (version) writePendingUpdate(version);
@@ -580,7 +593,7 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
   }
 
   async function download() {
-    if (canAutoInstall(autoUpdater)) {
+    if (canAutoInstall(autoUpdater) && !pendingInstallerUrl) {
       try {
         await autoUpdater!.downloadUpdate();
       } catch (err) {

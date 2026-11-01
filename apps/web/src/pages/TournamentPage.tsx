@@ -313,7 +313,15 @@ export default function TournamentPage() {
     tournament && categories && participants && games
       ? getNextPairingRound(maxRounds, categories, participants, games, mix)
       : null;
-  const absenceRound = nextPairingRound ?? Math.max(tournament?.currentRound ?? 1, 1);
+  const confirmedCount = tournament ? resolvedConfirmedRounds(tournament) : 0;
+  const currentRoundVal = tournament?.currentRound ?? 0;
+  // While the current paired round is still unconfirmed, absences/withdrawals
+  // on the Players tab apply to the active round in play rather than jumping
+  // ahead to `nextPairingRound`.
+  const absenceRound =
+    currentRoundVal >= 1 && confirmedCount < currentRoundVal
+      ? currentRoundVal
+      : (nextPairingRound ?? Math.max(currentRoundVal, 1));
 
   const caps =
     tournament && categories && participants && games
@@ -422,7 +430,7 @@ export default function TournamentPage() {
     const unsub = subscribeTournamentGames(id, (ok) => {
       realtimeOk = ok;
       if (cancelled) return;
-      if (!ok && backupHandle == null && tab === 'pairings') {
+      if (!ok && backupHandle == null) {
         backupHandle = window.setInterval(() => void tick(), 5_000);
       }
       if (ok && backupHandle != null) {
@@ -436,7 +444,7 @@ export default function TournamentPage() {
     const onFocus = () => void tick();
     window.addEventListener('focus', onFocus);
 
-    if (tab === 'pairings' && !realtimeOk) {
+    if (!realtimeOk && backupHandle == null) {
       backupHandle = window.setInterval(() => void tick(), 5_000);
     }
 
@@ -447,7 +455,7 @@ export default function TournamentPage() {
       if (backupHandle != null) window.clearInterval(backupHandle);
       window.removeEventListener('focus', onFocus);
     };
-  }, [id, tournament?.id, caps?.stage, floorTables?.length, tab]);
+  }, [id, tournament?.id, caps?.stage]);
 
   useEffect(() => {
     if (tournament?.deletedAt) {
@@ -501,7 +509,7 @@ export default function TournamentPage() {
       },
     );
 
-    if (!realtimeOk) {
+    if (!realtimeOk && pollHandle == null) {
       pollHandle = window.setInterval(() => void refreshCards(), 4_000);
     }
 
@@ -1141,7 +1149,19 @@ export default function TournamentPage() {
       }
       if (plan.kind === 'already_unpaired') return true;
       if (plan.kind === 'forfeit') {
-        requestGameResult(plan.gameId, plan.result);
+        const game = (games ?? []).find((g) => g.id === plan.gameId);
+        if (!game || !tournament || !canEditRoundResults(tournament, game.round)) {
+          return false;
+        }
+        const entered = game.result !== 'pending' && game.result !== 'bye';
+        const needsConfirm = Boolean(entered || game.resultLockedAt);
+        if (needsConfirm && game.result !== plan.result) {
+          const ok = window.confirm(
+            `Board ${game.board} already has result ${game.result}. Change it to ${plan.result} (forfeit) for ${player.name}?`,
+          );
+          if (!ok) return false;
+        }
+        await applyDirectorResult(plan.gameId, plan.result, needsConfirm, 'Marked absent/withdrawn');
         return true;
       }
       if (plan.kind === 'remove_bye') {
@@ -1168,7 +1188,7 @@ export default function TournamentPage() {
       }
       return true;
     },
-    [games, participants, requestGameResult],
+    [games, participants, tournament, applyDirectorResult],
   );
 
   const markAbsentThisRound = useCallback(

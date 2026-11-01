@@ -42,6 +42,15 @@ export function writeLastError(record: Omit<DesktopErrorRecord, 'at'> & { at?: s
   return next;
 }
 
+export function clearLastError(): void {
+  try {
+    const file = errorFile();
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch (err) {
+    log.warn('Could not clear last-error.json', err);
+  }
+}
+
 export async function openLogsFolder(): Promise<void> {
   const dir = path.join(app.getPath('userData'), 'logs');
   try {

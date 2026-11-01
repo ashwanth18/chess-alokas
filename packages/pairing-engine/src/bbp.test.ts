@@ -71,6 +71,30 @@ describe('TRF', () => {
     expect(out.byePlayerId).toBe('p3');
     expect(out.boards[1]?.isBye).toBe(true);
   });
+
+  it('orders unseeded players by rating descending and keeps withdrawn past opponents valid', () => {
+    const unseeded: EnginePlayer[] = [
+      { id: 'low', name: 'Aaron', rating: 1200 },
+      { id: 'high', name: 'Zara', rating: 1900 },
+      { id: 'mid', name: 'Bella', rating: 1500 },
+    ];
+    const past: PastGame[] = [
+      { round: 1, whiteId: 'high', blackId: 'withdrawn_p', result: '1-0', isBye: false },
+      { round: 1, whiteId: 'mid', blackId: 'low', result: '1-0', isBye: false },
+    ];
+    const { trf, pairingById } = buildTrf({
+      players: unseeded,
+      pastGames: past,
+      round: 2,
+      totalRounds: 5,
+    });
+    expect(pairingById.get('high')).toBe(1);
+    expect(pairingById.get('mid')).toBe(2);
+    expect(pairingById.get('low')).toBe(3);
+    expect(pairingById.get('withdrawn_p')).toBe(4);
+    expect(trf).not.toMatch(/0000 [wb] [10=]/);
+    expect(trf).toMatch(/0000 - Z/);
+  });
 });
 
 describe('bbpPairings v6', () => {
@@ -127,5 +151,26 @@ describe('bbpPairings v6', () => {
       const opp = board!.whiteId === id ? board!.blackId : board!.whiteId;
       expect(threePointers.has(opp!)).toBe(true);
     }
+  });
+
+  it.skipIf(!bbpPairingsAvailable())('pairs round 2 cleanly when a round 1 opponent withdraws', async () => {
+    const all = players(6);
+    const past: PastGame[] = [
+      { round: 1, whiteId: 'p1', blackId: 'p4', result: '1-0', isBye: false },
+      { round: 1, whiteId: 'p5', blackId: 'p2', result: '0-1', isBye: false },
+      { round: 1, whiteId: 'p3', blackId: 'p6', result: '1-0', isBye: false },
+    ];
+    // p4 withdraws before round 2; remaining 5 players are paired
+    const active = all.filter((p) => p.id !== 'p4');
+    const out = await pairDutchWithBbp({
+      players: active,
+      pastGames: past,
+      round: 2,
+      totalRounds: 5,
+    });
+    const pairedIds = out.boards.flatMap((b) => [b.whiteId, b.blackId].filter(Boolean));
+    expect(pairedIds).not.toContain('p4');
+    expect(pairedIds).toHaveLength(5);
+    expect(out.byePlayerId).not.toBeNull();
   });
 });

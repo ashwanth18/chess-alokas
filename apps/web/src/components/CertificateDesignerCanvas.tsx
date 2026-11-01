@@ -61,7 +61,18 @@ export default function CertificateDesignerCanvas({
   const displayHeight = displayWidth * (pageHeight / pageWidth);
 
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target.isContentEditable
+      );
+    };
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
       if (e.code === 'Space') {
         e.preventDefault();
         setSpaceDown(true);
@@ -80,25 +91,42 @@ export default function CertificateDesignerCanvas({
 
   useEffect(() => {
     let cancelled = false;
+    let loadingTask: ReturnType<typeof pdfjs.getDocument> | null = null;
+    let renderTask: { cancel: () => void; promise: Promise<void> } | null = null;
     async function render() {
       setRendering(true);
       setRenderError(null);
       try {
         const copy = new Uint8Array(templateBytes.byteLength);
         copy.set(templateBytes);
-        const loadingTask = pdfjs.getDocument({ data: copy });
+        loadingTask = pdfjs.getDocument({ data: copy });
         const pdf = await loadingTask.promise;
+        if (cancelled) {
+          void pdf.destroy();
+          return;
+        }
         const page = await pdf.getPage(1);
+        if (cancelled) {
+          void pdf.destroy();
+          return;
+        }
         // Render at high DPI for clarity; CSS size is separate
         const scale = (baseWidth * 2) / pageWidth;
         const viewport = page.getViewport({ scale });
         const canvas = canvasRef.current;
-        if (!canvas || cancelled) return;
+        if (!canvas || cancelled) {
+          void pdf.destroy();
+          return;
+        }
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) {
+          void pdf.destroy();
+          return;
+        }
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        renderTask = page.render({ canvasContext: ctx, viewport });
+        await renderTask.promise;
       } catch (err) {
         if (!cancelled) {
           setRenderError(err instanceof Error ? err.message : 'Failed to render PDF');
@@ -110,6 +138,16 @@ export default function CertificateDesignerCanvas({
     void render();
     return () => {
       cancelled = true;
+      try {
+        renderTask?.cancel();
+      } catch {
+        /* ignore */
+      }
+      try {
+        void loadingTask?.destroy();
+      } catch {
+        /* ignore */
+      }
     };
   }, [templateBytes, pageWidth]);
 

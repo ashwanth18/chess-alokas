@@ -202,6 +202,15 @@ export default function TableScoringPage() {
   );
 
   useEffect(() => {
+    setToken(slug ? loadSession(slug) : null);
+    setSelected(null);
+    setConfirming(false);
+    setCardPending(null);
+    setCardNote('');
+    setError(null);
+  }, [slug]);
+
+  useEffect(() => {
     const markOnline = () => {
       setOnline(true);
       void checkOnline().then(setOnline);

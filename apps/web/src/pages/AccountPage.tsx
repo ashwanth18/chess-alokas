@@ -36,6 +36,12 @@ function shortAgent(ua: string | null): string {
 export default function AccountPage() {
   const auth = useAuth();
   const [name, setName] = useState(auth.displayName ?? '');
+
+  useEffect(() => {
+    if (auth.displayName) {
+      setName((prev) => prev || auth.displayName || '');
+    }
+  }, [auth.displayName]);
   const [password, setPassword] = useState('');
   const [confirmDelete, setConfirmDelete] = useState('');
   const [busy, setBusy] = useState(false);

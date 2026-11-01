@@ -2,7 +2,7 @@
 
 **Read this first** when context is full or starting a new session on this repo.
 
-Last updated: 2026-08-18 (Dutch/bbpPairings, floor arbiter scoring, public live, cards, tiebreaks, admin/Sentry — desktop v0.1.53)
+Last updated: 2026-11-01 (Deep-scan fixes across Web/Desktop/Pairing/API + migration `023` — desktop v0.1.55)
 
 ## What this product is
 
@@ -30,7 +30,8 @@ Offline-first chess tournament manager with **per-manager accounts**:
 - [x] FIDE monthly rating lookup (via Lichess API, local CSV parse + bulk load)
 - [x] Platform admin dashboard: cross-account usage metrics, page-view analytics (`admin.ts`, `AdminPage.tsx`)
 - [x] Sentry error monitoring (free tier) — web, API, desktop
-- [ ] `scripts/replay-arcc-dutch.mts` — uncommitted validation tool replaying a real event through Dutch/bbp vs. actual results; runs clean via `npx tsx`, not yet committed
+- [x] Deep-scan security & workflow fixes across Web, Desktop, Pairing Engine, API, and DB (`023_fix_style_check_and_profiles_rls.sql`)
+- [x] `scripts/replay-arcc-dutch.mts` — validation tool replaying ARCC 2026 through Dutch/bbp vs. actual results
 
 ## Auth model
 

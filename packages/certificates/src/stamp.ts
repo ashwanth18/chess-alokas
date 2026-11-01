@@ -32,6 +32,30 @@ async function loadFont(
   }
 }
 
+function sanitizeForFont(text: string, font: PDFFont): string {
+  const normalized = text.normalize('NFKC');
+  let out = '';
+  for (const ch of normalized) {
+    try {
+      font.encodeText(ch);
+      out += ch;
+    } catch {
+      const stripped = ch.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+      let fallback = '';
+      for (const baseCh of stripped) {
+        try {
+          font.encodeText(baseCh);
+          fallback += baseCh;
+        } catch {
+          fallback += '?';
+        }
+      }
+      out += fallback;
+    }
+  }
+  return out;
+}
+
 function drawField(
   page: PDFPage,
   field: CertificateField,
@@ -40,12 +64,13 @@ function drawField(
   pageWidth: number,
   pageHeight: number,
 ): void {
-  if (!text) return;
+  const safeText = sanitizeForFont(text, font);
+  if (!safeText) return;
   const fontSize = field.fontSize;
   const maxWidth = (field.width ?? 0.8) * pageWidth;
-  let display = text;
+  let display = safeText;
   while (font.widthOfTextAtSize(display, fontSize) > maxWidth && display.length > 1) {
-    display = `${display.slice(0, -2)}…`;
+    display = `${display.slice(0, -2)}...`;
   }
 
   const textWidth = font.widthOfTextAtSize(display, fontSize);

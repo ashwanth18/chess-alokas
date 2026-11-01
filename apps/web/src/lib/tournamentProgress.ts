@@ -402,6 +402,13 @@ export function getCompletionBlockers(
       ).length;
       if (count < 2) continue;
       for (let r = 1; r <= tournament.rounds; r++) {
+        const availableInRound = players.filter(
+          (p) =>
+            !p.deletedAt &&
+            p.categoryIds?.includes(cat.id) &&
+            !isExcludedFromRound(p, r),
+        ).length;
+        if (availableInRound < 1) continue;
         if (!active.some((g) => g.round === r && g.categoryId === cat.id)) {
           blockers.push({
             type: 'unpaired_round',
@@ -513,6 +520,13 @@ export function getNextPairingRound(
         (p) => !p.deletedAt && p.categoryIds?.includes(cat.id),
       ).length;
       if (count < 2) continue;
+      const availableInRound = players.filter(
+        (p) =>
+          !p.deletedAt &&
+          p.categoryIds?.includes(cat.id) &&
+          !isExcludedFromRound(p, round),
+      ).length;
+      if (availableInRound < 1) continue;
       const hasRound = activeGames.some(
         (g) => !g.deletedAt && g.categoryId === cat.id && g.round === round,
       );

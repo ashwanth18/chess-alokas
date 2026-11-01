@@ -16,6 +16,16 @@ export function tablePublicUrl(slug: string): string {
   return `https://chess-manager.alokas.com/t/${slug}`;
 }
 
+function safeStickerText(text: string): string {
+  return (
+    text
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7E\xA0-\xFF]/g, '?')
+      .trim() || 'Tournament'
+  );
+}
+
 export async function buildTableStickerPdf(
   tournamentName: string,
   tables: StickerTable[],
@@ -23,6 +33,7 @@ export async function buildTableStickerPdf(
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
   const fontReg = await pdf.embedFont(StandardFonts.Helvetica);
+  const safeName = safeStickerText(tournamentName);
 
   // A6-ish sticker tiles: 4 per A4 page
   const pageWidth = 595.28;
@@ -67,7 +78,7 @@ export async function buildTableStickerPdf(
       borderWidth: 1.2,
     });
 
-    page.drawText(tournamentName.slice(0, 42), {
+    page.drawText(safeName.slice(0, 42), {
       x: x0 + 18,
       y: y0 + cellH - 36,
       size: 11,

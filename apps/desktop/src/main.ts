@@ -6,7 +6,7 @@ import log from 'electron-log/main';
 import { startApiSidecar, type SidecarHandle } from './sidecar.js';
 import { getLastUpdateStatus, setupAutoUpdater, dismissJustUpdatedNotice } from './updater.js';
 import { installAppMenu } from './menu.js';
-import { openLogsFolder, readLastError, writeLastError } from './errors.js';
+import { clearLastError, openLogsFolder, readLastError, writeLastError } from './errors.js';
 import { pairDutchFromMain, type DesktopDutchInput } from './pairDutch.js';
 
 function isSafeExternalUrl(url: string): boolean {
@@ -63,7 +63,18 @@ const isDev = !app.isPackaged && process.env['ELECTRON_DEV'] !== '0';
 /** Packaged builds use the cloud API by default (no secrets on the device). */
 const useLocalSidecar = isDev || process.env['DESKTOP_LOCAL_API'] === '1';
 
-const updater = setupAutoUpdater(() => mainWindow);
+// Only initialize the auto-updater when this process actually holds the
+// single-instance lock; otherwise a duplicate launch would consume and delete
+// pending-update.json / last-seen-version.txt before quitting.
+const updater = gotLock
+  ? setupAutoUpdater(() => mainWindow)
+  : {
+      check: async () => {},
+      download: async () => {},
+      install: async () => {},
+      openDownloadPage: async () => {},
+      announceJustUpdated: () => {},
+    };
 
 function loadFailHtml(message: string): string {
   const safe = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -120,6 +131,9 @@ function registerIpc() {
   ipcMain.handle('desktop:dismiss-just-updated', () => dismissJustUpdatedNotice());
   ipcMain.on('desktop:get-last-error', (event) => {
     event.returnValue = readLastError();
+  });
+  ipcMain.on('desktop:clear-last-error', () => {
+    clearLastError();
   });
   ipcMain.on('desktop:report-boot-issue', (_event, issue) => {
     if (!issue || typeof issue !== 'object') return;
@@ -193,12 +207,16 @@ async function createWindow() {
     if (
       url.startsWith('file:') ||
       url.startsWith('data:') ||
-      (isDev && /^https?:\/\/localhost(?::\d+)?\//i.test(url))
+      (isDev && /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\//i.test(url))
     ) {
       return;
     }
     event.preventDefault();
     if (isSafeExternalUrl(url)) void shell.openExternal(url);
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 
   mainWindow.webContents.on(
@@ -244,10 +262,6 @@ async function createWindow() {
       : path.join(__dirname, '../../web/dist/index.html');
     await mainWindow.loadFile(indexHtml);
   }
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
 }
 
 async function boot() {

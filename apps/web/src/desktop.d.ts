@@ -39,6 +39,7 @@ export interface DesktopBridge {
     at: string;
     details?: string;
   } | null;
+  clearLastError?: () => void;
   reportBootIssue: (issue: {
     code: string;
     message: string;

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import Papa from 'papaparse';
+import { useAuth } from '../auth/AuthContext';
 import { computeStandings, computeSectionStandings } from '@chess-alokas/pairing-engine';
 import {
   collectColumns,
@@ -120,7 +121,12 @@ function certRowCategoryId(id: string): string | null {
   return id.includes(':') ? id.slice(0, id.indexOf(':')) : null;
 }
 
-function issueMatchesRow(issue: ListedIssue, row: CertRow): boolean {
+function issueMatchesRow(
+  issue: ListedIssue,
+  row: CertRow,
+  expectedType?: 'participation' | 'winner',
+): boolean {
+  if (expectedType && issue.type !== expectedType) return false;
   const pid = certRowParticipantId(row.id);
   const catId = certRowCategoryId(row.id);
   const uuid = /^[0-9a-f-]{36}$/i.test(pid);
@@ -138,8 +144,14 @@ function issueMatchesRow(issue: ListedIssue, row: CertRow): boolean {
   return Boolean(name && issueName && name === issueName && !email && !issueEmail);
 }
 
-function issuesForSelectedRows(issues: ListedIssue[], selected: CertRow[]): ListedIssue[] {
-  return issues.filter((issue) => selected.some((row) => issueMatchesRow(issue, row)));
+function issuesForSelectedRows(
+  issues: ListedIssue[],
+  selected: CertRow[],
+  expectedType?: 'participation' | 'winner',
+): ListedIssue[] {
+  return issues.filter((issue) =>
+    selected.some((row) => issueMatchesRow(issue, row, expectedType)),
+  );
 }
 
 function recipientExtra(row: CertificateRow): string {
@@ -211,19 +223,21 @@ function FontSizeControl({
 }
 
 export default function CertificatesPage() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const tournamentId = searchParams.get('tournament') ?? '';
   const [highlightTournamentPicker, setHighlightTournamentPicker] = useState(false);
+  const reservedSerialsRef = useRef<Map<string, string>>(new Map());
 
   const tournaments = useLiveQuery(
     () =>
       db.tournaments
-        .filter((t) => !t.deletedAt)
+        .filter((t) => !t.deletedAt && (!user?.id || !t.ownerId || t.ownerId === user.id))
         .toArray()
         .then((list) =>
           list.sort((a, b) => (b.date ?? b.updatedAt ?? '').localeCompare(a.date ?? a.updatedAt ?? '')),
         ),
-    [],
+    [user?.id],
   );
 
   const tournament = useLiveQuery(
@@ -365,6 +379,10 @@ export default function CertificatesPage() {
     return formatCertificateSerial(prefixDraft, next, pad, year);
   }, [prefixDraft, padDraft, tournament?.date, tournament?.certSerialNext]);
 
+  useEffect(() => {
+    reservedSerialsRef.current.clear();
+  }, [tournamentId, mode]);
+
   const rebuildTournamentRows = useCallback(() => {
     if (!tournament || !participants) return;
     const mix = isMixedTournament(tournament);
@@ -377,11 +395,16 @@ export default function CertificatesPage() {
     const pad = tournament.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD;
     const next = tournament.certSerialNext ?? 1;
     const year = certificateYear(tournament.date);
-    const previewSerial = (i: number) => formatCertificateSerial(prefix, next + i, pad, year);
+    let unreservedIdx = 0;
+    const resolveSerial = (rowId: string) => {
+      const reserved = reservedSerialsRef.current.get(rowId);
+      if (reserved) return reserved;
+      return formatCertificateSerial(prefix, next + unreservedIdx++, pad, year);
+    };
 
     if (mode === 'participation') {
       setRows(
-        participants.map((p, i) => {
+        participants.map((p) => {
           const catNames = (categories ?? [])
             .filter((c) => p.categoryIds?.includes(c.id))
             .map((c) => c.name)
@@ -394,7 +417,7 @@ export default function CertificatesPage() {
               tournament: tournament.name,
               date: dateStr,
               category: catNames,
-              serial: previewSerial(i),
+              serial: resolveSerial(p.id),
             }),
           };
         }),
@@ -404,7 +427,6 @@ export default function CertificatesPage() {
 
     if (mode === 'winner' && games) {
       const nextRows: CertRow[] = [];
-      let serialIndex = 0;
       const enginePlayers = participants.map((p) => ({
         id: p.id,
         name: p.name,
@@ -439,7 +461,7 @@ export default function CertificatesPage() {
                 tournament: tournament.name,
                 date: dateStr,
                 category: 'Overall',
-                serial: previewSerial(serialIndex++),
+                serial: resolveSerial(s.id),
               }),
             });
           }
@@ -478,15 +500,16 @@ export default function CertificatesPage() {
                 );
             for (const s of winnersFromStandings(standings, catTop)) {
               const p = participants.find((x) => x.id === s.id);
+              const rowId = `${cat.id}:${s.id}`;
               nextRows.push({
-                id: `${cat.id}:${s.id}`,
+                id: rowId,
                 fileName: `${cat.name}_${s.rank}_${s.name}`,
                 email: p?.email ?? undefined,
                 row: winnerToRow(s, {
                   tournament: tournament.name,
                   date: dateStr,
                   category: cat.name,
-                  serial: previewSerial(serialIndex++),
+                  serial: resolveSerial(rowId),
                 }),
               });
             }
@@ -530,20 +553,35 @@ export default function CertificatesPage() {
 
   async function stampReservedSerials(source: CertRow[]): Promise<CertRow[]> {
     if (!tournamentId) return source;
-    const reserved = await apiReserveCertificateSerials(tournamentId, source.length);
-    if (!reserved.ok) {
-      throw new Error(reserved.error ?? 'Could not reserve certificate serials');
+    const unreserved = source.filter((r) => !reservedSerialsRef.current.has(r.id));
+    if (unreserved.length > 0) {
+      let serials: string[] | null = null;
+      const reserved = await apiReserveCertificateSerials(tournamentId, unreserved.length);
+      if (reserved.ok && reserved.data.serials.length === unreserved.length) {
+        serials = reserved.data.serials;
+      } else {
+        // Offline / unsynced tournament fallback: allocate locally from tournament settings
+        const prefix = tournament?.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX;
+        const pad = tournament?.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD;
+        const start = tournament?.certSerialNext ?? 1;
+        const year = certificateYear(tournament?.date);
+        serials = Array.from({ length: unreserved.length }, (_, i) =>
+          formatCertificateSerial(prefix, start + i, pad, year),
+        );
+      }
+      unreserved.forEach((r, i) => {
+        reservedSerialsRef.current.set(r.id, serials![i]!);
+      });
+      const currentNext = tournament?.certSerialNext ?? 1;
+      await persistTournament({ certSerialNext: currentNext + unreserved.length });
     }
-    const serials = reserved.data.serials;
-    if (serials.length !== source.length) {
-      throw new Error('Serial reservation returned the wrong count');
-    }
-    const currentNext = tournament?.certSerialNext ?? 1;
-    await persistTournament({ certSerialNext: currentNext + source.length });
-    return source.map((r, i) => ({
-      ...r,
-      row: { ...r.row, serial: serials[i]! },
-    }));
+    return source.map((r) => {
+      const serial = reservedSerialsRef.current.get(r.id) ?? String(r.row.serial ?? '');
+      return {
+        ...r,
+        row: { ...r.row, serial },
+      };
+    });
   }
 
   async function onTemplateFile(file: File) {
@@ -755,9 +793,12 @@ export default function CertificatesPage() {
     }
   }
 
+  const expectedIssueType: 'participation' | 'winner' | undefined =
+    mode === 'winner' ? 'winner' : mode === 'participation' ? 'participation' : undefined;
+
   const selectedIssues = useMemo(
-    () => issuesForSelectedRows(issues, selectedRows),
-    [issues, selectedRows],
+    () => issuesForSelectedRows(issues, selectedRows, expectedIssueType),
+    [issues, selectedRows, expectedIssueType],
   );
   const confirmPool = useMemo(
     () => pendingTargets(selectedIssues, resendEmailed),
@@ -830,7 +871,11 @@ export default function CertificatesPage() {
       return;
     }
     setIssues(listed.data.issues);
-    const matched = issuesForSelectedRows(listed.data.issues, selectedRows);
+    const matched = issuesForSelectedRows(
+      listed.data.issues,
+      selectedRows,
+      expectedIssueType,
+    );
     if (matched.length === 0) {
       setError('Issue digital for the selected people first.');
       return;
