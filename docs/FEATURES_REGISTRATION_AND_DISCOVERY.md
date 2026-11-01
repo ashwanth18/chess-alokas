@@ -90,3 +90,22 @@ Inside each tournament's **`Registrations`** tab:
 | `GET` | `/tournaments/:id/registrations` | `requireAuth` (owner/org) | List all registrations submitted for a tournament |
 | `POST` | `/tournaments/:id/registrations/:regId/review` | `requireAuth` (owner/org) | Approve, waitlist, or reject a registration; approval auto-creates the roster `Participant` |
 | `GET` | `/player/registrations` | `requireAuth` | List registrations submitted by or linked to the signed-in player/parent account |
+
+---
+
+## Registration review rules
+
+Each review runs in one transaction, locking the tournament and the registration.
+
+| Action | Allowed from |
+|--------|--------------|
+| Approve | `pending`, `waitlisted`, `rejected` |
+| Reject | `pending`, `waitlisted`, `approved` |
+| Waitlist | `pending`, `approved`, `rejected` |
+
+- Any other transition returns `409`, including approving an already approved registration and anything on a `cancelled` one.
+- Rejecting or waitlisting an approved registration soft-deletes its participant. If that player has games in a confirmed round, the review returns `409` and nothing changes.
+- Re-approving brings the same participant back.
+- `selectedCategoryId` must belong to the tournament, or registering returns `400`.
+- Approving a paid registration needs a receipt or `confirmPaymentWithoutReceipt: true`. Without either, it returns `409` and nothing changes.
+- The organizer list sets `possibleDuplicate` when another live registration has the same name and at least one of the two has no email. Both registrations stay allowed.

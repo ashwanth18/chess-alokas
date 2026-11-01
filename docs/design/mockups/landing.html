@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chess Alokas</title>
+<meta name="description" content="Chess tournament software for academies: Swiss pairings, floor result entry on phones, hall screens and parent pages. Keeps working when the Wi-Fi does not.">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/ds.css">
+<style>
+.wrap{max-width:1240px;margin:0 auto;padding:0 var(--s6)}
+.nav{display:flex;align-items:center;gap:var(--s5);height:64px;border-bottom:1px solid var(--rule)}
+.nav .mark{font-size:var(--t-lg);margin-right:auto}
+.nav a.l{color:var(--ink);text-decoration:none;font-weight:600;font-size:var(--t-md);padding:var(--s3) 0;min-height:44px;display:inline-flex;align-items:center}
+.nav a.l:hover{text-decoration:underline}
+.nav .btn{min-height:44px}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:var(--s8);padding:var(--s8) 0 var(--s9);align-items:start}
+.hero h1{font-size:clamp(44px,4.5vw,76px);margin-bottom:var(--s5)}
+.hero .sub{font-size:var(--t-xl);line-height:1.35;max-width:32em;color:var(--ink2);margin-bottom:var(--s6)}
+.cta{display:flex;gap:var(--s3);flex-wrap:wrap;margin-bottom:var(--s3)}
+.terms{font-size:var(--t-md);color:var(--ink2)}
+/* sheet demo */
+.sheet{border-top:3px solid var(--ink)}
+.sheet .hd{display:flex;justify-content:space-between;gap:var(--s3);align-items:baseline;padding:var(--s3) 0;flex-wrap:wrap}
+.sheet .hd b{font-weight:800;font-stretch:112%;font-size:var(--t-xl)}
+table.pt{width:100%;border-collapse:collapse;font-size:15px}
+.pt th.h{font-size:var(--t-xs);font-weight:600;color:var(--ink3);text-align:left;text-transform:uppercase;letter-spacing:.04em;padding:var(--s2) var(--s3);border-bottom:2px solid var(--ink)}
+.pt td,.pt th.bd{padding:var(--s3);border-bottom:1px solid var(--rule);vertical-align:top;line-height:1.25}
+.pt th.bd{text-align:right;font-weight:800;font-stretch:112%;width:40px;font-size:16px}
+.pt td.r{text-align:center;font-weight:700;width:110px;white-space:nowrap;color:var(--pen)}
+.pt td.r .e{color:var(--rule-strong);font-weight:400}
+.pt .pl{display:flex;gap:var(--s3);align-items:baseline}
+.pt tr.cur{background:var(--pen-wash);box-shadow:inset 3px 0 0 var(--pen)}
+.pt tr.cur .nm-p{color:var(--ink)}
+.rb{display:inline-flex;gap:1px;margin:-3px 0}.rb button{min-width:34px;height:30px;border:1px solid var(--pen);background:var(--paper);color:var(--pen);font-weight:700;font-size:var(--t-sm);cursor:pointer;padding:0 3px}
+.sheet .foot{display:flex;gap:var(--s4);padding:var(--s3) 0;font-size:var(--t-md);align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--ink)}
+.sheet .foot .ok{color:var(--go);font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.sheet .foot .wt{color:var(--wait);font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.sheet .foot button{min-height:44px;padding:0 var(--s4);margin-left:auto;background:none;border:1.5px solid var(--rule-strong);border-radius:var(--r);font-weight:600;cursor:pointer}
+.tryit{font-size:var(--t-md);color:var(--ink2);margin-top:var(--s3)}
+/* sections: ruled, not carded */
+section.band{border-top:2px solid var(--ink);padding:var(--s7) 0 var(--s8)}
+.band h2{font-size:clamp(28px,3vw,40px);margin-bottom:var(--s3);max-width:24em}
+.band .lede{font-size:var(--t-lg);color:var(--ink2);max-width:38em;margin-bottom:var(--s5)}
+.moments{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:var(--s5)}
+.moment{padding:var(--s4) var(--s5) var(--s4) 0;border-left:0}
+.moment+.moment{border-left:1px solid var(--rule);padding-left:var(--s5)}
+.moment h3{font-size:var(--t-lg);font-weight:800;margin-bottom:var(--s2)}
+.moment p{color:var(--ink2);font-size:15px}
+.moment .fig{height:172px;margin-bottom:var(--s4);border:1.5px solid var(--ink);overflow:hidden;position:relative;background:var(--paper)}
+.fig.mdw{background:#fff;color:#000;padding:var(--s3)}.fig.mdw .big{font-size:64px;font-weight:800;font-stretch:112%;line-height:1}
+.fig.tvf{background:#0A0A09;color:#fff;padding:var(--s3)}
+.tvf .rw{display:grid;grid-template-columns:26px 1fr;gap:8px;font-size:19px;font-weight:700;padding:4px 0;border-bottom:1px solid #3F3D37;line-height:1.1}
+.tvf .rw .n{font-weight:800;text-align:right;color:#fff}
+.fig.dsk{padding:var(--s3);font-size:12px}
+.fig.dsk .rw{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--rule);justify-content:space-between}
+.fig.dsk code{font:700 18px/1.2 var(--font);display:block;margin-bottom:var(--s2);border:1.5px solid var(--pen);padding:2px 6px;width:max-content}
+.fig.flr{padding:0}
+.flr .btnf{display:flex;justify-content:space-between;padding:10px 12px;font-weight:700;font-size:15px;border-bottom:1.5px solid #000}
+.flr .btnf.w{background:#fff;color:#000}.flr .btnf.d{background:var(--paper2)}.flr .btnf.b{background:#000;color:#fff}
+.flr .h{padding:8px 12px;font-weight:800;font-size:20px;font-stretch:112%}
+table.wifi{width:100%;border-collapse:collapse;margin-top:var(--s4);font-size:var(--t-body)}
+table.wifi th,table.wifi td{padding:var(--s3) var(--s4) var(--s3) 0;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+table.wifi thead th{font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.04em;color:var(--ink3);font-weight:600;border-bottom:2px solid var(--ink)}
+table.wifi tbody th{font-weight:700;width:30%}
+.twoc{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s8)}
+.facts{list-style:none;padding:0;margin:0}
+.facts li{padding:var(--s3) 0;border-bottom:1px solid var(--rule);display:flex;gap:var(--s4);justify-content:space-between}
+.facts b{font-weight:700}
+.parent{background:var(--ink);color:var(--on-ink);padding:var(--s6) 0}
+.parent .wrap{display:flex;justify-content:space-between;align-items:center;gap:var(--s5);flex-wrap:wrap}
+.parent h2{font-size:var(--t-3xl);color:inherit}
+.parent .btn{background:var(--on-ink);color:var(--ink);border-color:var(--on-ink)}
+.parent .btn:hover{background:var(--paper2);color:var(--ink)}
+footer{padding:var(--s6) 0;font-size:var(--t-md);color:var(--ink2)}
+footer .wrap{display:flex;gap:var(--s5);flex-wrap:wrap;justify-content:space-between}
+@media (max-width:1000px){.hero{grid-template-columns:1fr;gap:var(--s6);padding-top:var(--s6)}.moments{grid-template-columns:1fr 1fr}.moment:nth-child(3){border-left:0;padding-left:0}.twoc{grid-template-columns:1fr;gap:var(--s6)}}
+@media (max-width:640px){
+ .wrap{padding:0 var(--s4)}
+ .nav{gap:var(--s3)}.nav a.hidem,.nav button.hidem{display:none}
+ .hero h1{font-size:44px}.hero .sub{font-size:var(--t-lg)}
+ .cta .btn{width:100%}
+ .moments{grid-template-columns:1fr}.moment,.moment+.moment{border-left:0;padding:var(--s4) 0;border-top:1px solid var(--rule)}
+ .pt thead{display:none}
+ table.pt,table.pt tbody{display:block}
+ .pt tr{display:grid;grid-template-columns:36px minmax(0,1fr);padding:var(--s3) 0;border-bottom:1px solid var(--rule);row-gap:var(--s2)}
+ .pt th.bd,.pt td{display:block;padding:0;border:0;width:auto}
+ .pt th.bd{grid-row:1/4;text-align:left;font-size:20px}
+ .pt td.r{text-align:left;grid-column:2;order:3;width:auto}
+ .pt td.bl{order:2}
+ .rb{display:flex;margin:0}.rb button{flex:1;height:48px}
+ .pt tr.cur{padding-left:var(--s2)}
+ table.wifi thead{display:none}table.wifi,table.wifi tbody,table.wifi tr,table.wifi th,table.wifi td{display:block;width:auto;padding:0;border:0}table.wifi tr{padding:var(--s3) 0;border-bottom:1px solid var(--rule)}table.wifi td{margin-top:var(--s1);color:var(--ink2)}table.wifi tbody th{width:auto}
+ .sheet .foot button{margin-left:0;width:100%}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+ <header class="nav">
+  <a class="mark" href="index.html" data-mark>Chess Alokas</a>
+  <a class="l hidem" href="#hall">The hall</a>
+  <a class="l hidem" href="#wifi">When Wi-Fi drops</a>
+  <a class="l hidem" href="#start">Pricing and download</a>
+  <a class="l" href="register.html">Find a tournament</a>
+  <a class="l hidem" href="#">Sign in</a>
+  <button class="btn quiet hidem" data-cycle-theme style="min-height:44px"><span data-theme-label>Light</span></button>
+ </header>
+ <section class="hero">
+  <div>
+   <h1 class="display">Run the whole hall from a folding table.</h1>
+   <p class="sub">Pairings, results and standings for chess academies. Arbiters enter results on their phones, parents find the board on theirs, and the laptop keeps working when the venue Wi-Fi does not.</p>
+   <div class="cta"><a class="btn primary lg" href="round.html">Start a trial tournament</a><a class="btn lg" href="index.html">See the screens</a></div>
+   <p class="terms">Free trial: one tournament, up to 24 players. No card.</p>
+  </div>
+  <div>
+   <div class="sheet" id="demo" aria-label="Try the results sheet"></div>
+   <p class="tryit" id="tryit">Try it: press <kbd>1</kbd> White won, <kbd>0</kbd> Black won, <kbd>=</kbd> draw. Then pull the Wi-Fi.</p>
+  </div>
+ </section>
+ <section class="band" id="hall">
+  <h2 class="display">One round, four people, four screens.</h2>
+  <p class="lede">Everyone sees only what they need right now. Publish the round once, and all of it updates together.</p>
+  <div class="moments">
+   <div class="moment"><div class="fig dsk"><code>14 1</code><div class="rw"><span>Bd 14 White won. Enter to save.</span></div><div class="rw"><span>Bd 15</span><span>½ – ½</span></div><div class="rw"><span>Bd 16</span><span>—</span></div><div class="rw"><span>Bd 17</span><span>1 – 0</span></div></div><h3>Director at the desk</h3><p>One screen says what happens next. Slips arrive out of order, so you type the board and the result. No mouse needed for a whole round.</p></div>
+   <div class="moment"><div class="fig flr"><div class="h">Board 14</div><div class="btnf w"><span>White won</span><span>1–0</span></div><div class="btnf d"><span>Draw</span><span>½–½</span></div><div class="btnf b"><span>Black won</span><span>0–1</span></div></div><h3>Arbiter on the floor</h3><p>One PIN for the round. Tap the board, tap the result, with five seconds to undo. No Wi-Fi? The phone holds on to it and says so.</p></div>
+   <div class="moment"><div class="fig mdw"><div style="font-weight:600;font-size:13px">Board</div><div class="big">14</div><div style="font-weight:800;font-size:20px;margin-top:6px">Your child plays White</div><div style="font-size:14px;margin-top:4px">Against #15, 2 points</div></div><h3>Parent in the queue</h3><p>Open the link once, pick your child, and the page remembers. Board, colour, opponent and rank. No app, no account.</p></div>
+   <div class="moment"><div class="fig tvf"><div class="rw"><span class="n">1</span><span>Yap Pin Yi</span></div><div class="rw"><span class="n">2</span><span>Tan Zwischen Zug</span></div><div class="rw"><span class="n">3</span><span>Lim Gambit Ling</span></div><div class="rw"><span class="n">4</span><span>Foo Passed Pawn</span></div><div class="rw"><span class="n">5</span><span>Goh En Passant</span></div></div><h3>Children across the hall</h3><p>Plug in a TV or projector. Pairings, a find-your-name list and standings, sized to be read from the back row.</p></div>
+  </div>
+ </section>
+ <section class="band" id="wifi">
+  <h2 class="display">When the Wi-Fi drops, nothing stops.</h2>
+  <p class="lede">The laptop holds the tournament, not the cloud. Here is exactly what works and what waits.</p>
+  <table class="wifi"><thead><tr><th scope="col">If you are</th><th scope="col">Still works</th><th scope="col">Waits for the connection</th></tr></thead><tbody>
+   <tr><th scope="row">The director</th><td>Pairing, entering results, confirming rounds, standings, printing</td><td>Sending the new round to phones and the public page</td></tr>
+   <tr><th scope="row">A floor arbiter</th><td>Entering results, once the page is open and unlocked</td><td>Delivery to the desk. The phone shows how many are waiting.</td></tr>
+   <tr><th scope="row">A parent</th><td>The last board and standings they loaded, with the time shown</td><td>Anything newer</td></tr>
+  </tbody></table>
+ </section>
+ <section class="band" id="start">
+  <div class="twoc">
+   <div><h2 class="display">Pairings you can defend.</h2><p class="lede">FIDE Dutch rounds come from bbpPairings v6. Your own tiebreak order, card and forfeit handling, and a full record of who changed what.</p>
+    <ul class="facts"><li><b>Swiss and FIDE Dutch</b><span class="muted">Round robin coming</span></li><li><b>Tiebreaks</b><span class="muted">Buchholz, Cut 1, S-B, wins</span></li><li><b>Certificates</b><span class="muted">Design once, issue from standings</span></li><li><b>Registration</b><span class="muted">Link, DuitNow receipt, approval queue</span></li></ul></div>
+   <div><h2 class="display">Start small.</h2><p class="lede">Run your first event on a trial. We check your academy once, and that unlocks public listing and paid entries.</p>
+    <ul class="facts"><li><b>Trial</b><span class="muted">1 tournament, 24 players, private</span></li><li><b>Verified academy</b><span class="muted">Public listing, paid entries, more players</span></li><li><b>Desktop app</b><span class="muted">Windows, macOS, Linux</span></li><li><b>Browser</b><span class="muted">Nothing to install</span></li></ul>
+    <div class="cta" style="margin-top:var(--s5)"><a class="btn primary lg" href="round.html">Start a trial tournament</a><a class="btn lg" href="#">Download for Windows</a></div></div>
+  </div>
+ </section>
+</div>
+<section class="parent"><div class="wrap"><h2 class="display">Here for your child's tournament?</h2><a class="btn lg" href="matchday.html">Find your child's board</a></div></section>
+<footer><div class="wrap"><span>Chess Alokas · Fake data in this mockup</span><span><a href="index.html">All mockups</a></span></div></footer>
+<script src="assets/ds.js"></script>
+<script>
+const {nameHTML,sq,resText,simulate,newRound,esc}=CA;
+const s=simulate(2,CA.SEED);const B=newRound(s).filter(b=>b.sec==='U18').slice(0,5).map((b,i)=>({...b,bd:i+1}));B[0].res='1-0';B[1].res='1/2';
+const D={cur:2,off:false,q:0};
+const root=document.getElementById('demo');
+function rd(){const left=B.filter(b=>!b.res).length;
+ root.innerHTML=`<div class="hd"><b>Round 3</b><span class="muted">${left?left+' boards still playing':'All results in'}</span></div>
+ <table class="pt"><caption class="vh">Sample pairing sheet. Choose a result for the highlighted board.</caption><thead><tr><th class="h" scope="col" style="text-align:right">Bd</th><th class="h" scope="col">White</th><th class="h" scope="col" style="text-align:center">Result</th><th class="h" scope="col">Black</th></tr></thead><tbody>
+ ${B.map((b,i)=>`<tr class="${i===D.cur?'cur':''}" data-i="${i}"><th class="bd" scope="row">${b.bd}</th><td><div class="pl">${sq('w')}<div>${nameHTML(b.w.name)}</div></div></td><td class="r">${b.res?resText[b.res]:i===D.cur?`<span class="rb"><button data-r="1-0" aria-label="White won">1–0</button><button data-r="1/2" aria-label="Draw">½</button><button data-r="0-1" aria-label="Black won">0–1</button></span>`:'<span class="e">—</span>'}</td><td class="bl"><div class="pl">${sq('b')}<div>${nameHTML(b.b.name)}</div></div></td></tr>`).join('')}</tbody></table>
+ <div class="foot" role="status"><span class="ok"><span class="dot"></span>Saved on this laptop</span>${D.off?`<span class="wt"><span class="dot hollow"></span>No Wi-Fi. ${D.q} waiting to send.</span>`:`<span class="muted">Cloud has everything</span>`}<button id="pull" aria-pressed="${D.off}">${D.off?'Plug it back in':'Pull the Wi-Fi'}</button></div>`}
+function put(r){if(D.cur<0)return;B[D.cur].res=r;if(D.off)D.q++;const n=B.findIndex(b=>!b.res);D.cur=n;rd();if(n<0){document.getElementById('tryit').textContent=D.off?'Done, offline, and nothing lost. Plug it back in to send.':'That is a round. Now imagine eighteen boards and no mouse.'}}
+document.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey)return;if(/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName))return;if(e.key==='1')put('1-0');if(e.key==='0')put('0-1');if(e.key==='='||e.key==='5')put('1/2')});
+document.addEventListener('click',e=>{const t=e.target;let x;if(x=t.closest('[data-r]'))put(x.dataset.r);if(t.closest('#pull')){D.off=!D.off;if(!D.off)D.q=0;rd()}if((x=t.closest('tr[data-i]'))&&!t.closest('button')){const i=+x.dataset.i;if(!B[i].res){D.cur=i;rd()}}});
+rd();
+</script>
+</body>
+</html>

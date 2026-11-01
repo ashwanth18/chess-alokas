@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Round Desk</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/ds.css">
+<style>
+html,body{height:100%}
+body{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;height:100vh;font-size:var(--t-md)}
+/* top: event and timeline */
+.top{display:flex;align-items:stretch;gap:var(--s5);padding:0 var(--s5);border-bottom:1px solid var(--rule);min-height:44px}
+.top .mark{font-size:var(--t-md);align-self:center}
+.evname{align-self:center;font-weight:600;white-space:nowrap}
+.top nav{flex:1;min-width:0;display:flex}
+.tl{display:flex;align-items:stretch;margin:0;padding:0;list-style:none;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+.tl li{display:flex}
+.tl button{background:none;border:0;border-bottom:3px solid transparent;padding:0 var(--s3);font-size:var(--t-sm);font-weight:500;color:var(--ink2);cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px;min-height:44px}
+.tl button:hover{color:var(--ink);background:var(--paper2)}
+.tl button[aria-current="step"]{color:var(--ink);font-weight:700;border-bottom-color:var(--ink)}
+.tl .done::before{content:"";width:7px;height:7px;background:var(--ink3);display:inline-block}
+.tl .sep{color:var(--rule-strong);align-self:center;padding:0 2px;font-size:11px}
+.tl .rd{padding:0 7px;font-feature-settings:"tnum"}
+.tools{display:flex;align-items:center;gap:var(--s2);white-space:nowrap}
+.tools .btn{min-height:32px;padding:0 var(--s3);font-size:var(--t-sm)}
+/* now bar */
+.now{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:var(--s6);align-items:center;padding:var(--s4) var(--s5);border-bottom:2px solid var(--ink)}
+.now h1{font-size:var(--t-3xl)}
+.now p{margin-top:2px;color:var(--ink2);font-size:var(--t-md)}
+.loop{display:flex;list-style:none;margin:0;padding:0;font-size:var(--t-sm)}
+.loop li{padding:4px 10px;border:1px solid var(--rule);margin-left:-1px;color:var(--ink3);display:flex;gap:6px;align-items:center;white-space:nowrap}
+.loop li.done{color:var(--ink2)}
+.loop li.done::before{content:"";width:7px;height:7px;background:currentColor}
+.loop li.cur{background:var(--ink);color:var(--on-ink);border-color:var(--ink);font-weight:700}
+.nowact{display:flex;gap:var(--s3);align-items:center}
+/* work area */
+.work{display:grid;grid-template-columns:minmax(0,1fr) 312px;min-height:0}
+.main{overflow:auto;min-width:0;padding:0 var(--s5) var(--s6);container-type:inline-size}
+@container (min-width:860px){.pt .nm,.st .nm{font-stretch:100%}}
+.rail{border-left:1px solid var(--rule);overflow:auto;padding:var(--s4) var(--s5)}
+.bar{position:sticky;top:0;background:var(--paper);z-index:3;display:flex;flex-wrap:wrap;gap:var(--s3);align-items:center;padding:var(--s3) 0;border-bottom:1px solid var(--rule)}
+.slip{display:flex;align-items:center;gap:var(--s3);flex:1 1 320px;min-width:0}
+.slip label{font-size:var(--t-sm);font-weight:600;white-space:nowrap}
+.slip input{width:110px;min-height:36px;border:1.5px solid var(--rule-strong);border-radius:var(--r);padding:0 var(--s3);background:var(--paper);font-weight:700;font-size:var(--t-lg);font-feature-settings:"tnum"}
+.slip input:focus{border-color:var(--pen);outline:2px solid var(--pen);outline-offset:0}
+.slipecho{font-size:var(--t-sm);color:var(--ink2);min-width:0}
+.slipecho b{color:var(--pen);font-weight:700}
+.views,.secs{display:flex}
+.printb{min-height:32px}
+.views button,.secs button{min-height:32px;border:1px solid var(--rule-strong);background:none;margin-left:-1px;padding:0 var(--s3);font-size:var(--t-sm);font-weight:500;cursor:pointer}
+.views button[aria-pressed="true"],.secs button[aria-pressed="true"]{background:var(--ink);color:var(--on-ink);border-color:var(--ink);font-weight:700}
+/* the pairing table */
+table.pt{width:100%;border-collapse:collapse;table-layout:fixed;font-size:var(--name)}
+.pt th.h{font-size:var(--t-xs);font-weight:600;color:var(--ink3);text-align:left;padding:var(--s3) var(--s3) var(--s2);border-bottom:2px solid var(--ink);letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.pt .cb{width:46px}.pt .cp{width:40px}.pt .cr{width:128px}.pt .cs{width:64px}
+.pt tbody tr.board{border-bottom:1px solid var(--rule);cursor:default}
+.pt tbody tr.board:nth-child(4n+1) td,.pt tbody tr.board:nth-child(4n+1) th{}
+.pt td,.pt th.bd{padding:calc((var(--row) - 1.3em)/2) var(--s3);vertical-align:top;line-height:1.3}
+.pt th.bd{font-weight:800;font-stretch:112%;text-align:right;padding-right:var(--s4);font-size:1.05em}
+.pt td.p{text-align:right;color:var(--ink2);padding-left:0;padding-right:var(--s2)}
+.pt td.w,.pt td.b{padding-left:var(--s2)}
+.pt .pl{display:flex;gap:var(--s3);align-items:baseline}
+.pt .sq{position:relative;top:.05em}
+.pt td.r{text-align:center;font-weight:700;white-space:nowrap}
+.pt td.r .fresh{color:var(--pen)}
+.pt td.r .none{color:var(--rule-strong);font-weight:400}
+.pt td.s{font-size:var(--t-xs);color:var(--ink3);text-align:right;white-space:nowrap;padding-left:0}
+.pt tr.board.cur{background:var(--pen-wash);box-shadow:inset 3px 0 0 var(--pen)}
+.pt tr.board.cur td.p,.pt tr.board.cur td.s,.pt tr.board.cur .nm-p{color:var(--ink)}
+.pt tr.board.alert{box-shadow:inset 3px 0 0 var(--flag)}
+.pt tr.sech th{position:sticky;top:50px;background:var(--paper);text-align:left;padding:var(--s4) var(--s3) var(--s2);font-size:var(--t-sm);font-weight:700;border-bottom:1px solid var(--ink);z-index:2}
+.pt tr.sech .faint{font-weight:400}
+.rb{display:inline-flex;gap:1px;margin:-4px 0}
+.rb button{min-width:36px;height:28px;padding:0 4px;border:1px solid var(--pen);background:var(--paper);color:var(--pen);font-weight:700;font-size:var(--t-sm);cursor:pointer}
+.rb button:hover{background:var(--pen);color:var(--paper)}
+/* standings */
+table.st{width:100%;border-collapse:collapse;font-size:var(--name)}
+.st th.h{font-size:var(--t-xs);font-weight:600;color:var(--ink3);text-align:right;padding:var(--s3) var(--s3) var(--s2);border-bottom:2px solid var(--ink);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.st th.h.l,.st td.l{text-align:left}
+.st td,.st th.rk{padding:calc((var(--row) - 1.3em)/2) var(--s3);border-bottom:1px solid var(--rule);text-align:right;vertical-align:top;line-height:1.3;white-space:nowrap;font-weight:400}
+.st td.l{white-space:normal}
+.st .rk{font-weight:800;font-stretch:112%}
+.st .tot{font-weight:800}
+.st .x{color:var(--ink2);font-size:var(--t-sm)}
+.st .x .sq{margin-left:2px;width:9px;height:9px;min-width:9px;min-height:9px;border-width:1px}
+.st .x b{font-weight:700;color:var(--ink)}
+.st tr.prize td,.st tr.prize th{border-bottom:2px solid var(--ink)}
+.st .no{color:var(--ink3);font-size:var(--t-xs);margin-right:6px}
+.sech2{font-weight:700;font-size:var(--t-lg);margin:var(--s5) 0 0}
+/* rail */
+.rail h2{font-size:var(--t-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:0 0 var(--s3)}
+.rail section{padding-bottom:var(--s4);margin-bottom:var(--s4);border-bottom:1px solid var(--rule)}
+.need{display:grid;gap:var(--s2);padding:var(--s3);margin-bottom:var(--s3);border-left:3px solid var(--flag);background:var(--flag-wash)}
+.need b{font-weight:700}
+.need .acts{display:flex;gap:var(--s2);margin-top:var(--s2);flex-wrap:wrap}
+.need .btn{min-height:32px;padding:0 var(--s3);font-size:var(--t-sm);background:var(--paper)}
+.none-msg{color:var(--ink2);font-size:var(--t-sm)}
+.pin{font-size:34px;font-weight:800;font-stretch:112%;letter-spacing:.06em;font-feature-settings:"tnum";line-height:1.1}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px var(--s4);font-size:var(--t-sm)}
+.kv span:nth-child(even){text-align:right;font-weight:600}
+.rowbtns{display:flex;gap:var(--s2);margin-top:var(--s3);flex-wrap:wrap}
+.rowbtns .btn{min-height:32px;padding:0 var(--s3);font-size:var(--t-sm)}
+/* status */
+.status{display:flex;align-items:center;gap:var(--s5);padding:var(--s2) var(--s5);border-top:1px solid var(--ink);font-size:var(--t-sm);flex-wrap:wrap;min-height:34px;background:var(--paper2)}
+.status .st-i{display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.status .ok{color:var(--go);font-weight:600}.status .wt{color:var(--wait);font-weight:600}
+.status .demo{margin-left:auto;padding:1px var(--s3);border-radius:0}
+.status .demo button{min-height:24px}
+/* help */
+dialog{border:2px solid var(--ink);background:var(--paper);color:var(--ink);padding:var(--s6);max-width:560px;border-radius:var(--r)}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:var(--s3) var(--s5);margin:var(--s4) 0;align-items:baseline}
+/* phase panels */
+.panel{padding:var(--s5) 0;max-width:860px}
+.panel h2{font-size:var(--t-2xl);margin-bottom:var(--s2)}
+.simple{width:100%;border-collapse:collapse;margin-top:var(--s4)}
+.simple th{text-align:left;font-size:var(--t-xs);color:var(--ink3);text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--ink);padding:var(--s2) var(--s3);font-weight:600}
+.simple td{border-bottom:1px solid var(--rule);padding:var(--s3);vertical-align:top}
+/* narrow */
+@media (max-width:1180px){.loop{display:none}.now{grid-template-columns:minmax(0,1fr) auto}}
+@media (max-width:960px){
+ body{display:block;height:auto}
+ .work{display:block}.main{overflow:visible;padding:0 var(--s4) var(--s6)}.rail{border-left:0;border-top:2px solid var(--ink);padding:var(--s4)}
+ .now{padding:var(--s4)}.now h1{font-size:var(--t-2xl)}
+ .top{flex-wrap:wrap;padding:0 var(--s4);gap:0 var(--s3)}.evname{flex:1;font-size:var(--t-sm);padding:var(--s2) 0;white-space:normal}.top nav{order:5;flex-basis:100%}.main{container-type:normal}
+ #densBtn,#helpBtn{display:none}
+ .tools .btn{min-height:44px}.tl button{min-height:44px}
+ .bar{position:static}.slip{display:none}
+ .views button,.secs button{min-height:44px;padding:0 var(--s4)}
+ .status{position:sticky;bottom:0;z-index:5}
+ .status .demo button{min-height:32px}
+ .need .btn,.rowbtns .btn{min-height:44px}
+ .nowact .hide-n{display:none}
+ .now .btn.primary{min-height:48px}
+}
+@media (max-width:640px){
+ .now{grid-template-columns:1fr}
+ .now .btn.primary{width:100%}.nowact{display:block}
+ kbd{display:none}
+ table.pt,table.pt tbody,table.pt tr.board{display:block}
+ table.pt thead{display:none}
+ tr.sech,tr.sech th{display:block;position:static}
+ .pt tr.board{display:grid!important;grid-template-columns:44px minmax(0,1fr) 40px;grid-template-areas:"bd w wp" "bd b bp" "bd r r";padding:var(--s3) 0;row-gap:var(--s2);font-size:var(--t-body)}
+ .pt th.bd{grid-area:bd;font-size:var(--t-xl);padding:0;text-align:left;display:block}
+ .pt td{display:block;padding:0!important}
+ .pt td.w{grid-area:w}.pt td.b{grid-area:b}.pt td.p.wp{grid-area:wp}.pt td.p.bp{grid-area:bp}.pt td.r{grid-area:r;text-align:left}.pt td.s{display:none}
+ .rb button{min-width:0;flex:1;height:48px;font-size:var(--t-body)}.rb{display:flex;width:100%;margin:0}.bar .printb{min-height:44px}.pt tr.board.cur{padding-left:var(--s3);padding-right:var(--s2)}
+ .pt td.r{min-height:0}
+ .st .xc{display:none}
+ .status .demo{margin-left:0}
+ .status{gap:2px var(--s3);padding:var(--s2) var(--s4)}.status .st-i{white-space:normal}.status .st-i:nth-of-type(3){display:none}
+}
+@media print{
+ body{display:block;height:auto;font-size:11pt;background:#fff;color:#000}
+ .top,.now,.rail,.status,.bar,.pt .cs,.pt td.s{display:none!important}
+ .work,.main{display:block;overflow:visible;padding:0}
+ .printhead{display:block!important;margin-bottom:8pt}
+ .pt tr.board{break-inside:avoid}
+ .pt tr.board.cur{background:none;box-shadow:none}
+}
+.printhead{display:none}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="mark" href="index.html" data-mark aria-label="Chess Alokas, back to mockup index"></a>
+  <div class="evname">Imaginary Bay Junior Rapid</div>
+  <nav aria-label="Tournament timeline"><ol class="tl" id="tl"></ol></nav>
+  <div class="tools">
+    <button class="btn quiet" id="densBtn" title="Row density"><span id="densLbl">Desk rows</span></button>
+    <button class="btn quiet" data-cycle-theme><span data-theme-label>Light</span></button>
+    <button class="btn quiet" id="helpBtn" aria-haspopup="dialog">Keys <kbd>?</kbd></button>
+  </div>
+</header>
+<section class="now" aria-label="Right now">
+  <div><h1 class="display" id="nowH"></h1><p id="nowP"></p></div>
+  <ol class="loop" id="loop" aria-label="Round steps"></ol>
+  <div class="nowact" id="nowAct"></div>
+</section>
+<div class="work">
+  <main class="main" id="main"></main>
+  <aside class="rail" id="rail" aria-label="Needs you, floor and hall screen"></aside>
+</div>
+<footer class="status" role="status" aria-live="polite" id="status"></footer>
+<dialog id="help" aria-labelledby="helpT">
+  <h2 id="helpT" style="font-size:var(--t-2xl);font-weight:800">Keys for the desk</h2>
+  <div class="keys">
+    <span><kbd>↑</kbd> <kbd>↓</kbd></span><span>Move between boards</span>
+    <span><kbd>1</kbd></span><span>White won, then jump to the next empty board</span>
+    <span><kbd>0</kbd></span><span>Black won</span>
+    <span><kbd>=</kbd> or <kbd>5</kbd></span><span>Draw</span>
+    <span><kbd>F</kbd></span><span>Forfeit options for this board</span>
+    <span><kbd>Backspace</kbd></span><span>Clear this result</span>
+    <span><kbd>U</kbd></span><span>Undo the last entry</span>
+    <span><kbd>/</kbd></span><span>Slip entry: type <b>14 1</b> then Enter, for slips that arrive out of order</span>
+    <span><kbd>S</kbd></span><span>Swap pairings and standings</span>
+    <span><kbd>Enter</kbd></span><span>Do the main action shown top right</span>
+  </div>
+  <form method="dialog"><button class="btn primary">Close</button></form>
+</dialog>
+<script src="assets/ds.js"></script>
+<script>
+const conflictCount=()=>S.alerts.filter(a=>a.conflict).length;
+const {esc,nameHTML,sq,pts,resText,resSpoken,simulate,newRound,applyResult,params}=CA;
+const S={round:4,total:5,stage:'play',view:'pairings',sec:'all',cursor:0,phase:'round',viewRound:null,offline:false,waiting:0,lastSent:'14:32',undo:null,pin:'406 318',slipEcho:'',alerts:[
+ {id:1,bd:7,kind:'Chief called',text:'Clock malfunction',who:'Arbiter Aini',ago:'2 min ago'},
+ {id:2,bd:12,kind:'Two results disagree',text:'Desk says 1–0, floor phone says 0–1',who:'Arbiter Ravi',ago:'just now',conflict:true}],floorPaused:!!params.get('still'),floorIn:0};
+const sim=simulate(3,CA.SEED); S.sim=sim; S.boards=newRound(sim);
+const live=(r,src,state)=>({res:r,src,state:state||'sent'});
+[[1,'1-0'],[2,'1/2'],[3,'0-1'],[5,'1-0'],[6,'1-0'],[9,'1/2'],[10,'0-1'],[11,'1-0'],[14,'1-0'],[15,'1/2']].forEach(([b,r])=>Object.assign(S.boards[b-1],live(r,b<9?'Aini':'Ravi')));
+S.boards[3].res=null; S.boards[11].res='1-0';S.boards[11].src='desk';S.boards[11].state='sent';
+S.cursor=S.boards.findIndex(b=>!b.res);
+const $=id=>document.getElementById(id);
+const left=()=>S.boards.filter(b=>!b.res).length;
+function toast(msg){const e=$('live-msg');if(e)e.textContent=msg}
+function setResult(i,r,src){const b=S.boards[i];if(!b)return;S.undo={i,prev:{res:b.res,src:b.src,state:b.state}};b.res=r;b.src=src||'desk';b.state=S.offline?'queued':'sent';if(S.offline)S.waiting++;else S.lastSent=now();S.alerts=S.alerts.filter(a=>!(a.conflict&&a.bd===b.bd));}
+function now(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+function nextEmpty(from){const n=S.boards.length;const vis=visibleIdx();for(let k=1;k<=n;k++){const i=(from+k)%n;if(!S.boards[i].res&&vis.includes(i))return i}return -1}
+function visibleIdx(){return S.boards.map((b,i)=>i).filter(i=>S.sec==='all'||S.boards[i].sec===S.sec)}
+/* render */
+function renderTop(){
+ const phases=[['setup','Setup'],['reg','Registration'],['check','Check-in']];
+ let h=phases.map(([k,l])=>`<li><button class="done" data-phase="${k}" ${S.phase===k?'aria-current="step"':''}>${l}</button></li><li class="sep" aria-hidden="true">›</li>`).join('');
+ h+=`<li class="sep" style="padding-right:4px;font-size:12px;color:var(--ink3)">Rounds</li>`;
+ for(let r=1;r<=S.total;r++){const cur=S.phase==='round'&&(S.viewRound||S.round)===r;const dn=r<S.round||(r===S.round&&S.stage==='standings')||S.stage==='finished';const off=r>S.round;
+  h+=`<li><button class="rd ${dn?'done':''}" data-round="${r}" ${cur?'aria-current="step"':''} ${off?'disabled style="opacity:.45;cursor:default"':''} aria-label="Round ${r}">${r}</button></li>`}
+ h+=`<li class="sep" aria-hidden="true">›</li><li><button data-phase="finish" ${S.phase==='finish'?'aria-current="step"':''}>Finish</button></li>`;
+ $('tl').innerHTML=h;
+}
+function stageInfo(){const r=S.round,n=S.boards.length,l=left();
+ switch(S.stage){
+  case 'play':if(conflictCount()&&!l)return{h:`Round ${r}: settle ${conflictCount()} disagreement first`,p:'All results are in, but one board has two different results. The list on the right shows which.',btn:`Confirm round ${r}`,dis:true,step:3};return l?{h:`Round ${r}: ${l} ${l===1?'board':'boards'} still playing`,p:`${n-l} of ${n} results in. Enter slips here, or let the floor phones do it.`,btn:`Confirm round ${r}`,dis:true,step:2}:{h:`Round ${r}: all ${n} results in`,p:'Check the board list, then confirm. You can undo this until the next round is paired.',btn:`Confirm round ${r}`,step:3};
+  case 'standings':return r<S.total?{h:`Round ${r} confirmed. Standings are out.`,p:`Next is round ${r+1}. Mark anyone leaving before you pair.`,btn:`Pair round ${r+1}`,key:'P',step:4}:{h:'Final round confirmed',p:'Standings are final once you finish the tournament.',btn:'Finish and issue certificates',step:4};
+  case 'review':return{h:`Round ${r}: pairings ready to check`,p:'Nobody has seen these yet. Publishing sends them to the floor, the hall screen and parents together.',btn:`Publish round ${r}`,step:1};
+  case 'finished':return{h:'Tournament finished',p:'Final standings are published and certificates are ready to issue.',btn:'Back to round list',step:5};
+ }}
+function renderNow(){
+ if(S.viewRound&&S.viewRound!==S.round){$('nowH').textContent=`Round ${S.viewRound}, finished`;$('nowP').textContent=`Read only. Correcting a result here recalculates later tiebreaks, and you will be asked to confirm.`;$('nowAct').innerHTML=`<button class="btn" data-back>Back to round ${S.round}</button>`;$('loop').innerHTML='';return}
+ if(S.phase!=='round'){const m={setup:['Setup is done','Change round count, sections and tiebreaks until round 1 is published.'],reg:['Registration: 2 waiting for you','Approving adds the player to the list, and they join the next unpaired round at 0 points.'],check:['Check-in: 34 of 36 present','Round 4 was paired without the two who left.'],finish:['Finish','Available after the last round is confirmed.']}[S.phase];$('nowH').textContent=m[0];$('nowP').textContent=m[1];$('nowAct').innerHTML=`<button class="btn" data-back>Back to round ${S.round}</button>`;$('loop').innerHTML='';return}
+ const i=stageInfo();$('nowH').textContent=i.h;$('nowP').textContent=i.p;
+ $('nowAct').innerHTML=`${S.stage==='review'?'<button class="btn hide-n" data-repair>Re-pair</button>':''}<button class="btn primary lg" id="prim" ${i.dis?'disabled':''}>${esc(i.btn)} <kbd>${i.key||'Enter'}</kbd></button>`;
+ const steps=['Pair','Publish','Play','Confirm','Standings'];
+ $('loop').innerHTML=steps.map((s,k)=>`<li class="${k<i.step?'done':k===i.step?'cur':''}" ${k===i.step?'aria-current="step"':''}>${s}</li>`).join('');
+}
+function renderBar(){const rv=S.viewRound&&S.viewRound!==S.round;const entry=(S.stage==='play'&&!rv);
+ return `<div class="bar">${entry?`<div class="slip"><label for="slip">Slip <kbd>/</kbd></label><input id="slip" inputmode="numeric" autocomplete="off" placeholder="14 1" aria-describedby="slipEcho"><span class="slipecho" id="slipEcho">${S.slipEcho||'Board, then 1, 0 or = . Or just move with ↑↓ and press the result.'}</span></div>`:'<div class="slip"></div>'}
+ <div class="secs" role="group" aria-label="Section">${[['all','All'],['U12','U12'],['U18','U18']].map(([k,l])=>`<button aria-pressed="${S.sec===k}" data-sec="${k}">${l}</button>`).join('')}</div>
+ <div class="views" role="group" aria-label="View"><button aria-pressed="${S.view==='pairings'}" data-view="pairings">Pairings</button><button aria-pressed="${S.view==='standings'}" data-view="standings">Standings <kbd>S</kbd></button></div>
+ <button class="btn printb" onclick="window.print()">Print</button></div>`}
+function boardRow(b,i,o){const isCur=o.cur===i;const al=S.alerts.find(a=>a.bd===b.bd);
+ let r;
+ if(b.res){r=`<span class="${b.state==='locked'?'':'fresh'}">${resText[b.res]}</span><span class="vh">${resSpoken[b.res]}</span>`;}
+ else if(isCur&&S.stage==='play'){r=S.forf?`<span class="rb"><button data-r="1F" title="Black absent">W+</button><button data-r="0F" title="White absent">B+</button><button data-r="0-0" title="Both absent">Both</button></span>`:`<span class="rb"><button data-r="1-0" aria-label="White won">1–0</button><button data-r="1/2" aria-label="Draw">½</button><button data-r="0-1" aria-label="Black won">0–1</button></span>`}
+ else r=`<span class="none">${S.stage==='review'?'':'—'}</span><span class="vh">No result yet</span>`;
+ let src='';if(b.state==='queued')src=`<span class="chip wait" title="Saved on this laptop, not yet at the cloud"><span class="dot hollow"></span>here</span>`;else if(b.src&&b.src!=='desk')src=esc(b.src);else if(b.src==='desk')src='desk';
+ if(al)src=`<span class="chip flag">${al.conflict?'differs':'chief'}</span>`;
+ return `<tr class="board ${isCur?'cur':''} ${al?'alert':''}" data-i="${i}" ${isCur?'aria-current="true"':''}>
+ <th class="bd" scope="row"><span class="vh">Board </span>${b.bd}</th>
+ <td class="p wp"><span class="vh">White points </span>${pts(b.wp)}</td>
+ <td class="w"><div class="pl">${sq('w')}<div>${nameHTML(b.w.name)}</div></div></td>
+ <td class="r">${r}</td>
+ <td class="b"><div class="pl">${sq('b')}<div>${nameHTML(b.b.name)}</div></div></td>
+ <td class="p bp"><span class="vh">Black points </span>${pts(b.bp)}</td>
+ <td class="s">${src}</td></tr>`}
+function renderPairings(boards,cur,round,locked){const secs=S.sec==='all'?['U12','U18']:[S.sec];
+ const label={U12:'Under 12',U18:'Under 18'};
+ let body='';secs.forEach(s=>{const list=boards.map((b,i)=>[b,i]).filter(([b])=>b.sec===s);const dn=list.filter(([b])=>b.res).length;
+  body+=`<tr class="sech"><th colspan="7" scope="colgroup">${label[s]} <span class="faint">${dn} of ${list.length} in</span></th></tr>`;
+  list.forEach(([b,i])=>{body+=boardRow(locked?{...b,state:'locked',res:b.res}:b,i,{cur})})});
+ return `<div class="printhead"><b>Imaginary Bay Junior Rapid</b> · Round ${round} pairings</div><table class="pt"><caption class="vh">Round ${round} pairings. Each row is one board: White on the left, result in the middle, Black on the right.</caption>
+ <thead><tr><th class="h cb" scope="col" style="text-align:right">Bd</th><th class="h cp" scope="col" style="text-align:right">Pts</th><th class="h" scope="col">White</th><th class="h cr" scope="col" style="text-align:center">Result</th><th class="h" scope="col">Black</th><th class="h cp" scope="col" style="text-align:right">Pts</th><th class="h cs" scope="col" style="text-align:right">By</th></tr></thead><tbody>${body}</tbody></table>`}
+function standingsTable(players,sec,rounds){const by={};S.sim.all.forEach(p=>by[p.id]=p);
+ const bh=p=>p.hist.reduce((a,h)=>a+by[h.opp].pts,0);const sb=p=>p.hist.reduce((a,h)=>a+by[h.opp].pts*h.res,0);
+ const list=[...players].sort((a,b)=>b.pts-a.pts||bh(b)-bh(a)||sb(b)-sb(a)||a.no-b.no);
+ const key=p=>p.pts+'|'+bh(p)+'|'+sb(p);
+ const heads=Array.from({length:rounds},(_,i)=>`<th class="h xc" scope="col">R${i+1}</th>`).join('');
+ const rows=list.map((p,i)=>{const same=list.filter(q=>key(q)===key(p));const first=list.indexOf(same[0])+1;const rk=same.length>1?`${first}=`:String(first);
+  const cells=p.hist.map(h=>{const o=by[h.opp];return`<td class="x xc"><b>${h.res===1?'+':h.res===0?'−':'='}</b>${o.no}<span class="sq ${h.col}" aria-hidden="true"></span><span class="vh">${h.res===1?'won':h.res===0?'lost':'drew'} against number ${o.no} as ${h.col==='w'?'White':'Black'}</span></td>`}).join('');
+  return`<tr class="${i===2?'prize':''}"><th class="rk" scope="row">${rk}</th><td class="l"><span class="no">#${p.no}</span>${nameHTML(p.name)}</td><td class="tot">${pts(p.pts)}</td><td>${pts(bh(p))}</td><td>${pts(sb(p))}</td>${cells}</tr>`}).join('');
+ return`<table class="st"><caption class="vh">${sec} standings after round ${rounds}</caption><thead><tr><th class="h" scope="col" style="width:44px">Rk</th><th class="h l" scope="col">Player</th><th class="h" scope="col">Pts</th><th class="h" scope="col" title="Buchholz">BH</th><th class="h" scope="col" title="Sonneborn-Berger">SB</th>${heads}</tr></thead><tbody>${rows}</tbody></table>`}
+function renderStandings(){const label={U12:'Under 12',U18:'Under 18'};const secs=S.sec==='all'?['U12','U18']:[S.sec];const rounds=S.sim.all[0].hist.length;
+ return `<div class="printhead"><b>Imaginary Bay Junior Rapid</b> · Standings after round ${rounds}</div>`+secs.map(s=>`<h2 class="sech2">${label[s]} <span class="faint" style="font-weight:400;font-size:var(--t-md)">after round ${rounds}. Rule marks prize places.</span></h2>${standingsTable(S.sim.f[s],s,rounds)}`).join('')}
+function renderPhase(){
+ if(S.phase==='setup')return`<div class="panel"><table class="simple"><tbody><tr><th scope="row">Format</th><td>Swiss, FIDE Dutch pairing, 5 rounds</td></tr><tr><th scope="row">Sections</th><td>Under 12 (16 players), Under 18 (20 players)</td></tr><tr><th scope="row">Time control</th><td>15+5</td></tr><tr><th scope="row">Tiebreaks</th><td>Buchholz, Sonneborn-Berger, wins</td></tr></tbody></table></div>`;
+ if(S.phase==='reg')return`<div class="panel"><table class="simple"><caption class="vh">Registrations waiting for review</caption><thead><tr><th>Player</th><th>Section</th><th>Paid</th><th></th></tr></thead><tbody>
+  <tr><td>${nameHTML('Foo Passed Pawn Junior')}<br><span class="faint">Parent: +60 00-000 0000</span></td><td>Under 12</td><td>RM 30 <a href="#" onclick="return false">receipt</a></td><td><button class="btn" onclick="this.closest('tr').remove()">Approve <kbd>A</kbd></button></td></tr>
+  <tr><td>${nameHTML('Sharifah Petroff Aina binti Syed Perpetual Check')} <span class="chip wait">possible duplicate</span><br><span class="faint">Same name as #27, no email on this one</span></td><td>Under 18</td><td><span class="chip wait">No receipt</span></td><td><button class="btn" onclick="this.closest('tr').remove()">Approve</button></td></tr></tbody></table></div>`;
+ if(S.phase==='check')return`<div class="panel"><p class="muted">Type part of a name, press Enter to mark present.</p><input class="input" style="max-width:420px;margin-top:8px" placeholder="Find a player" aria-label="Find a player"><table class="simple"><tbody>${S.sim.all.slice(0,6).map(p=>`<tr><td><span class="faint">#${p.no}</span> ${nameHTML(p.name)}</td><td>${p.sec}</td><td><span class="chip go">Present</span></td></tr>`).join('')}</tbody></table></div>`;
+ return`<div class="panel"><p class="muted">Final standings, prize list and certificates live here after round ${S.total}.</p></div>`}
+let lastKey='';
+function renderMain(){
+ const m=$('main');const key=[S.phase,S.view,S.stage,S.round,S.viewRound].join();if(key!==lastKey){m.scrollTop=0;lastKey=key;requestAnimationFrame(()=>m.scrollTop=0)}
+ if(S.phase!=='round'){m.innerHTML=renderPhase();return}
+ if(S.viewRound&&S.viewRound!==S.round){const games=S.sim.hist[S.viewRound-1].map(g=>({...g,state:'locked'}));m.innerHTML=renderBar()+renderPairings(games,-1,S.viewRound,true);return}
+ if(S.view==='standings'){m.innerHTML=renderBar()+renderStandings();return}
+ m.innerHTML=renderBar()+renderPairings(S.boards,S.stage==='play'?S.cursor:-1,S.round,false);
+}
+function renderRail(){
+ const a=S.alerts;
+ const stateByArb=who=>S.boards.filter(b=>b.src===who).length;
+ $('rail').innerHTML=`<section aria-labelledby="nh"><h2 id="nh">Needs you</h2>${a.length?a.map(x=>`<div class="need" role="alert"><div><b>Board ${x.bd}: ${esc(x.kind)}</b></div><div>${esc(x.text)}</div><div class="faint" style="color:var(--ink2);font-size:var(--t-sm)">${esc(x.who)}, ${esc(x.ago)}</div><div class="acts">${x.conflict?`<button class="btn" data-keep="${x.id}" data-v="1-0">Keep 1–0</button><button class="btn" data-keep="${x.id}" data-v="0-1">Use 0–1</button>`:`<button class="btn" data-goto="${x.bd}">Go to board</button><button class="btn" data-resolve="${x.id}">Done</button>`}</div></div>`).join(''):'<p class="none-msg">Nothing right now.</p>'}</section>
+ <section aria-labelledby="fh"><h2 id="fh">Floor, round ${S.round}</h2><div class="pin" aria-label="Round PIN ${S.pin.replace(' ','')}">${S.pin}</div>
+ <div class="kv" style="margin-top:8px"><span>Aini, boards 1–8</span><span>${stateByArb('Aini')} in</span><span>Ravi, boards 9–18</span><span>${stateByArb('Ravi')} in</span></div>
+ <div class="rowbtns"><button class="btn" onclick="navigator.clipboard&&navigator.clipboard.writeText('${S.pin.replace(' ','')}');this.textContent='Copied'">Copy PIN</button><a class="btn" href="floor.html">Open floor view</a></div></section>
+ <section aria-labelledby="hh"><h2 id="hh">Hall screen</h2><div class="kv"><span>Showing</span><span>${S.stage==='standings'?'Standings':'Pairings, A–Z, standings'}</span></div><div class="rowbtns"><a class="btn" href="tv.html">Open on this screen</a></div></section>
+ <section style="border:0"><h2>Parents</h2><p class="none-msg">Matchday page updates when you publish. <a href="matchday.html">See what parents see</a></p></section>`;
+}
+function renderStatus(){
+ const off=S.offline,w=S.waiting;
+ $('status').innerHTML=`<span class="st-i ok"><span class="dot"></span>Everything saved on this laptop</span>
+ ${off?`<span class="st-i wt"><span class="dot hollow"></span>No connection. ${w?`${w} ${w===1?'result':'results'} will go to the cloud when it returns.`:'Nothing waiting to send.'}</span><span class="st-i muted">Floor phones keep their own results until then. The parents’ page stays at ${S.lastSent}.</span>`
+ :w?`<span class="st-i wt"><span class="dot hollow"></span>Sending ${w} to the cloud…</span>`:`<span class="st-i muted"><span class="dot" style="color:var(--go)"></span>Cloud has everything, as of ${S.lastSent}</span><span class="st-i muted">2 floor phones connected</span>`}
+ <span class="vh" id="live-msg"></span>
+ <span class="demo"><b>Mock only</b><button aria-pressed="${off}" id="wifi">${off?'Wi-Fi off':'Pull the Wi-Fi'}</button></span>`;
+}
+function render(keepFocus){renderTop();renderNow();renderMain();renderRail();renderStatus();
+ const c=document.querySelector('tr.board.cur');if(c&&keepFocus!==false)c.scrollIntoView({block:'nearest'});}
+function primary(){
+ if(S.phase!=='round')return;
+ if(S.stage==='play'&&!left()){S.boards.forEach(b=>applyResult(b.w,b.b,b.res));S.sim.hist.push(S.boards);S.stage='standings';S.view='standings';render();return}
+ if(S.stage==='standings'){if(S.round<S.total){S.round++;S.boards=newRound(S.sim);S.stage='review';S.view='pairings';S.cursor=0;S.alerts=[];render()}else{S.stage='finished';render()}return}
+ if(S.stage==='review'){S.stage='play';S.pin=String(100+Math.floor(Math.random()*899))+' '+String(100+Math.floor(Math.random()*899));S.cursor=0;render();return}
+}
+function enter(r){if(S.stage!=='play'||S.view!=='pairings')return;const i=S.cursor;if(i<0)return;const b=S.boards[i];setResult(i,r);S.forf=false;const n=nextEmpty(i);if(n>=0)S.cursor=n;render();toast(`Board ${b.bd}: ${resSpoken[r]}`)}
+function move(d){const v=visibleIdx();let p=v.indexOf(S.cursor);p=Math.max(0,Math.min(v.length-1,p+d));S.cursor=v[p];S.forf=false;render()}
+document.addEventListener('keydown',e=>{
+ if(e.ctrlKey||e.metaKey||e.altKey)return;
+ const dlg=$('help');if(dlg.open)return;
+ const t=e.target;
+ if(t.id==='slip'){
+  if(e.key==='Escape'||e.key==='ArrowDown'||e.key==='ArrowUp'){t.blur();e.preventDefault();return}
+  if(e.key==='Enter'){e.preventDefault();const m=parseSlip(t.value);if(m){setResult(m.i,m.r);S.slipEcho=`Saved: board ${S.boards[m.i].bd}, ${resSpoken[m.r]}. Next slip.`;S.cursor=nextEmpty(m.i)>=0?nextEmpty(m.i):S.cursor;render(false);const inp=$('slip');inp.focus()}else{if(t.value.trim()===''&&!left())primary()}}
+  return}
+ if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return;
+ if(t.tagName==='BUTTON'&&e.key==='Enter')return;
+ switch(e.key){
+  case'ArrowDown':case'j':move(1);e.preventDefault();break;
+  case'ArrowUp':case'k':move(-1);e.preventDefault();break;
+  case'1':enter('1-0');break;case'0':enter('0-1');break;case'=':case'5':case'd':enter('1/2');break;
+  case'f':case'F':S.forf=!S.forf;render();break;
+  case'Backspace':{const b=S.boards[S.cursor];if(b&&S.stage==='play'){S.undo={i:S.cursor,prev:{res:b.res,src:b.src,state:b.state}};b.res=null;b.src=null;b.state=null;render();}e.preventDefault();break}
+  case'u':case'U':if(S.undo){Object.assign(S.boards[S.undo.i],S.undo.prev);S.cursor=S.undo.i;S.undo=null;render()}break;
+  case'/':e.preventDefault();{const i=$('slip');if(i)i.focus()}break;
+  case's':case'S':S.view=S.view==='standings'?'pairings':'standings';render();break;
+  case'p':case'P':if(S.stage==='standings')primary();break;
+  case'Enter':if(document.getElementById('prim')&&!$('prim').disabled)primary();break;
+  case'?':$('help').showModal();break;
+ }
+});
+function parseSlip(v){const m=v.trim().match(/^(\d{1,3})[\s.,-]*([10=5dD]|½)$/);if(!m)return null;const i=S.boards.findIndex(b=>b.bd===+m[1]);if(i<0)return null;const r={'1':'1-0','0':'0-1','=':'1/2','5':'1/2','d':'1/2','D':'1/2','½':'1/2'}[m[2]];return{i,r}}
+document.addEventListener('input',e=>{if(e.target.id==='slip'){const m=parseSlip(e.target.value);const echo=$('slipEcho');if(m){const b=S.boards[m.i];const who=m.r==='1-0'?CA.splitName(b.w.name)[0]+' (White) won':m.r==='0-1'?CA.splitName(b.b.name)[0]+' (Black) won':'Draw';echo.innerHTML=`Board ${b.bd}: <b>${esc(who)}</b>${b.res?` <span class="chip wait">replaces ${resText[b.res]}</span>`:''}. Enter to save.`}else{const n=e.target.value.trim().match(/^(\d{1,3})$/);if(n){const b=S.boards.find(x=>x.bd===+n[1]);echo.innerHTML=b?`Board ${b.bd}: ${esc(CA.splitName(b.w.name)[0])} v ${esc(CA.splitName(b.b.name)[0])}. Now 1, 0 or =`:'No such board in this round.'}else if(!e.target.value)echo.textContent='Board, then 1, 0 or = . Or just move with ↑↓ and press the result.'}}});
+document.addEventListener('click',e=>{const t=e.target;let x;
+ if(x=t.closest('[data-r]')){e.stopPropagation();enter(x.dataset.r);return}
+ if(t.closest('#prim')){primary();return}
+ if(t.closest('[data-back]')){S.phase='round';S.viewRound=null;render();return}
+ if(t.closest('[data-repair]')){S.boards=newRound(S.sim);render();return}
+ if(t.closest('#helpBtn')){$('help').showModal();return}
+ if(t.closest('#densBtn')){const r=document.documentElement;const room=r.getAttribute('data-density')==='roomy';if(room)r.removeAttribute('data-density');else r.setAttribute('data-density','roomy');$('densLbl').textContent=room?'Desk rows':'Roomy rows';return}
+ if(x=t.closest('[data-sec]')){S.sec=x.dataset.sec;const v=visibleIdx();if(!v.includes(S.cursor))S.cursor=v[0];render();return}
+ if(x=t.closest('[data-view]')){S.view=x.dataset.view;render();return}
+ if(x=t.closest('[data-phase]')){S.phase=x.dataset.phase;S.viewRound=null;render();return}
+ if(x=t.closest('[data-round]')){if(x.disabled)return;S.phase='round';S.viewRound=+x.dataset.round===S.round?null:+x.dataset.round;render();return}
+ if(x=t.closest('[data-goto]')){S.view='pairings';S.sec='all';S.phase='round';S.cursor=+x.dataset.goto-1;render();return}
+ if(x=t.closest('[data-resolve]')){S.alerts=S.alerts.filter(a=>a.id!=+x.dataset.resolve);render();return}
+ if(x=t.closest('[data-keep]')){const a=S.alerts.find(q=>q.id==+x.dataset.keep);setResult(a.bd-1,x.dataset.v,'desk');S.alerts=S.alerts.filter(q=>q!==a);render();return}
+ if(t.closest('#wifi')){S.offline=!S.offline;if(!S.offline&&S.waiting){renderStatus();setTimeout(()=>{S.boards.forEach(b=>{if(b.state==='queued')b.state='sent'});S.waiting=0;S.lastSent=now();render(false)},1400);render(false)}else render(false);return}
+ if(x=t.closest('tr.board')){if(S.stage==='play'&&!S.viewRound&&S.view==='pairings'){S.cursor=+x.dataset.i;S.forf=false;render(false)}}
+});
+/* floor phones report in while you work (mock) */
+if(!S.floorPaused)setInterval(()=>{if(S.offline||S.stage!=='play'||S.phase!=='round')return;const free=S.boards.map((b,i)=>[b,i]).filter(([b,i])=>!b.res&&i!==S.cursor);if(free.length<3)return;const[b,i]=free[Math.floor(Math.random()*free.length)];b.res=Math.random()>.5?'1-0':'1/2';b.src=b.bd<9?'Aini':'Ravi';b.state='sent';S.lastSent=now();const f=document.activeElement&&document.activeElement.id==='slip';const v=f?$('slip').value:'';render(false);if(f){$('slip').focus();$('slip').value=v}toast(`Board ${b.bd} result in from the floor`)},11000);
+render();
+</script>
+</body>
+</html>

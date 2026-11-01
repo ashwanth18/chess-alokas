@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Register a Child</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/ds.css">
+<style>
+body{min-height:100dvh;display:flex;flex-direction:column;max-width:520px;margin:0 auto}
+.hd{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);border-bottom:1px solid var(--rule)}
+.hd .mark{flex:1;font-size:var(--t-md)}
+.lang{min-height:44px;background:none;border:1.5px solid var(--rule-strong);border-radius:var(--r);padding:0 var(--s3);font-size:var(--t-sm);font-weight:600;cursor:pointer}
+.ev{padding:var(--s5) var(--s4) var(--s4)}
+.ev h1{font-size:40px;margin-bottom:var(--s3);overflow-wrap:break-word}
+.ev .org{font-weight:600;font-size:var(--t-md);margin-bottom:var(--s2)}
+.facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--s2) var(--s4);border-top:2px solid var(--ink);margin-top:var(--s4);padding-top:var(--s3)}
+.facts dt{color:var(--ink2)}.facts dd{margin:0;font-weight:600}
+.facts dd small{display:block;font-weight:400;color:var(--ink2)}
+.prog{display:flex;align-items:baseline;gap:var(--s3);padding:var(--s3) var(--s4);border-bottom:2px solid var(--ink)}
+.prog b{font-size:var(--t-lg);font-weight:800;font-stretch:108%;flex:1;line-height:1.15}
+.prog span{font-size:var(--t-sm);color:var(--ink2);white-space:nowrap}
+.bars{display:flex;gap:2px;padding:0 var(--s4)}
+.bars i{flex:1;height:4px;background:var(--paper3)}
+.bars i.on{background:var(--ink)}
+main{flex:1;padding:var(--s4) var(--s4) var(--s3)}
+.saved{display:flex;gap:var(--s2);align-items:center;font-size:var(--t-sm);color:var(--go);font-weight:600;margin-bottom:var(--s4)}
+.prof{display:block;width:100%;text-align:left;min-height:64px;padding:var(--s3) var(--s4);background:none;border:1.5px solid var(--rule-strong);border-radius:var(--r);margin-bottom:var(--s2);cursor:pointer;font-size:var(--t-body);line-height:1.25}
+.prof small{display:block;color:var(--ink2);font-size:var(--t-sm)}
+.or{text-align:left;color:var(--ink2);font-size:var(--t-sm);margin:var(--s4) 0 var(--s3);border-top:1px solid var(--rule);padding-top:var(--s3)}
+.sec-box{border:1.5px solid var(--ink);padding:var(--s3) var(--s4);border-radius:var(--r);display:flex;gap:var(--s3);align-items:center;margin-bottom:var(--s5)}
+.sec-box div{flex:1;line-height:1.25}
+.sec-box b{font-weight:800;font-size:var(--t-lg)}
+.sec-box small{display:block;color:var(--ink2);font-size:var(--t-sm)}
+.sec-box select{min-height:44px;background:none;border:1px solid var(--rule-strong);border-radius:var(--r);padding:0 var(--s2);font-weight:600;font-size:var(--t-sm)}
+details{border-top:1px solid var(--rule);padding:var(--s3) 0}
+summary{min-height:44px;display:flex;align-items:center;font-weight:600;cursor:pointer;list-style:none;gap:var(--s3)}summary::-webkit-details-marker{display:none}summary::before{content:'+';font-weight:800;font-size:var(--t-xl);width:16px}details[open] summary::before{content:'−'}
+.act{position:sticky;bottom:0;background:var(--paper);padding:var(--s3) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom));border-top:1px solid var(--rule)}
+.act .btn{width:100%;min-height:56px}
+.act .alt{display:block;text-align:center;margin-top:var(--s2);min-height:44px;line-height:44px;font-weight:600;color:var(--ink2)}
+.amt{font-size:56px;font-weight:800;font-stretch:112%;line-height:1;font-feature-settings:"tnum"}
+.paybox{display:grid;grid-template-columns:150px minmax(0,1fr);gap:var(--s4);align-items:start;margin:var(--s4) 0}
+.qr{width:150px;height:150px;background:#fff;border:1.5px solid #000;padding:6px}
+.ref{display:flex;gap:var(--s3);align-items:center;background:var(--paper2);padding:var(--s3) var(--s4);margin:var(--s3) 0;border-radius:var(--r)}
+.ref .v{font-size:var(--t-xl);font-weight:800;flex:1;font-feature-settings:"tnum";letter-spacing:.02em}
+.ref small{display:block;font-size:var(--t-xs);font-weight:400;letter-spacing:0;color:var(--ink2)}
+ol.how{margin:var(--s3) 0 0;padding:0;list-style:none;counter-reset:s}
+ol.how li{counter-increment:s;display:flex;gap:var(--s3);padding:var(--s2) 0;align-items:baseline}
+ol.how li::before{content:counter(s);font-weight:800;min-width:1.2em}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2)}
+.pick label,.pick button{min-height:104px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1.5px solid var(--ink);border-radius:var(--r);background:none;font-weight:700;cursor:pointer;text-align:center;padding:var(--s2);font-size:var(--t-body)}
+.rec{display:grid;grid-template-columns:96px minmax(0,1fr);gap:var(--s4);align-items:start;margin:var(--s3) 0}
+.rec .th{width:96px;height:128px;border:1.5px solid var(--rule-strong);background:var(--paper2);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink2);text-align:center}
+.rec .th img{width:100%;height:100%;object-fit:cover}
+.up{height:6px;background:var(--paper3);margin:var(--s2) 0}
+.up i{display:block;height:100%;background:var(--pen);transition:width .2s linear}
+.done h2{font-size:var(--t-3xl);margin-bottom:var(--s2)}
+.tline{list-style:none;margin:var(--s4) 0;padding:0;border-left:3px solid var(--ink)}
+.tline li{padding:var(--s1) 0 var(--s4) var(--s6);position:relative;line-height:1.3}
+.tline li::before{content:"";position:absolute;left:-8px;top:12px;width:13px;height:13px;background:var(--ink)}
+.tline li.todo{color:var(--ink2)}.tline li.todo::before{background:var(--paper);border:2px solid var(--ink)}
+.tline li b{display:block;font-weight:700}
+.stack .btn{width:100%;min-height:52px;margin-bottom:var(--s2)}
+.need{padding:var(--s4)}.need ul{margin:var(--s2) 0 0;padding:0;list-style:none}.need li{padding:var(--s2) 0;border-bottom:1px solid var(--rule)}
+.err{color:var(--flag);font-weight:600;margin:-8px 0 var(--s4);font-size:var(--t-sm)}
+.input.bad{border-color:var(--flag)}
+@media (min-width:900px){
+ body{max-width:1040px;display:grid;grid-template-columns:minmax(0,1fr) 480px;grid-template-rows:auto minmax(0,1fr);column-gap:var(--s8);padding:0 var(--s6)}
+ .hd{grid-column:1/-1}
+ .ev{padding:var(--s8) 0 var(--s6);grid-column:1;grid-row:2}
+ .ev h1{font-size:64px}
+ .flow{grid-column:2;grid-row:2;border-inline:1px solid var(--rule);display:flex;flex-direction:column;min-height:calc(100dvh - 62px)}
+}
+</style>
+</head>
+<body>
+<div id="app" style="display:contents"></div>
+<script src="assets/ds.js"></script>
+<script>
+const {esc,nameHTML,params,store}=CA;
+const STR={
+ en:{org:'Pretend Academy',title:'Imaginary Bay Junior Rapid',when:'When',where:'Where',fee:'Entry',fmt:'Format',feev:'RM 30 per child',feeh:'Pay by DuitNow, upload the receipt',deadline:'Closes',start:'Register a child',needt:'About two minutes. Have ready:',need:["Your child's name and year of birth",'A WhatsApp number','Your banking app, to pay RM 30 by DuitNow'],signin:'Have an account? Sign in',steps:['Who is playing?','How do we reach you?','Pay the entry fee','Add your receipt'],of:(a,b)=>`Step ${a} of ${b}`,savedphone:'Saved on this phone, so you can leave and come back.',saved:'Your children',or:'Or a new player',name:'Full name',nameh:'As on MyKid or IC. This goes on the pairing list and the certificate.',yob:'Year of birth',gender:'Gender',boy:'Boy',girl:'Girl',secs:'Section',secauto:y=>`Born ${y}, so under 12 this year`,change:'Change',more:'School, club, FIDE ID (optional)',school:'School',club:'Club or academy',fide:'FIDE ID',next:'Continue',back:'Back',phone:'WhatsApp number',phoneh:'The organiser messages you here about the receipt or the schedule.',email:'Email (optional)',emailh:'For the digital certificate.',amt:'Amount',qrh:'Scan or save this QR',saveqr:'Save QR to phone',refl:'Reference',refh:'Put this in the bank transfer note',copy:'Copy',copied:'Copied',how:['Open your banking or e-wallet app','Scan the saved QR, pay RM 30','Screenshot the receipt, come back here'],paid:"I've paid, add receipt",later:'Pay later: the place is not held until you do',recp:'A screenshot is fine. We shrink it so it uploads on slow data.',cam:'Take a photo',gal:'Choose from gallery',sample:'Mock: use a sample receipt',uploading:'Uploading on slow data…',ready:'Receipt ready',replace:'Choose a different one',netfail:'No connection. Your receipt is safe on this phone and will send automatically. You can close this page.',send:'Send registration',donet:'Sent to Pretend Academy',doner:(c)=>`${c} is not on the list yet. The organiser checks your receipt first.`,t1:'Registration sent',t2:'Organiser checks the receipt',t2h:'Usually within a day. We message you on WhatsApp.',t3:'On the player list',t4:'Matchday: board, colour and opponent on your phone',another:'Register another child',share:'Send to my WhatsApp',md:'See the matchday page',saveacc:'Save these details to an account'},
+ ms:{org:'Pretend Academy',title:'Imaginary Bay Junior Rapid',when:'Bila',where:'Tempat',fee:'Yuran',fmt:'Format',feev:'RM 30 seorang',feeh:'Bayar melalui DuitNow, muat naik resit',deadline:'Tutup',start:'Daftarkan anak',needt:'Kira-kira dua minit. Sediakan:',need:['Nama dan tahun lahir anak anda','Nombor WhatsApp','Aplikasi bank anda, untuk bayar RM 30 melalui DuitNow'],signin:'Ada akaun? Log masuk',steps:['Siapa yang bermain?','Bagaimana kami boleh hubungi anda?','Bayar yuran penyertaan','Tambah resit anda'],of:(a,b)=>`Langkah ${a} daripada ${b}`,savedphone:'Disimpan dalam telefon ini, jadi anda boleh keluar dan kembali semula.',saved:'Anak-anak anda',or:'Atau pemain baharu',name:'Nama penuh',nameh:'Seperti dalam MyKid atau IC. Nama ini dipaparkan dalam senarai pasangan dan sijil.',yob:'Tahun lahir',gender:'Jantina',boy:'Lelaki',girl:'Perempuan',secs:'Kategori',secauto:y=>`Lahir ${y}, jadi bawah 12 tahun ini`,change:'Tukar',more:'Sekolah, kelab, ID FIDE (pilihan)',school:'Sekolah',club:'Kelab atau akademi',fide:'ID FIDE',next:'Teruskan',back:'Kembali',phone:'Nombor WhatsApp',phoneh:'Penganjur akan menghubungi anda di sini tentang resit atau jadual.',email:'E-mel (pilihan)',emailh:'Untuk sijil digital.',amt:'Jumlah',qrh:'Imbas atau simpan QR ini',saveqr:'Simpan QR ke telefon',refl:'Rujukan',refh:'Masukkan dalam nota pindahan bank',copy:'Salin',copied:'Disalin',how:['Buka aplikasi bank atau e-dompet anda','Imbas QR yang disimpan, bayar RM 30','Tangkap skrin resit, kembali ke sini'],paid:'Saya sudah bayar, tambah resit',later:'Bayar kemudian: tempat tidak dikhaskan sehingga anda bayar',recp:'Tangkapan skrin pun boleh. Kami kecilkan supaya mudah dimuat naik dengan data perlahan.',cam:'Ambil gambar',gal:'Pilih dari galeri',sample:'Mock: guna resit contoh',uploading:'Sedang dimuat naik dengan data perlahan…',ready:'Resit sedia',replace:'Pilih yang lain',netfail:'Tiada sambungan. Resit anda selamat dalam telefon ini dan akan dihantar secara automatik. Anda boleh tutup halaman ini.',send:'Hantar pendaftaran',donet:'Dihantar kepada Pretend Academy',doner:(c)=>`${c} belum tersenarai. Penganjur akan menyemak resit anda dahulu.`,t1:'Pendaftaran dihantar',t2:'Penganjur menyemak resit',t2h:'Biasanya dalam masa sehari. Kami akan hubungi anda melalui WhatsApp.',t3:'Dalam senarai pemain',t4:'Hari perlawanan: papan, warna dan lawan di telefon anda',another:'Daftarkan anak lain',share:'Hantar ke WhatsApp saya',md:'Lihat halaman hari perlawanan',saveacc:'Simpan maklumat ini ke akaun'}};
+const S={lang:params.get('lang')||'en',step:+params.get('step')||0,name:'',yob:'',g:'',phone:'',email:'',rec:null,prog:0,copied:false,err:{},ready:false};
+if(S.step>=3)Object.assign(S,{name:'Puteri Alekhine Damia binti Queen Gambit',yob:'2015',g:'F',phone:'+60 00-000 0000'});
+const t=()=>STR[S.lang];
+function qrSvg(){let s=12345;const r=()=>(s=(s*1664525+1013904223)>>>0)/4294967296;const n=29;let c='';const fin=(x,y)=>{c+=`<path d="M${x} ${y}h7v7h-7z" fill="#000"/><path d="M${x+1} ${y+1}h5v5h-5z" fill="#fff"/><path d="M${x+2} ${y+2}h3v3h-3z" fill="#000"/>`};
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){const inF=(x<8&&y<8)||(x>n-9&&y<8)||(x<8&&y>n-9);if(!inF&&r()>.52)c+=`<path d="M${x} ${y}h1v1h-1z" fill="#000"/>`}fin(0,0);fin(n-7,0);fin(0,n-7);
+ return`<svg viewBox="0 0 ${n} ${n}" role="img" aria-label="Sample payment QR, not a real code" shape-rendering="crispEdges">${c}</svg>`}
+const app=document.getElementById('app');
+function header(){return`<header class="hd"><a class="mark" href="index.html" data-mk>${CA.MARK}Chess Alokas</a><select class="lang" id="lang" aria-label="Language"><option value="en" ${S.lang==='en'?'selected':''}>English</option><option value="ms" ${S.lang==='ms'?'selected':''}>Bahasa Melayu</option></select><button class="lang" data-cycle-theme><span data-theme-label>Light</span></button></header>`}
+function eventBlock(){return`<section class="ev"><div class="org">${t().org}</div><h1 class="display">${t().title}</h1><dl class="facts"><dt>${t().when}</dt><dd>Sat 14 Nov 2026, 8:30am</dd><dt>${t().where}</dt><dd>Imaginary Bay Hall <small><a href="#" onclick="return false">Open in Maps</a></small></dd><dt>${t().fee}</dt><dd>${t().feev}<small>${t().feeh}</small></dd><dt>${t().fmt}</dt><dd>Swiss, 5 rounds, 15+5</dd><dt>${t().deadline}</dt><dd>Thu 12 Nov, 10pm</dd></dl></section>`}
+function stepView(){const st=S.step;const total=4;const prog=`<div class="prog"><b>${t().steps[st-1]}</b><span>${t().of(st,total)}</span></div><div class="bars" aria-hidden="true">${[1,2,3,4].map(i=>`<i class="${i<=st?'on':''}"></i>`).join('')}</div>`;
+ const m=(body,action)=>prog+`<main>${body}</main><div class="act">${action}</div>`;
+ const nav=(lbl,dis)=>`<button class="btn primary lg" id="next" ${dis?'disabled':''}>${lbl}</button>`;
+ if(st===1){const y=parseInt(S.yob,10);const hasY=y>1990&&y<2025;return m(`
+  <div class="saved"><span class="dot"></span>${t().savedphone}</div>
+  ${S.fam?`<div class="label" style="margin-bottom:var(--s2)">${t().saved}</div><button class="prof" data-prof>${nameHTML('Goh En Passant',{nofit:true})}<small>2014 · Under 12</small></button><div class="or">${t().or}</div>`:''}
+  <label class="field"><span class="lab">${t().name}</span><span class="hint">${t().nameh}</span><input class="input ${S.err.name?'bad':''}" id="fName" autocomplete="name" value="${esc(S.name)}"></label>
+  <div style="display:grid;grid-template-columns:120px minmax(0,1fr);gap:var(--s3)">
+   <label class="field"><span class="lab">${t().yob}</span><input class="input" id="fYob" inputmode="numeric" maxlength="4" value="${esc(S.yob)}" placeholder="2015"></label>
+   <div class="field"><span class="lab" id="gl">${t().gender}</span><div class="seg" role="group" aria-labelledby="gl"><button aria-pressed="${S.g==='M'}" data-g="M">${t().boy}</button><button aria-pressed="${S.g==='F'}" data-g="F">${t().girl}</button></div></div>
+  </div>
+  ${hasY?`<div class="sec-box"><div><span class="label">${t().secs}</span><br><b>${y>=2015?'Under 12':'Under 18'}</b><small>${y>=2015?t().secauto(y):''}</small></div><select aria-label="${t().change}"><option>${t().change}</option><option>Under 12</option><option>Under 18</option></select></div>`:''}
+  <details><summary>${t().more}</summary><label class="field" style="margin-top:var(--s3)"><span class="lab">${t().school}</span><input class="input"></label><label class="field"><span class="lab">${t().club}</span><input class="input"></label><label class="field"><span class="lab">${t().fide}</span><input class="input" inputmode="numeric"></label></details>
+  `,nav(t().next,!(S.name.trim().length>2&&hasY&&S.g)))}
+ if(st===2)return m(`<div class="saved"><span class="dot"></span>${t().savedphone}</div><label class="field"><span class="lab">${t().phone}</span><span class="hint">${t().phoneh}</span><input class="input" id="fPhone" inputmode="tel" autocomplete="tel" placeholder="+60" value="${esc(S.phone)}"></label><label class="field"><span class="lab">${t().email}</span><span class="hint">${t().emailh}</span><input class="input" id="fEmail" inputmode="email" autocomplete="email" value="${esc(S.email)}"></label>`,nav(t().next,S.phone.replace(/\D/g,'').length<8));
+ if(st===3)return m(`<div class="label">${t().amt}</div><div class="amt">RM 30.00</div>
+  <div class="paybox"><div class="qr">${qrSvg()}</div><div><p style="font-weight:600;margin-bottom:var(--s2)">${t().qrh}</p><button class="btn" style="min-height:48px;white-space:normal;line-height:1.15" id="saveQr">${t().saveqr}</button></div></div>
+  <div class="ref"><div class="v">CA-4821<small>${t().refl}: ${t().refh}</small></div><button class="btn" style="min-height:44px" id="copyRef">${S.copied?t().copied:t().copy}</button></div>
+  <ol class="how">${t().how.map(h=>`<li>${h}</li>`).join('')}</ol>
+  <div class="saved" style="margin:var(--s4) 0 0"><span class="dot"></span>${t().savedphone}</div>`,nav(t().paid)+`<a href="#" class="alt" id="later">${t().later}</a>`);
+ if(st===4){const has=!!S.rec;return m(`<p class="muted" style="margin-bottom:var(--s4)">${t().recp}</p>${has?`<div class="rec"><div class="th">${S.rec.url?`<img src="${S.rec.url}" alt="Your receipt">`:'Sample receipt RM 30.00'}</div><div><b style="font-weight:700">${S.prog>=100?t().ready:t().uploading}</b><div class="up" role="progressbar" aria-valuenow="${S.prog}" aria-valuemin="0" aria-valuemax="100"><i style="width:${S.prog}%"></i></div><div class="muted" style="font-size:var(--t-sm)">${esc(S.rec.name)} · 180 KB</div><button class="btn" style="margin-top:var(--s3);min-height:44px" id="repl">${t().replace}</button></div></div>`:
+  `<div class="pick"><label>${t().cam}<input class="vh" type="file" accept="image/*" capture="environment" id="fileCam"></label><label>${t().gal}<input class="vh" type="file" accept="image/*,application/pdf" id="fileGal"></label></div><button class="btn block" id="sampleReceipt" style="margin-top:var(--s3);min-height:48px;border-style:dashed">${t().sample}</button>`}`,nav(t().send,!(has&&S.prog>=100)))}
+ return''}
+function doneView(){return`<main class="done"><h2 class="display">${t().donet}</h2><p style="font-size:var(--t-lg);margin-bottom:var(--s3)">${t().doner(esc(CA.splitName(S.name)[0]))}</p>
+ <ol class="tline"><li><b>${t().t1}</b></li><li class="todo"><b>${t().t2}</b>${t().t2h}</li><li class="todo"><b>${t().t3}</b></li><li class="todo"><b>${t().t4}</b></li></ol>
+ <div class="stack"><button class="btn primary lg" id="another">${t().another}</button><button class="btn">${t().share}</button><a class="btn" href="matchday.html">${t().md}</a><button class="btn quiet">${t().saveacc}</button></div></main>`}
+function render(){const a=document.activeElement;const id=a&&a.id;const pos=a&&a.selectionStart;document.documentElement.lang=S.lang;
+ let flow;
+ if(S.step===0)flow=`<div class="need"><div class="label">${t().needt}</div><ul>${t().need.map(n=>`<li>${n}</li>`).join('')}</ul></div><div class="act" style="position:static;border:0"><button class="btn primary lg" id="startBtn">${t().start}</button><a href="#" class="alt" id="signin">${t().signin}</a></div>`;
+ else if(S.step===5)flow=doneView();else flow=stepView();
+ const wide=matchMedia('(min-width:900px)').matches;
+ if(wide)app.innerHTML=header()+eventBlock()+`<div class="flow" >${flow}</div>`;
+ else app.innerHTML=header()+(S.step===0?eventBlock():'')+`<div class="flow" style="display:flex;flex-direction:column;flex:1">${flow}</div>`;
+ document.querySelectorAll('[data-theme-label]').forEach(e=>{e.textContent={light:'Light',dark:'Dark',sun:'Sunlight'}[document.documentElement.getAttribute('data-theme')]||'Light'});
+ if(id){const n=document.getElementById(id);if(n&&n.tagName==='INPUT'){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}}
+}
+function upload(){S.prog=8;render();const iv=setInterval(()=>{S.prog=Math.min(100,S.prog+18);render();if(S.prog>=100)clearInterval(iv)},350)}
+document.addEventListener('input',e=>{const m={fName:'name',fYob:'yob',fPhone:'phone',fEmail:'email'}[e.target.id];if(m){S[m]=e.target.value;render()}});
+document.addEventListener('change',e=>{if(e.target.id==='lang'){S.lang=e.target.value;render()}
+ if(e.target.id==='fileCam'||e.target.id==='fileGal'){const f=e.target.files[0];if(f){S.rec={name:f.name,url:f.type.startsWith('image/')?URL.createObjectURL(f):null};upload()}}});
+document.addEventListener('click',e=>{const x=e.target;let g;
+ if(x.closest('#startBtn')){S.step=1;S.fam=true;window.scrollTo(0,0);render();return}
+ if(x.closest('#signin')||x.closest('#later')){e.preventDefault();return}
+ if(g=x.closest('[data-g]')){S.g=g.dataset.g;render();return}
+ if(x.closest('[data-prof]')){Object.assign(S,{name:'Goh En Passant',yob:'2015',g:'M'});render();return}
+ if(x.closest('#next')){S.step++;window.scrollTo(0,0);render();return}
+ if(x.closest('#copyRef')){S.copied=true;render();return}
+ if(x.closest('#sampleReceipt')){S.rec={name:'receipt-sample.png'};upload();return}
+ if(x.closest('#repl')){S.rec=null;S.prog=0;render();return}
+ if(x.closest('#another')){Object.assign(S,{step:1,name:'',yob:'',g:'',rec:null,prog:0});window.scrollTo(0,0);render();return}
+});
+render();
+</script>
+</body>
+</html>

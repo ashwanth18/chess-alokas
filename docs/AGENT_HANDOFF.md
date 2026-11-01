@@ -2,7 +2,7 @@
 
 **Read this first** when context is full or starting a new session on this repo.
 
-Last updated: 2026-11-01 (Chess Alokas 2.0 Phase 4: Flutter Participant & Family Mobile App `apps/mobile` — GPS Event Discovery, 1-Tap Family Registration, Live Matchday Companion & Digital Certificate Vault, installed on Android `R5CW2242D5J`)
+Last updated: 2026-11-01 (security, offline and honesty hardening after a multi-agent audit; migrations `028`, `029` written, NOT applied to production)
 
 ## What this product is
 
@@ -13,7 +13,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 - **Pairing:** in-house Swiss engine, plus a Dutch-system engine wrapping FIDE-approved `bbpPairings` v6 (`packages/pairing-engine/src/dutch/`)
 - **Auth:** Supabase Auth — email/password, OTP/magic link, Google, GitHub
 - **Cloud host:** `https://chess-manager.alokas.com` (Dokploy on Hostinger VPS)
-- **Desktop:** Electron (currently v0.1.53); packaged builds call cloud API (no user secrets); auto-updates in-app; Sentry error monitoring wired for web/API/desktop
+- **Desktop:** Electron (see `apps/desktop/package.json` for the version); packaged builds call cloud API (no user secrets); auto-updates in-app; Sentry error monitoring wired for web/API/desktop
 
 ## Status
 
@@ -37,6 +37,19 @@ Offline-first chess tournament manager with **per-manager accounts**:
 - [x] **Chess Alokas 2.0 Phase 2**: Tournament Discovery & Shareable Registrations (`026_tournament_discovery_and_registrations.sql`), GPS Haversine nearby search (`/discover`), 1-click family/player registration with payment receipt upload (`/register/:slug`), B2B verification gate for global publishing/paid fees, and Organizer `Registrations` approval queue in `TournamentPage.tsx`
 - [x] **Chess Alokas 2.0 Phase 3**: Floor Arbiter Zone Grid (`GET /public/tables/:slug/zone`), Call Chief Arbiter alerts (`027_floor_alerts_and_checkin.sql`, `POST /public/tables/:slug/call-chief`, `/tournaments/:id/floor/alerts`), Offline Floor Result Queue (`alokas-floor-offline-queue`), Morning Roll Call check-in on `Players` tab, and Live Venue TV / Projector Mode (`/live/:token/tv`, `LiveTvPage.tsx`)
 - [x] **Chess Alokas 2.0 Phase 4**: Flutter Participant & Family Mobile App (`apps/mobile`) with 4 tabs (`Discover`, `Matchday`, `Career & Certs`, `Family & Auth`), Haversine GPS nearby events, 1-Tap family registration with auto-category matching, Morning Check-In QR Pass modal, Next Match board card, Rating Progression chart, and Digital Certificate Vault (`apps/mobile/README.md`)
+
+- [x] **Audit hardening (2026-11-01)**: client writes locked to the API (`028`), trial limits for accounts with no org, org membership checks on create/sync, confirmed-email plus name claiming, private receipt storage, sync rejections reported to clients, server-side sync cursor (`029`), real offline PWA (`apps/web/src/sw.ts`), desktop sandbox/fuses/backups (Electron 45), honest Flutter app with no seed data. `apps/api/src/storeContract.test.ts` runs rules against MemoryStore and real PostgresStore on PGlite; `migrations.test.ts` applies the whole migration chain
+
+## Not done / known gaps
+
+- **`sample-registrations-*.csv` and `scripts/arcc-*.json` are in a PUBLIC repo** and may hold real minors' data. Founder must confirm; see the founder's decision before pushing anything
+- Do not push until that's resolved: `deploy/SUPABASE_MIGRATION.md` also names VPS details
+- No route exists to add organization members, so directors/arbiters can't be invited through the product
+- Production runs the August build. Deploy order: apply `028`, `029` first (after a backup); count null-owner tournaments; confirm `SUPABASE_URL` and key are set or the API refuses to start; check `certificates` bucket is private; set `TRUST_PROXY_HOPS` if the proxy chain isn't Traefik + nginx
+- Never tested against real Supabase: sign-in, token refresh, OAuth, RLS under PostgREST, Storage, real email
+- No billing code; Windows installer unsigned; no icon; no privacy policy, terms or parental consent
+- Design overhaul is planned, not started: `docs/design/DESIGN_PLAN.md`, mockups in `docs/design/mockups/`
+- Flutter: `apps/mobile/README.md` lists what's real. Pairing `--dart-define`s: API_BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY
 
 ## Auth model
 
@@ -81,7 +94,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 
 ## How to resume
 
-1. Branch: currently `feat/auth-cloud-deploy`, up to date with origin; only uncommitted change is `.cursor/mcp.json` (added Sentry MCP entry) plus the untracked `scripts/replay-arcc-dutch.mts` + its two JSON fixtures/output
+1. Branch: `feat/auth-cloud-deploy`, ahead of origin by unpushed local commits; `.cursor/mcp.json` has a local uncommitted Sentry entry. Check `git status` rather than trusting this line
 2. Local: set web `.env` anon keys; API `.env` with URL + secret + anon (+ `SENTRY_DSN` if testing error reporting)
 3. Deploy: follow `deploy/DOKPLOY.md`
 4. Enable Google/GitHub in Supabase dashboard before OAuth works

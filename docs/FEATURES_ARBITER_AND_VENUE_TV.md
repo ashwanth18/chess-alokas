@@ -41,6 +41,7 @@ Row-Level Security (RLS) is enabled on `public.floor_alerts` and scoped to the t
 
 1. **Single Unlock per Round**:
    - Unlocking any table QR sticker with the 6-digit Round PIN issues a tournament-round session token valid across all tables in that round.
+   - A session belongs to the PIN that issued it: rotating the PIN ends all older sessions, even within the same round. Two arbiters scoring one board at once can't both succeed: the second gets `409`, and only one audit event is written.
 2. **View Mode Toggle (`Single Table` vs. `Zone Grid (All Tables)`)**:
    - Floor arbiters covering a section of tables can switch to **Zone Grid (All Tables)** and filter by range (`All`, `1–15`, `16–30`, `31+`, `Pending Only`).
    - Pending boards can be scored inline (`1-0`, `0-1`, `1/2-1/2`, `1-0F`, `0-1F`, `0-0` + `Confirm`) or opened in Single Table view without scanning 15 separate QR stickers.

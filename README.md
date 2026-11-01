@@ -110,11 +110,11 @@ See [`apps/desktop/README.md`](apps/desktop/README.md).
 # Terminal 1 — Vite
 pnpm --filter @chess-alokas/web dev
 
-# Terminal 2 — Electron (starts its own API sidecar)
+# Terminal 2 — Electron (development only: starts its own API sidecar)
 pnpm --filter @chess-alokas/desktop dev
 ```
 
-Desktop stores API secrets in `%APPDATA%\Chess Alokas\api.env` (seeded from `apps/api/.env` on first run in dev).
+In development the sidecar reads `%APPDATA%\Chess Alokas\api.env` (seeded from `apps/api/.env` on first run). Packaged builds have no sidecar and no secrets.
 
 ## Production desktop build
 
@@ -151,8 +151,8 @@ pnpm --filter @chess-alokas/pairing-engine test
 | POST | `/tournaments/:id/rounds/:n/pair` | Generate pairings |
 | PATCH | `/games/:id/result` | Set result |
 | GET | `/tournaments/:id/standings` | Standings |
-| GET | `/sync/pull?since=` | Pull LWW sync |
-| POST | `/sync/push` | Push LWW sync |
+| GET | `/sync/pull?since=` | Pull LWW sync (server-assigned cursor) |
+| POST | `/sync/push` | Push LWW sync; returns `accepted` and per-row `rejected` reasons |
 | POST | `/tournaments/:id/certificates/issue` | Store digital PDFs |
 | POST | `/tournaments/:id/certificates/email` | Email issued PDFs |
 | GET | `/certificates/:issueId/download` | Download issued PDF (organizer or linked player) |
@@ -160,7 +160,7 @@ pnpm --filter @chess-alokas/pairing-engine test
 | PATCH | `/organizations/:id` | Update organization contact & payment info |
 | GET/PATCH | `/admin/organizations` | Platform admin B2B organization review & tier upgrades |
 | GET/POST/PATCH/DELETE | `/player/profiles` | Manage global `Self` + `Child / Student` player profiles |
-| POST | `/player/profiles/:id/claim` | Claim past/live tournament participations |
+| POST | `/player/profiles/:id/claim` | Link participations entered under the account's confirmed email |
 | GET | `/player/dashboard` | Player career stats, live matchday card, and certificate vault |
 | GET | `/public/events` | Public tournament discovery feed with GPS Haversine distance & search |
 | GET/POST | `/public/events/:slugOrId`, `/public/events/:slugOrId/register` | Public event details & 1-click player/family registration with receipt upload |

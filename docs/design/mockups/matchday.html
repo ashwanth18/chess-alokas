@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Matchday</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/ds.css">
+<style>
+body{max-width:520px;margin:0 auto;min-height:100dvh;padding-bottom:var(--s7)}
+.hd{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);flex-wrap:wrap}
+.hd .evn{flex:1;min-width:0;font-weight:600;font-size:var(--t-md);line-height:1.2}
+.hd .evn small{display:block;font-weight:400;color:var(--ink2);font-size:var(--t-sm)}
+.lang{min-height:44px;background:none;border:1.5px solid var(--rule-strong);border-radius:var(--r);padding:0 var(--s2);font-size:var(--t-sm);font-weight:600}
+.ic{min-height:44px;background:none;border:1.5px solid var(--rule-strong);border-radius:var(--r);padding:0 var(--s3);font-size:var(--t-sm);font-weight:600;cursor:pointer}
+/* family tabs */
+.fam{display:flex;gap:var(--s2);padding:0 var(--s4) var(--s3);overflow-x:auto}
+.fam button{min-height:44px;padding:0 var(--s4);border:1.5px solid var(--rule-strong);background:none;border-radius:var(--r);font-weight:600;white-space:nowrap;cursor:pointer}
+.fam button[aria-pressed="true"]{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
+/* hero inverts with the colour your child plays */
+.hero{padding:var(--s5) var(--s4) var(--s6);border-top:3px solid #000;border-bottom:3px solid #000}
+.hero.w{background:#fff;color:#000}
+.hero.b{background:#000;color:#fff;border-color:#000}
+.hero.n{background:var(--paper2);color:var(--ink);border-color:var(--ink)}
+[data-theme="dark"] .hero.b{border-color:#5a5850}
+.hero .rd{font-weight:700;font-size:var(--t-md);display:flex;justify-content:space-between;gap:var(--s3);align-items:baseline;flex-wrap:wrap}
+.hero .bd{font-size:96px;line-height:.95;margin:var(--s3) 0 0;font-weight:800;font-stretch:112%;letter-spacing:-.02em;font-feature-settings:"tnum"}
+.hero .bdl{font-size:var(--t-xl);font-weight:700;display:block;letter-spacing:0;line-height:1.2}
+.hero .col{display:flex;align-items:center;gap:var(--s3);font-size:var(--t-2xl);font-weight:800;margin:var(--s3) 0 var(--s4);line-height:1.15}
+.hero .vs{border-top:1px solid currentColor;padding-top:var(--s3);font-size:var(--t-lg);line-height:1.25}
+.hero .vs .l{display:block;font-size:var(--t-sm);font-weight:600;margin-bottom:2px}
+.hero .nm-p{color:inherit;opacity:.85}
+.hero .nm-g{font-weight:700}
+.hero .meta{font-size:var(--t-sm);margin-top:2px}
+.hero .res{font-size:64px;font-weight:800;font-stretch:112%;line-height:1;margin:var(--s3) 0}
+.fresh{display:flex;gap:var(--s2);align-items:center;font-size:var(--t-sm);font-weight:600;padding:var(--s2) var(--s4);min-height:36px}
+.fresh.ok{color:var(--go)}.fresh.wt{color:var(--wait);background:var(--wait-wash)}
+section.s{padding:var(--s5) var(--s4) var(--s3);border-bottom:1px solid var(--rule)}
+section.s h2{font-size:var(--t-xl);font-weight:800;font-stretch:108%;margin-bottom:var(--s2)}
+.stand{font-size:var(--t-lg)}
+.stand b{font-weight:800}
+.big{font-size:44px;font-weight:800;font-stretch:112%;line-height:1;font-feature-settings:"tnum"}
+.lad{width:100%;border-collapse:collapse;margin-top:var(--s3);font-size:15px}
+.lad td,.lad th{padding:var(--s3) var(--s2);border-bottom:1px solid var(--rule);vertical-align:top;text-align:left;font-weight:400;line-height:1.25}
+.lad .rk{width:38px;font-weight:800;text-align:right}
+.lad .pt{width:40px;font-weight:800;text-align:right}
+.lad tr.me td,.lad tr.me th{background:var(--pen-wash)}
+.rounds{width:100%;border-collapse:collapse;font-size:15px;margin-top:var(--s2)}
+.rounds td,.rounds th{padding:var(--s3) var(--s2);border-bottom:1px solid var(--rule);vertical-align:top;text-align:left;font-weight:400;line-height:1.25}
+.rounds .rn{width:32px;font-weight:800}.rounds .re{width:44px;font-weight:800;text-align:right}
+/* find */
+.find{padding:var(--s5) var(--s4)}
+.find h1{font-size:var(--t-3xl);margin-bottom:var(--s2)}
+.who{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--rule);padding:var(--s4) var(--s2);cursor:pointer;font-size:var(--t-lg);line-height:1.25}
+.who small{display:block;font-size:var(--t-sm);color:var(--ink2);margin-top:2px}
+.who:hover{background:var(--paper2)}
+.demo{margin:var(--s4)}
+.links{display:flex;gap:var(--s3);padding:var(--s4);flex-wrap:wrap}
+.links .btn{min-height:48px;flex:1}
+@media (min-width:700px){body{border-inline:1px solid var(--rule)}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/ds.js"></script>
+<script>
+const {esc,nameHTML,sq,pts,resSpoken,simulate,newRound,params,splitName,store}=CA;
+const I18N={
+ en:{find:'Find your child',findp:'Type part of the name. We remember it on this phone, so next time this page opens straight to the board.',ph:'Name',none:'No player with that name in this tournament.',round:n=>`Round ${n}`,playing:'Playing now',starts:t=>`Starts ${t}`,board:'Board',plays:(n,c)=>`${n} plays ${c}`,white:'White',black:'Black',against:'Against',pts:'pts',stand:'Where we stand',rank:(r,n,s)=>`Rank ${r} of ${n} in ${s}`,after:n=>`after round ${n}`,prev:'Earlier rounds',all:'All pairings',standings:'Full standings',live:t=>`Live, updated ${t}`,stale:t=>`No connection. Showing ${t}. This page updates itself when it returns.`,waiting:'Pairings are not out yet',waitp:'The board appears here as soon as the desk publishes round 5.',lastwas:'Last result',won:'Won',lost:'Lost',drew:'Drew',bye:'Bye this round',byep:'No game this round. A bye counts as 1 point in this event.',add:'Add child',change:'Change',res:'Result'},
+ ms:{find:'Cari anak anda',findp:'Taip sebahagian nama. Kami simpan dalam telefon ini, jadi lain kali halaman ini terus tunjuk papan.',ph:'Nama',none:'Tiada pemain dengan nama itu dalam kejohanan ini.',round:n=>`Pusingan ${n}`,playing:'Sedang bermain',starts:t=>`Mula ${t}`,board:'Papan',plays:(n,c)=>`${n} main ${c}`,white:'Putih',black:'Hitam',against:'Lawan',pts:'mata',stand:'Kedudukan kita',rank:(r,n,s)=>`Tangga ${r} daripada ${n} dalam ${s}`,after:n=>`selepas pusingan ${n}`,prev:'Pusingan terdahulu',all:'Semua pasangan',standings:'Kedudukan penuh',live:t=>`Langsung, dikemas kini ${t}`,stale:t=>`Tiada sambungan. Paparan pukul ${t}. Halaman ini akan dikemas kini sendiri apabila sambungan pulih.`,waiting:'Pasangan belum keluar',waitp:'Nombor papan akan muncul di sini sebaik sahaja meja urus setia menerbitkan pusingan 5.',lastwas:'Keputusan terakhir',won:'Menang',lost:'Kalah',drew:'Seri',bye:'Bye pusingan ini',byep:'Tiada perlawanan pusingan ini. Bye dikira 1 mata dalam kejohanan ini.',add:'Tambah anak',change:'Tukar',res:'Keputusan'},
+ zh:{find:'查找您的孩子',findp:'输入部分姓名。我们会保存在这部手机上，下次打开直接显示棋台。',ph:'姓名',none:'本赛事没有这个名字的棋手。',round:n=>`第 ${n} 轮`,playing:'正在对弈',starts:t=>`${t} 开始`,board:'棋台',plays:(n,c)=>`${n} 执${c}`,white:'白棋',black:'黑棋',against:'对手',pts:'分',stand:'目前排名',rank:(r,n,s)=>`${s} 第 ${r} 名，共 ${n} 人`,after:n=>`第 ${n} 轮后`,prev:'之前各轮',all:'全部对阵',standings:'完整排名',live:t=>`实时，更新于 ${t}`,stale:t=>`没有网络。显示 ${t} 的资料。恢复后自动更新。`,waiting:'对阵尚未公布',waitp:'裁判台公布第 5 轮后，棋台号会立即显示在这里。',lastwas:'上一轮结果',won:'胜',lost:'负',drew:'和',bye:'本轮轮空',byep:'本轮没有对局。本赛事轮空计 1 分。',add:'添加孩子',change:'更改',res:'结果'},
+ ta:{find:'உங்கள் குழந்தையைத் தேடுங்கள்',findp:'பெயரின் ஒரு பகுதியை உள்ளிடுங்கள். இந்த தொலைபேசியில் சேமிக்கப்படும், அடுத்த முறை நேரடியாக பலகை காட்டப்படும்.',ph:'பெயர்',none:'இந்தப் போட்டியில் அந்தப் பெயரில் வீரர் இல்லை.',round:n=>`சுற்று ${n}`,playing:'இப்போது விளையாடுகிறார்',starts:t=>`${t} மணிக்கு தொடக்கம்`,board:'பலகை',plays:(n,c)=>`${n}: ${c}`,white:'வெள்ளை',black:'கருப்பு',against:'எதிராளி',pts:'புள்ளி',stand:'தற்போதைய நிலை',rank:(r,n,s)=>`${s}: ${n} பேரில் ${r}-ஆம் இடம்`,after:n=>`சுற்று ${n} முடிவில்`,prev:'முந்தைய சுற்றுகள்',all:'அனைத்து ஜோடிகள்',standings:'முழு தரவரிசை',live:t=>`நேரலை, ${t} புதுப்பிக்கப்பட்டது`,stale:t=>`இணைப்பு இல்லை. ${t} தகவல் காட்டப்படுகிறது. இணைப்பு வந்ததும் தானாக புதுப்பிக்கும்.`,waiting:'ஜோடிகள் இன்னும் வெளியாகவில்லை',waitp:'சுற்று 5 வெளியானதும் பலகை எண் இங்கே தோன்றும்.',lastwas:'கடைசி முடிவு',won:'வெற்றி',lost:'தோல்வி',drew:'சமநிலை',bye:'இந்த சுற்றில் பை',byep:'இந்த சுற்றில் ஆட்டம் இல்லை. இந்தப் போட்டியில் பை 1 புள்ளி.',add:'குழந்தையைச் சேர்',change:'மாற்று',res:'முடிவு'}};
+const htmlLang={en:'en',ms:'ms',zh:'zh-Hans',ta:'ta'};
+const sim=simulate(3,CA.SEED);const round=newRound(sim);const byId={};sim.all.forEach(p=>byId[p.id]=p);
+const S={lang:params.get('lang')||'en',q:'',me:params.get('me')||null,family:[],state:params.get('state')||null};
+if(S.me)S.family=[S.me,'U18'+2];
+const t=()=>I18N[S.lang];
+const first=n=>splitName(n)[0];
+function find(id){const g=round.find(b=>b.w.id===id||b.b.id===id);return g?{g,col:g.w.id===id?'w':'b',opp:g.w.id===id?g.b:g.w}:null}
+function bh(p){return p.hist.reduce((a,h)=>a+byId[h.opp].pts,0)}
+function rankList(p){return[...sim.f[p.sec]].sort((a,b)=>b.pts-a.pts||bh(b)-bh(a)||a.no-b.no)}
+const secName=s=>({U12:'Under 12',U18:'Under 18'}[s]);
+function langSel(){return`<select class="lang" id="lang" aria-label="Language">${[['en','English'],['ms','Bahasa Melayu'],['zh','中文'],['ta','தமிழ்']].map(([k,l])=>`<option value="${k}" ${S.lang===k?'selected':''}>${l}</option>`).join('')}</select>`}
+function header(){return`<header class="hd"><div class="evn">Imaginary Bay Junior Rapid<small>Pretend Academy</small></div>${langSel()}<button class="ic" data-cycle-theme><span data-theme-label>Light</span></button></header>`}
+function view(){
+ document.documentElement.lang=htmlLang[S.lang];
+ if(!S.me)return header()+`<div class="find"><h1 class="display">${t().find}</h1><p class="muted" style="margin-bottom:var(--s4)">${t().findp}</p>
+  <label class="vh" for="q">${t().ph}</label><input class="input" id="q" placeholder="${t().ph}" autocomplete="off" value="${esc(S.q)}">
+  <div id="results" aria-live="polite" style="margin-top:var(--s3)">${results()}</div></div>`;
+ return header()+family()+hero()+standing()+earlier()+`<div class="links"><a class="btn" href="#" onclick="return false">${t().all}</a><a class="btn" href="#" onclick="return false">${t().standings}</a></div>
+ <div class="demo"><b>Mock only: states</b>${['white','black','waiting','result','bye','stale'].map(s=>`<button data-st="${s}" aria-pressed="${curState()===s}">${s}</button>`).join('')}</div>`;
+}
+function results(){const q=S.q.trim().toLowerCase();if(q.length<2)return'';const r=sim.all.filter(p=>p.name.toLowerCase().includes(q));if(!r.length)return`<p class="muted">${t().none}</p>`;
+ return r.map(p=>`<button class="who" data-id="${p.id}">${nameHTML(p.name,{nofit:true})}<small>#${p.no} · ${secName(p.sec)} · ${esc(p.school)}</small></button>`).join('')}
+function family(){if(S.family.length<1)return'';return`<div class="fam" role="group">${S.family.map(id=>`<button aria-pressed="${id===S.me}" data-fam="${id}">${esc(first(byId[id].name).split(' ').slice(-1)[0])}</button>`).join('')}<button data-add>+ ${t().add}</button></div>`}
+function curState(){if(S.state)return S.state;const f=find(S.me);return f&&f.col==='b'?'black':'white'}
+function hero(){const p=byId[S.me];const f=find(S.me);const st=curState();const short=first(p.name).split(' ').slice(-1)[0];
+ let fresh=`<div class="fresh ok" role="status"><span class="dot"></span>${t().live('14:32')}</div>`;
+ if(st==='stale')fresh=`<div class="fresh wt" role="status"><span class="dot hollow"></span>${t().stale('14:02')}</div>`;
+ if(st==='waiting')return fresh+`<div class="hero n"><div class="rd"><span>${t().round(5)}</span><span>${t().starts('15:30')}</span></div><div class="col" style="font-size:var(--t-3xl);margin-top:var(--s3)">${t().waiting}</div><p>${t().waitp}</p></div>`;
+ if(st==='bye')return fresh+`<div class="hero n"><div class="rd"><span>${t().round(4)}</span></div><div class="col" style="font-size:var(--t-3xl);margin-top:var(--s3)">${t().bye}</div><p>${t().byep}</p></div>`;
+ const col=st==='black'?'b':st==='white'?'w':f.col;
+ const opp=f.opp;const cname=col==='w'?t().white:t().black;
+ if(st==='result'){return fresh+`<div class="hero ${col}"><div class="rd"><span>${t().round(4)} · ${t().board} ${f.g.bd}</span><span>${t().res}</span></div><div class="res">1 – 0</div><div class="col" style="margin-bottom:var(--s3)">${t().won}</div><div class="vs"><span class="l">${t().against}</span>${nameHTML(opp.name,{nofit:true})}<div class="meta">#${opp.no} · ${pts(opp.pts)} ${t().pts}</div></div></div>`}
+ return fresh+`<div class="hero ${col}"><div class="rd"><span>${t().round(4)} · ${t().playing}</span><span>${t().starts('14:05')}</span></div>
+  <div class="bd" aria-label="${t().board} ${f.g.bd}"><span class="bdl">${t().board}</span>${f.g.bd}</div>
+  <div class="col"><span>${t().plays(esc(short),cname)}</span></div>
+  <div class="vs"><span class="l">${t().against}</span>${nameHTML(opp.name,{nofit:true})}<div class="meta">#${opp.no} · ${pts(opp.pts)} ${t().pts} · ${esc(opp.school)}</div></div></div>`}
+function standing(){const p=byId[S.me];const list=rankList(p);const i=list.indexOf(p);const lo=Math.max(0,Math.min(i-2,list.length-5));const near=list.slice(lo,lo+5);
+ return`<section class="s" aria-labelledby="st"><h2 id="st">${t().stand}</h2><div class="stand"><span class="big">${pts(p.pts)}</span> <span class="muted">/ ${p.hist.length} ${t().pts}, ${t().after(p.hist.length)}</span></div><p style="font-weight:600;margin-top:var(--s2)">${t().rank(i+1,list.length,secName(p.sec))}</p>
+ <table class="lad"><caption class="vh">${t().stand}</caption><tbody>${near.map(q=>`<tr class="${q===p?'me':''}"><th class="rk" scope="row">${list.indexOf(q)+1}</th><td>${nameHTML(q.name,{nofit:true})}</td><td class="pt">${pts(q.pts)}</td></tr>`).join('')}</tbody></table></section>`}
+function earlier(){const p=byId[S.me];return`<section class="s" aria-labelledby="er" style="border:0"><h2 id="er">${t().prev}</h2><table class="rounds"><caption class="vh">${t().prev}</caption><tbody>${p.hist.map((h,i)=>`<tr><th class="rn" scope="row">${i+1}</th><td>${sq(h.col)} ${nameHTML(byId[h.opp].name,{nofit:true})}</td><td class="re">${h.res===1?t().won:h.res===0?t().lost:t().drew}</td></tr>`).join('')}</tbody></table></section>`}
+const app=document.getElementById('app');
+function render(){app.innerHTML=view();document.querySelectorAll('[data-theme-label]').forEach(e=>{e.textContent={light:'Light',dark:'Dark',sun:'Sunlight'}[document.documentElement.getAttribute('data-theme')]||'Light'})}
+document.addEventListener('input',e=>{if(e.target.id==='q'){S.q=e.target.value;document.getElementById('results').innerHTML=results()}});
+document.addEventListener('change',e=>{if(e.target.id==='lang'){S.lang=e.target.value;render()}});
+document.addEventListener('click',e=>{let x;const tg=e.target;
+ if(x=tg.closest('.who')){S.me=x.dataset.id;S.family=[S.me,'U18'+2];window.scrollTo(0,0);render();return}
+ if(x=tg.closest('[data-st]')){S.state=x.dataset.st;window.scrollTo(0,0);render();return}
+ if(x=tg.closest('[data-fam]')){S.me=x.dataset.fam;S.state=null;render();return}
+ if(tg.closest('[data-add]')){S.me=null;S.q='';render();return}
+});
+render();
+</script>
+</body>
+</html>

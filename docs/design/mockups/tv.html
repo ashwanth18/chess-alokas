@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en" data-theme="tv" data-theme-fixed>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hall Screen</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/ds.css">
+<style>
+/* One unit scales the whole stage: 1u = 19.2px at 1080p, 38.4px at 4K, fits any 16:9-ish screen. */
+:root{--u:min(1vw,1.7778vh)}
+html,body{height:100%;overflow:hidden;background:var(--paper)}
+body{font-size:calc(var(--u)*2)}
+.stage{width:calc(var(--u)*100);height:calc(var(--u)*56.25);margin:auto;position:relative;display:flex;flex-direction:column;padding:0 calc(var(--u)*2)}
+.bar{display:flex;align-items:center;gap:calc(var(--u)*2);height:calc(var(--u)*8);border-bottom:calc(var(--u)*.3) solid var(--ink)}
+.rd{font-weight:800;font-stretch:112%;font-size:calc(var(--u)*5.2);letter-spacing:-.01em;line-height:1;white-space:nowrap}
+.what{flex:1;font-size:calc(var(--u)*2.4);font-weight:600;line-height:1.15;color:var(--ink2);min-width:0}
+.what b{display:block;color:var(--ink);font-weight:700;font-size:calc(var(--u)*2.8)}
+.clock{font-weight:800;font-stretch:112%;font-size:calc(var(--u)*6);line-height:1;font-feature-settings:"tnum";white-space:nowrap}
+.clock.low{color:var(--wait)}.clock.out{color:var(--flag)}
+.list{flex:1;display:flex;flex-direction:column;min-height:0}
+.row{flex:1 1 0;display:grid;grid-template-columns:calc(var(--u)*8) minmax(0,1fr) calc(var(--u)*10) minmax(0,1fr);align-items:center;border-bottom:calc(var(--u)*.08) solid var(--rule);min-height:0;gap:0 calc(var(--u)*1)}
+.b-no{font-weight:800;font-stretch:112%;font-size:calc(var(--u)*5.2);text-align:right;line-height:1;font-feature-settings:"tnum";padding-right:calc(var(--u)*.8)}
+.pl{display:flex;gap:calc(var(--u)*1.1);align-items:baseline;min-width:0}
+.pl .sq{width:calc(var(--u)*2.6);height:calc(var(--u)*2.6);border-width:calc(var(--u)*.16);align-self:center;flex:none;position:relative}
+.nm-wrap{display:block;flex:1;min-width:0;line-height:1.04}
+.g{display:block;font-weight:700;font-size:var(--fs-g);white-space:nowrap}
+.pat{display:block;white-space:nowrap;font-weight:500;font-size:var(--fs-p);color:var(--ink2);margin-top:calc(var(--u)*.2)}
+.res{text-align:center;font-weight:800;font-size:calc(var(--u)*3.6);white-space:nowrap;font-feature-settings:"tnum"}
+.res.none{color:var(--rule-strong);font-weight:400}
+[data-size="far"]{--fs-g:calc(var(--u)*3.9);--fs-p:calc(var(--u)*2.4)}
+[data-size="mid"]{--fs-g:calc(var(--u)*3);--fs-p:calc(var(--u)*2)}
+
+.foot{height:calc(var(--u)*3.8);display:flex;align-items:center;gap:calc(var(--u)*2);font-size:calc(var(--u)*1.7);color:var(--ink2);font-weight:500;position:relative}
+.foot .sp{flex:1}
+.foot .warn{color:var(--wait);font-weight:700}
+.prog{position:absolute;left:0;top:calc(var(--u)*-.15);height:calc(var(--u)*.3);background:var(--ink);width:100%;transform-origin:left;animation:adv var(--dwell,12s) linear}
+@keyframes adv{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+/* standings */
+.st-row{grid-template-columns:calc(var(--u)*7) minmax(0,1fr) calc(var(--u)*10) calc(var(--u)*10)}
+.st-row .t{font-weight:800;font-size:calc(var(--u)*4.4);text-align:right;font-feature-settings:"tnum"}
+.st-row .bh{font-size:calc(var(--u)*2.8);text-align:right;color:var(--ink2);font-feature-settings:"tnum"}
+.heads{display:grid;font-size:calc(var(--u)*1.6);font-weight:600;color:var(--ink2);padding:calc(var(--u)*.6) 0 0}
+/* A-Z */
+.az{flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) calc(var(--u)*19);gap:0 calc(var(--u)*2);min-height:0}
+.az-col{display:flex;flex-direction:column;min-height:0}
+.az-row>.nm-wrap{min-width:0}
+.az-row{flex:1 1 0;display:grid;grid-template-columns:minmax(0,1fr) auto calc(var(--u)*6);gap:calc(var(--u)*1);align-items:center;border-bottom:calc(var(--u)*.08) solid var(--rule);min-height:0}
+.az-row .g{font-size:calc(var(--u)*2.6)}.az-row .pat{font-size:calc(var(--u)*1.7);margin-top:0}
+.az-row .sq{width:calc(var(--u)*2.2);height:calc(var(--u)*2.2);border-width:calc(var(--u)*.14)}
+.az-row .bd{font-weight:800;font-stretch:112%;font-size:calc(var(--u)*3.8);text-align:right;font-feature-settings:"tnum"}
+.scan{padding:calc(var(--u)*1.4) 0;display:flex;flex-direction:column;gap:calc(var(--u)*1)}
+.scan .qr{background:#fff;padding:calc(var(--u)*.8);width:calc(var(--u)*18);height:calc(var(--u)*18)}
+.scan b{font-size:calc(var(--u)*2.6);line-height:1.1;font-weight:800}
+.scan span{font-size:calc(var(--u)*1.6);color:var(--ink2);line-height:1.2;overflow-wrap:anywhere}
+/* operator */
+.op{position:fixed;left:50%;bottom:calc(var(--u)*5);transform:translateX(-50%);background:var(--paper2);border:2px solid var(--ink);padding:10px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:14px;z-index:5;max-width:94vw;opacity:0;pointer-events:none;transition:opacity .12s}
+.op.show{opacity:1;pointer-events:auto}
+.op button{min-height:40px;padding:0 12px;background:var(--paper);border:1.5px solid var(--rule-strong);border-radius:3px;font-weight:600;cursor:pointer;font-size:14px}
+.op button[aria-pressed="true"]{background:var(--ink);color:var(--on-ink)}
+.op .lbl{font-weight:700;margin-left:6px}
+.op a{font-weight:600;color:var(--ink);padding:0 6px}
+</style>
+</head>
+<body>
+<div class="stage" id="stage" data-size="far"></div>
+<div class="op" id="op" role="toolbar" aria-label="Screen controls"></div>
+<script src="assets/ds.js"></script>
+<script>
+const {esc,nameHTML,sq,pts,resText,simulate,newRound,params,splitName}=CA;
+const sim=simulate(3,CA.SEED);const boards=newRound(sim);const byId={};sim.all.forEach(p=>byId[p.id]=p);
+const seed=[[1,'1-0'],[2,'1/2'],[3,'0-1'],[5,'1-0'],[6,'1-0'],[9,'1/2'],[10,'0-1'],[11,'1-0'],[14,'1-0'],[15,'1/2']];seed.forEach(([b,r])=>boards[b-1].res=r);
+const S={view:params.get('view')||'rotate',cur:0,page:0,size:params.get('size')||'far',clock:18*60+42,run:!params.get('still'),offline:!!params.get('offline'),paused:!!params.get('still')};
+if(params.get('mode')==='projector')document.documentElement.setAttribute('data-theme','sun');
+const ROWS={far:6,mid:8};
+const SEQ=[['pairings'],['az'],['standings','U12'],['standings','U18']];
+function pages(){const r=ROWS[S.size];const out=[];
+ const pg=(arr,n,kind,extra)=>{for(let i=0;i<arr.length;i+=n)out.push({kind,items:arr.slice(i,i+n),from:i,total:arr.length,...extra})};
+ const want=S.view==='rotate'?['pairings','az','standings']:[S.view];
+ if(want.includes('pairings'))pg(boards,r,'pairings');
+ if(want.includes('az')){const a=[...sim.all].sort((x,y)=>x.name.localeCompare(y.name));pg(a,14,'az')}
+ if(want.includes('standings')){for(const s of['U12','U18']){const l=[...sim.f[s]].sort((a,b)=>b.pts-a.pts||bh(b)-bh(a)||a.no-b.no).slice(0,r);out.push({kind:'standings',sec:s,items:l})}}
+ return out}
+function bh(p){return p.hist.reduce((a,h)=>a+byId[h.opp].pts,0)}
+/* Fit, never clip: narrow along the width axis first, wrap only as a last resort. */
+function fitNames(){document.querySelectorAll('.g,.pat').forEach(el=>{const box=el.parentElement.clientWidth;for(const w of [100,92,84,76,68,62]){el.style.fontStretch=w+'%';if(el.scrollWidth<=box)return}el.style.whiteSpace='normal'})}
+function nm(n){const[g,p]=splitName(n);return`<span class="nm-wrap"><span class="g">${esc(g)}</span>${p?`<span class="pat">${esc(p)}</span>`:''}</span>`}
+function fmt(s){const m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
+function qr(){let s=99;const r=()=>(s=(s*1664525+1013904223)>>>0)/4294967296;const n=25;let c='';for(let y=0;y<n;y++)for(let x=0;x<n;x++){const f=(x<8&&y<8)||(x>n-9&&y<8)||(x<8&&y>n-9);if(!f&&r()>.5)c+=`<path d="M${x} ${y}h1v1h-1z"/>`}const d=(x,y)=>`<path d="M${x} ${y}h7v7h-7z"/><path fill="#fff" d="M${x+1} ${y+1}h5v5h-5z"/><path d="M${x+2} ${y+2}h3v3h-3z"/>`;return`<svg viewBox="0 0 ${n} ${n}" fill="#000" shape-rendering="crispEdges" role="img" aria-label="Sample QR, not a real code">${c}${d(0,0)}${d(n-7,0)}${d(0,n-7)}</svg>`}
+function draw(){const all=pages();if(S.page>=all.length)S.page=0;const p=all[S.page];const st=document.getElementById('stage');st.dataset.size=S.size;
+ let mid='',what='';
+ if(p.kind==='pairings'){const first=p.items[0].bd,last=p.items[p.items.length-1].bd;what=`<b>Pairings</b>Boards ${first}–${last} of ${p.total}`;
+  mid=`<div class="list">${p.items.map(b=>`<div class="row"><div class="b-no">${b.bd}</div><div class="pl">${sq('w')}${nm(b.w.name)}</div><div class="res ${b.res?'':'none'}">${b.res?resText[b.res]:'–'}</div><div class="pl">${sq('b')}${nm(b.b.name)}</div></div>`).join('')}</div>`}
+ if(p.kind==='standings'){what=`<b>Standings: ${p.sec==='U12'?'Under 12':'Under 18'}</b>After round 3`;
+  mid=`<div class="heads st-row" style="display:grid;gap:0 calc(var(--u)*1)"><span style="text-align:right">Rank</span><span>Player</span><span style="text-align:right">Points</span><span style="text-align:right">Buchholz</span></div><div class="list">${p.items.map((q,i)=>`<div class="row st-row"><div class="b-no">${i+1}</div><div class="pl">${nm(q.name)}</div><div class="t">${pts(q.pts)}</div><div class="bh">${pts(bh(q))}</div></div>`).join('')}</div>`}
+ if(p.kind==='az'){const a=p.items[0].name[0],z=p.items[p.items.length-1].name[0];what=`<b>Find your name: ${a} to ${z}</b>Your board and colour`;
+  const find=q=>{const g=boards.find(b=>b.w===q||b.b===q);return{bd:g.bd,c:g.w===q?'w':'b'}};
+  const row=q=>{const f=find(q);return`<div class="az-row">${nm(q.name)}<span>${sq(f.c)}</span><span class="bd">${f.bd}</span></div>`};
+  const half=Math.ceil(p.items.length/2);
+  mid=`<div class="az"><div class="az-col">${p.items.slice(0,half).map(row).join('')}${'<div class="az-row" style="visibility:hidden"></div>'.repeat(7-half)}</div><div class="az-col">${p.items.slice(half).map(row).join('')}${'<div class="az-row" style="visibility:hidden"></div>'.repeat(Math.max(0,7-(p.items.length-half)))}</div><div class="scan"><div class="qr">${qr()}</div><b>Scan for your board on your phone</b><span>chess-manager.alokas.com/live/…</span></div></div>`}
+ const cl=S.clock<=0?'out':S.clock<300?'low':'';
+ st.innerHTML=`<div class="bar"><div class="rd">Round 4</div><div class="what">${what}</div><div class="clock ${cl}" aria-label="Time left">${fmt(Math.max(0,S.clock))}</div></div>${mid}
+ <div class="foot">${S.paused?'':`<i class="prog" style="--dwell:${dwell(p)}s"></i>`}<span>Imaginary Bay Junior Rapid</span><span class="sp"></span>${S.offline?'<span class="warn">No connection. Showing the list as of 14:02.</span>':`<span>Updated 14:32</span>`}<span>Screen ${S.page+1} of ${all.length}</span></div>`;
+ fitNames();drawOp()}
+function dwell(p){return p.kind==='pairings'?12:p.kind==='az'?15:10}
+function drawOp(){const v=S.view,dark=document.documentElement.getAttribute('data-theme')==='tv';document.getElementById('op').innerHTML=
+ `<span class="lbl">Show</span>${[['rotate','All, rotating'],['pairings','Pairings'],['az','A to Z'],['standings','Standings']].map(([k,l])=>`<button data-v="${k}" aria-pressed="${v===k}">${l}</button>`).join('')}
+ <span class="lbl">Size</span><button data-s="far" aria-pressed="${S.size==='far'}">10 m, 6 rows</button><button data-s="mid" aria-pressed="${S.size==='mid'}">6 m, 8 rows</button>
+ <span class="lbl">Screen</span><button data-m aria-pressed="${!dark}">${dark?'TV (dark)':'Projector (light)'}</button>
+ <span class="lbl">Clock</span><button data-c>${S.run?'Pause':'Start'}</button><button data-c5>−5 min</button><a href="index.html">Exit</a>`}
+let tm;function sched(){clearTimeout(tm);if(S.paused)return;const all=pages();const p=all[Math.min(S.page,all.length-1)];tm=setTimeout(()=>{S.page=(S.page+1)%all.length;draw();sched()},dwell(p)*1000)}
+setInterval(()=>{if(S.run&&S.clock>0){S.clock--;const e=document.querySelector('.clock');if(e){e.textContent=fmt(S.clock);e.className='clock '+(S.clock<=0?'out':S.clock<300?'low':'')}}},1000);
+document.addEventListener('keydown',e=>{const n=pages().length;if(e.key==='ArrowRight'){S.page=(S.page+1)%n;draw();sched()}if(e.key==='ArrowLeft'){S.page=(S.page-1+n)%n;draw();sched()}if(e.key===' '){S.paused=!S.paused;draw();sched();e.preventDefault()}if(e.key==='l'||e.key==='L')toggleMode()});
+function toggleMode(){const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='tv'?'sun':'tv');drawOp()}
+document.fonts&&document.fonts.ready.then(()=>draw());
+let hide;function showOp(){const o=document.getElementById('op');o.classList.add('show');clearTimeout(hide);hide=setTimeout(()=>o.classList.remove('show'),4000)}
+document.addEventListener('mousemove',showOp);
+document.addEventListener('click',e=>{const t=e.target;let x;if(x=t.closest('[data-v]')){S.view=x.dataset.v;S.page=0;draw();sched()}if(x=t.closest('[data-s]')){S.size=x.dataset.s;S.page=0;draw();sched()}if(t.closest('[data-m]'))toggleMode();if(t.closest('[data-c]')){S.run=!S.run;drawOp()}if(t.closest('[data-c5]')){S.clock=Math.max(0,S.clock-300)}showOp()});
+draw();sched();
+</script>
+</body>
+</html>

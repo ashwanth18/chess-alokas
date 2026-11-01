@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pairing Sheet Mockups</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/ds.css">
+<style>
+.wrap{max-width:1120px;margin:0 auto;padding:var(--s6)}
+.top{display:flex;align-items:center;gap:var(--s4);margin-bottom:var(--s7)}
+.top .mark{margin-right:auto;font-size:var(--t-lg)}
+h1{font-size:clamp(40px,6vw,72px);margin-bottom:var(--s4)}
+.lede{font-size:var(--t-xl);max-width:36em;color:var(--ink2);margin-bottom:var(--s7);line-height:1.35}
+h2{font-size:var(--t-2xl);font-weight:800;font-stretch:108%;margin:var(--s7) 0 var(--s3)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;vertical-align:top;padding:var(--s4) var(--s4) var(--s4) 0;border-bottom:1px solid var(--rule)}
+thead th{font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.04em;color:var(--ink3);font-weight:600;border-bottom:2px solid var(--ink);padding:var(--s2) var(--s4) var(--s2) 0}
+.nm-l{font-size:var(--t-xl);font-weight:800;font-stretch:108%;white-space:nowrap}
+.nm-l a{color:var(--ink);text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.nm-l a:hover{color:var(--pen)}
+.w{white-space:nowrap;color:var(--ink2);font-size:var(--t-md)}
+.num{text-align:right;font-weight:800;font-size:var(--t-xl);white-space:nowrap}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:0;border-top:1px solid var(--ink);border-left:1px solid var(--ink)}
+.sw{border-right:1px solid var(--ink);border-bottom:1px solid var(--ink);padding:var(--s3);min-height:92px;font-size:var(--t-sm);display:flex;flex-direction:column;justify-content:flex-end}
+.sw b{font-weight:700}
+.type-s{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s6);margin-top:var(--s3)}
+.nameDemo{font-size:18px;line-height:1.25;border-bottom:1px solid var(--rule);padding:var(--s2) 0}
+.alt{display:grid;grid-template-columns:260px minmax(0,1fr);gap:var(--s6);align-items:start}
+.altf{background:#000;color:#F5C400;padding:var(--s4);font-weight:800;font-stretch:90%;letter-spacing:.02em;font-size:15px;line-height:1.5;font-feature-settings:"tnum"}
+.altf div{display:flex;justify-content:space-between;border-bottom:1px solid #333;gap:var(--s3)}
+@media (max-width:760px){.wrap{padding:var(--s4)}.hide-s{display:none}.alt,.type-s{grid-template-columns:1fr}.nm-l{white-space:normal}.lede{font-size:var(--t-lg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+ <header class="top"><span class="mark" data-mark>Chess Alokas</span><button class="btn" data-cycle-theme style="min-height:44px">Theme: <span data-theme-label>Light</span></button></header>
+ <h1 class="display">Pairing Sheet</h1>
+ <p class="lede">A redesign built like the paper a tournament already runs on. Black and white are data, not decoration. Colour appears only when it means something: the arbiter's blue pen for results just entered, a red pencil for what needs you. All data here is invented.</p>
+
+ <h2>The screens</h2>
+ <table>
+  <thead><tr><th scope="col">Screen</th><th scope="col">Who and when</th><th scope="col" class="hide-s">Try this</th><th scope="col" class="hide-s">Size</th></tr></thead>
+  <tbody>
+  <tr><th scope="row" class="nm-l"><a href="round.html">Round desk</a></th><td>Director, laptop, round starting</td><td class="hide-s">Press <kbd>1</kbd> <kbd>0</kbd> <kbd>=</kbd> to fill boards. <kbd>/</kbd> then <b>13 1</b> Enter for a slip. Pull the Wi-Fi. Settle the disagreement, finish the round with <kbd>Enter</kbd>, then pair with <kbd>P</kbd>.</td><td class="w hide-s">1366, 1920</td></tr>
+  <tr><th scope="row" class="nm-l"><a href="floor.html">Floor</a></th><td>Arbiter, one hand, walking</td><td class="hide-s">PIN: any 6 digits (000000 shows the error). Tap a board, tap a result, undo within 5 s. Try Sunlight.</td><td class="w hide-s">390, 360</td></tr>
+  <tr><th scope="row" class="nm-l"><a href="register.html">Register</a></th><td>Parent, phone, weeknight</td><td class="hide-s">Four steps, including DuitNow and receipt. Switch to Bahasa Melayu.</td><td class="w hide-s">390, 1366</td></tr>
+  <tr><th scope="row" class="nm-l"><a href="matchday.html">Matchday</a></th><td>Parent, in the corridor</td><td class="hide-s">Type "puteri" to see why names must not truncate. The hero turns white or black with your child's colour. Try 中文 and தமிழ்.</td><td class="w hide-s">390</td></tr>
+  <tr><th scope="row" class="nm-l"><a href="tv.html">Hall screen</a></th><td>Everyone, 10 m away</td><td class="hide-s">Arrows change screen, <kbd>L</kbd> for projector, move the mouse for controls.</td><td class="w hide-s">1920, 4K</td></tr>
+  <tr><th scope="row" class="nm-l"><a href="landing.html">Landing</a></th><td>Academy owner, deciding</td><td class="hide-s">Enter results in the live sheet, then pull the Wi-Fi.</td><td class="w hide-s">390–1920</td></tr>
+  </tbody>
+ </table>
+
+ <h2>Before and after, in steps</h2>
+ <table>
+  <thead><tr><th scope="col">Journey</th><th scope="col" style="text-align:right">Today</th><th scope="col" style="text-align:right">Target</th><th scope="col" class="hide-s">Worst friction today</th></tr></thead>
+  <tbody>
+  <tr><th scope="row" style="font-weight:600">Run a round: pair to standings (15 boards, 2 sections)</th><td class="num">23</td><td class="num">18</td><td class="hide-s">8 clicks of overhead and no keyboard. Names cut to "SITI ..." at 1366.</td></tr>
+  <tr><th scope="row" style="font-weight:600">Same, not counting the 15 results</th><td class="num">8</td><td class="num">3</td><td class="hide-s">Category tabs hide boards. First board was 1,512 px down at 1366 in my run.</td></tr>
+  <tr><th scope="row" style="font-weight:600">Floor result, first board on a new phone</th><td class="num">8</td><td class="num">4</td><td class="hide-s">Result buttons are 26 px tall. All 89 zone-grid controls measure under 44 px.</td></tr>
+  <tr><th scope="row" style="font-weight:600">Floor result, each later board</th><td class="num">3–5</td><td class="num">2</td><td class="hide-s">Scrolling a 3,225 px page to find the board.</td></tr>
+  <tr><th scope="row" style="font-weight:600">Register a child, no account</th><td class="num">19</td><td class="num">13</td><td class="hide-s">12 fields become 4. Labels measure 1.7:1 today, and nothing is saved if the bank app reloads the tab.</td></tr>
+  <tr><th scope="row" style="font-weight:600">Find your board, first time</th><td class="num">4–5</td><td class="num">3</td><td class="hide-s">Two children show as the same "PUTERI ALEKHINE DAMIA B...". The opponent is one more tap away.</td></tr>
+  <tr><th scope="row" style="font-weight:600">Find your board, every later round</th><td class="num">2–4</td><td class="num">1</td><td class="hide-s">2 if the parent starred the child, up to 4 if not. Starring is optional and easy to miss.</td></tr>
+  </tbody>
+ </table>
+
+ <h2>Colour tokens</h2>
+ <div class="swatches" aria-label="Current theme colours">
+  <div class="sw" style="background:var(--paper)"><b>paper</b>page</div>
+  <div class="sw" style="background:var(--paper2)"><b>paper2</b>raised</div>
+  <div class="sw" style="background:var(--ink);color:var(--on-ink)"><b>ink</b>data, primary action</div>
+  <div class="sw" style="background:var(--pen);color:var(--paper)"><b>pen</b>just entered, links, focus</div>
+  <div class="sw" style="background:var(--flag);color:var(--paper)"><b>flag</b>needs you</div>
+  <div class="sw" style="background:var(--go);color:var(--paper)"><b>go</b>sent, complete</div>
+  <div class="sw" style="background:var(--wait);color:var(--paper)"><b>wait</b>on this device, waiting</div>
+ </div>
+
+ <h2>Type: one family, Archivo</h2>
+ <p class="muted" style="max-width:44em">A variable font with weight and width axes, self-hosted at 90 KB for Latin. Width is the useful axis here: long names can narrow by up to 32 percent instead of being cut.</p>
+ <div class="type-s">
+  <div><p class="display" style="font-size:44px">Round 4 · Board 14</p><p style="font-size:var(--t-lg);margin-top:var(--s3);font-weight:700;word-spacing:.4em">1 – 0  ½ – ½  0 – 1  12½  1881</p></div>
+  <div>
+   <div class="nameDemo">Puteri Alekhine Damia <span class="nm-p">binti Queen Gambit</span></div>
+   <div class="nameDemo" style="font-stretch:84%">Kavitha Zugzwang <span class="nm-p">a/p Fianchetto Rajaratnam</span></div>
+   <div class="nameDemo" style="font-stretch:74%">Tengku Gambit Iskandar <span class="nm-p">bin Tengku Kingside Castle</span></div>
+  </div>
+ </div>
+
+ <h2>The alternative: Departure Board</h2>
+ <div class="alt">
+  <div class="altf" aria-hidden="true"><div><span>BD 01</span><span>1-0</span></div><div><span>BD 02</span><span>1/2</span></div><div><span>BD 03</span><span>—</span></div><div><span>BD 04</span><span>0-1</span></div></div>
+  <p>Black first, one signal yellow, railway-station condensed type. Superb on the hall screen and memorable on a landing page. I am not recommending it: it fights print, reads poorly on a cheap phone in sunlight, and makes a parent's phone feel like an airport. Its idea of a screen you read from a distance is already in the Hall screen.</p>
+ </div>
+
+ <h2>Plan</h2>
+ <p><a href="DESIGN_PLAN.md">DESIGN_PLAN.md</a> has the critique, workflow, design system, accessibility and rollout. <a href="screenshots/">screenshots/</a> has every capture.</p>
+</div>
+<script src="assets/ds.js"></script>
+</body>
+</html>
