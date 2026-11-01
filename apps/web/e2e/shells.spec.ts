@@ -59,6 +59,9 @@ const PARENT_ROUTES = [
   [`/live/${LIVE_TOKEN}/p/${players[0]!.id}`, 'h1'],
   [`/live/${LIVE_TOKEN}/tv`, 'table'],
   [`/t/${TABLE_SLUG}`, 'input'],
+  ['/mobile-app', '.ma'],
+  ['/privacy', 'h1'],
+  ['/terms', 'h1'],
 ] as const;
 
 for (const [path, ready] of PARENT_ROUTES) {
