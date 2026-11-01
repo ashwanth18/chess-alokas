@@ -1,4 +1,4 @@
-export const DEFAULT_CERT_SERIAL_PREFIX = 'ARCC';
+export const DEFAULT_CERT_SERIAL_PREFIX = 'CERT';
 export const DEFAULT_CERT_SERIAL_PAD = 3;
 
 export const DEFAULT_CERT_EMAIL_SUBJECT =

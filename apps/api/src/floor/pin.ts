@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const PIN_LEN = 6;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -8,6 +8,8 @@ export type ArbiterSessionPayload = {
   tableId: string;
   tableNumber: number;
   pinRound: number;
+  /** Which PIN issued this session. Rotating the PIN ends every session from the old one. */
+  pinGeneration: string;
   arbiterName?: string | null;
   exp: number;
 };
@@ -46,6 +48,25 @@ export function verifyArbiterPin(pin: string, stored: string | null | undefined)
   }
 }
 
+/**
+ * Identifies one issued PIN. Every hash has a fresh salt, so re-issuing a PIN for the
+ * same round changes this even if the digits happen to repeat.
+ */
+export function pinGenerationOf(pinHash: string | null | undefined): string | null {
+  if (!pinHash) return null;
+  return createHash('sha256').update(pinHash).digest('base64url').slice(0, 22);
+}
+
+/** A session is live only for the round and the PIN that issued it. */
+export function sessionMatchesPin(
+  session: Pick<ArbiterSessionPayload, 'pinRound' | 'pinGeneration'>,
+  pin: { hash: string | null; round: number | null },
+): boolean {
+  if (pin.round == null || session.pinRound !== pin.round) return false;
+  const generation = pinGenerationOf(pin.hash);
+  return Boolean(generation && session.pinGeneration === generation);
+}
+
 function b64url(buf: Buffer): string {
   return buf.toString('base64url');
 }
@@ -75,7 +96,9 @@ export function verifyArbiterSession(token: string | undefined | null): ArbiterS
     if (sig.length !== expected.length || !timingSafeEqual(sig, expected)) return null;
     const payload = JSON.parse(raw.toString('utf8')) as ArbiterSessionPayload;
     if (!payload.exp || Date.now() > payload.exp) return null;
-    if (!payload.tournamentId || !payload.tableId || !payload.pinRound) return null;
+    if (!payload.tournamentId || !payload.tableId || !payload.pinRound || !payload.pinGeneration) {
+      return null;
+    }
     return payload;
   } catch {
     return null;

@@ -44,14 +44,6 @@ const CreatePlayerProfileBodySchema = z.object({
 
 const UpdatePlayerProfileBodySchema = CreatePlayerProfileBodySchema.partial();
 
-const ClaimBodySchema = z
-  .object({
-    email: z.string().email().nullable().optional().or(z.literal('')),
-    fideId: z.number().int().positive().nullable().optional(),
-    fullName: z.string().max(120).nullable().optional(),
-  })
-  .optional();
-
 export const playerProfilesPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
   const { store } = opts;
 
@@ -145,23 +137,22 @@ export const playerProfilesPlugin: FastifyPluginAsync<PluginOptions> = async (ap
     },
   );
 
-  app.post<{ Params: { id: string }; Body: unknown }>(
+  app.post<{ Params: { id: string } }>(
     '/player/profiles/:id/claim',
     { preHandler: requireAuth },
     async (request, reply) => {
       const { id } = request.params;
       const userId = request.userId ?? DEFAULT_USER_ID;
-      const parsed = ClaimBodySchema.safeParse(request.body ?? {});
-      if (!parsed.success) {
-        return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
+      // Only a confirmed address proves who someone is. Names can be shared and FIDE ids
+      // are public, so anything else in the body is ignored.
+      const confirmedEmail = request.confirmedEmail ?? null;
+      if (!confirmedEmail) {
+        return reply.code(403).send({
+          error:
+            'Confirm your account email first. Past tournaments are linked using your confirmed email address.',
+        });
       }
-      const body = parsed.data;
-      const result = await store.claimPastParticipations(userId, id, {
-        email: body?.email || undefined,
-        fideId: body?.fideId ?? undefined,
-        fullName: body?.fullName ?? undefined,
-      });
-      return result;
+      return store.claimPastParticipations(userId, id, confirmedEmail);
     },
   );
 
@@ -171,7 +162,7 @@ export const playerProfilesPlugin: FastifyPluginAsync<PluginOptions> = async (ap
     async (request) => {
       const userId = request.userId ?? DEFAULT_USER_ID;
       const profileId = request.query.profileId ?? null;
-      return store.getPlayerCareerDashboard(userId, profileId);
+      return store.getPlayerCareerDashboard(userId, profileId, request.confirmedEmail ?? null);
     },
   );
 };

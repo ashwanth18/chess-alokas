@@ -8,6 +8,8 @@ services:
       PORT: "3001"
       HOST: "0.0.0.0"
       DATABASE_URL: ${DATABASE_URL}
+      # Traefik (Dokploy) + nginx sit in front of the API
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}

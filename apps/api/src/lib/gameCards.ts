@@ -145,6 +145,7 @@ export async function issueGameCard(
       actorUserId: input.actorUserId,
       note,
       lock: true,
+      onlyIfOpen: true,
     });
     if (!saved) {
       return { ok: false, status: 500, error: 'Failed to apply card-limit loss' };

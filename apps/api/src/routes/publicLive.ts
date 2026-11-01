@@ -7,7 +7,8 @@ type Opts = { store: Store };
 
 /**
  * Sanitized tournament snapshot for parents / players (no auth).
- * Omits emails, pins, floor slugs, owner ids, audit fields.
+ * Omits emails, pins, floor slugs, owner ids, audit fields, and players' age, birth year,
+ * school and club.
  */
 export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
   const { store } = opts;
@@ -41,7 +42,6 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
     const activePlayers = participants.filter((p) => !p.deletedAt);
     const mix = tournament.mixCategories === true || activeCategories.length === 0;
     const startRanks = computeStartRankMap(activePlayers, { mixCategories: mix });
-    const yearNow = new Date().getFullYear();
 
     return {
       tournament: {
@@ -61,24 +61,18 @@ export const publicLivePlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
         name: c.name,
         prizePlaces: c.prizePlaces ?? null,
       })),
-      players: activePlayers.map((p) => {
-        const fromAge =
-          p.age != null && p.age > 0 && p.age < 80 ? yearNow - p.age : null;
-        return {
-          id: p.id,
-          name: p.name,
-          rating: p.rating ?? null,
-          club: p.club ?? null,
-          school: p.school ?? p.club ?? null,
-          city: p.city ?? null,
-          state: p.state ?? null,
-          country: p.country ?? 'Malaysia',
-          age: p.age ?? null,
-          yearOfBirth: p.yearOfBirth ?? fromAge,
-          seed: p.seed ?? startRanks.get(p.id) ?? null,
-          categoryIds: p.categoryIds ?? [],
-        };
-      }),
+      // No age, year of birth, school or club: most players are children, and this page
+      // is public. Imports often store the school in club, so that goes too.
+      players: activePlayers.map((p) => ({
+        id: p.id,
+        name: p.name,
+        rating: p.rating ?? null,
+        city: p.city ?? null,
+        state: p.state ?? null,
+        country: p.country ?? 'Malaysia',
+        seed: p.seed ?? startRanks.get(p.id) ?? null,
+        categoryIds: p.categoryIds ?? [],
+      })),
       games: games
         .filter((g) => !g.deletedAt)
         .map((g) => {

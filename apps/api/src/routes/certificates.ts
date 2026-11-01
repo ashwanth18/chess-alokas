@@ -6,16 +6,39 @@ import {
   type CertificateIssueStore,
 } from '../certificates/store.js';
 import { readCertificatePdf, saveCertificatePdf } from '../certificates/storage.js';
-import { requireAuth } from '../auth.js';
+import { authEnabled, requireAuth } from '../auth.js';
 import {
   DEFAULT_CERT_EMAIL_BODY,
   DEFAULT_CERT_EMAIL_SUBJECT,
   certBodyToHtml,
   certTypeLabel,
   renderCertTemplate,
+  type Organization,
+  type OrganizationPlanTier,
 } from '@chess-alokas/shared';
 
 const MAX_EMAIL_PDF_BYTES = 8 * 1024 * 1024;
+
+/** Rolling 24-hour caps. A trial keeps its 5 test emails and has no bulk sending. */
+const TRIAL_TEST_EMAILS_PER_DAY = 5;
+const VERIFIED_TEST_EMAILS_PER_DAY = 50;
+const BULK_EMAILS_PER_DAY: Partial<Record<OrganizationPlanTier, number>> = {
+  event_pass: 500,
+  pro: 2000,
+  enterprise: 5000,
+};
+
+function testEmailLimit(org: Organization | null): number {
+  return org?.verificationStatus === 'verified'
+    ? VERIFIED_TEST_EMAILS_PER_DAY
+    : TRIAL_TEST_EMAILS_PER_DAY;
+}
+
+/** 0 means this organization may not bulk-send at all. */
+function bulkEmailLimit(org: Organization | null): number {
+  if (org?.verificationStatus !== 'verified') return 0;
+  return BULK_EMAILS_PER_DAY[org.planTier] ?? 0;
+}
 
 const IssueItemSchema = z.object({
   participantId: z.string().uuid().nullable().optional(),
@@ -193,6 +216,21 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
       }
 
+      for (const item of parsed.data.items) {
+        if (item.participantId) {
+          const participant = await tournamentStore.getParticipant(item.participantId);
+          if (participant?.tournamentId !== tournamentId) {
+            return reply.code(400).send({ error: 'participantId is not in this tournament.' });
+          }
+        }
+        if (item.categoryId) {
+          const category = await tournamentStore.getCategory(item.categoryId);
+          if (category?.tournamentId !== tournamentId) {
+            return reply.code(400).send({ error: 'categoryId is not in this tournament.' });
+          }
+        }
+      }
+
       const created = [];
       let storageBackend: 'supabase' | 'local' = 'local';
       for (const item of parsed.data.items) {
@@ -266,15 +304,14 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
               allowed = true;
             }
           }
-          if (!allowed && issue.recipientEmail) {
-            const targetEmail = issue.recipientEmail.trim().toLowerCase();
-            const userEmail = request.user?.email?.trim().toLowerCase();
-            if (
-              userEmail === targetEmail ||
-              profiles.some((p) => p.email?.trim().toLowerCase() === targetEmail)
-            ) {
-              allowed = true;
-            }
+          // profile.email is typed in by the user, so it proves nothing.
+          if (
+            !allowed &&
+            issue.recipientEmail &&
+            request.confirmedEmail &&
+            issue.recipientEmail.trim().toLowerCase() === request.confirmedEmail
+          ) {
+            allowed = true;
           }
         }
         if (!allowed) {
@@ -309,6 +346,37 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
       const parsed = EmailTestBodySchema.safeParse(request.body ?? {});
       if (!parsed.success) {
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
+      }
+
+      // With auth on, a test goes only to the sender's own confirmed address. Otherwise any
+      // account could use the platform's domain to mail strangers.
+      if (authEnabled() || request.confirmedEmail) {
+        const own = request.confirmedEmail ?? null;
+        if (!own) {
+          return reply.code(403).send({ error: 'Confirm your account email to send a test.' });
+        }
+        if (parsed.data.to.trim().toLowerCase() !== own) {
+          return reply.code(403).send({
+            error: 'Test emails can only be sent to your own account email address.',
+          });
+        }
+      }
+
+      const org = tournament.organizationId
+        ? await tournamentStore.getOrganization(tournament.organizationId)
+        : null;
+      const testCap = await tournamentStore.reserveEmailSends({
+        kind: 'test',
+        scopeKey: request.userId ? `user:${request.userId}` : `tournament:${tournamentId}`,
+        count: 1,
+        limit: testEmailLimit(org),
+        tournamentId,
+        userId: request.userId ?? null,
+      });
+      if (!testCap.allowed) {
+        return reply.code(429).send({
+          error: `Daily test email limit reached (${testCap.limit} per day).`,
+        });
       }
 
       const all = await certStore.listIssues(tournamentId);
@@ -388,6 +456,35 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
         targets = all.filter((i) => i.status !== 'pending');
       } else {
         targets = all.filter((i) => i.status === 'stored' || i.status === 'failed');
+      }
+
+      const bulkOrg = tournament.organizationId
+        ? await tournamentStore.getOrganization(tournament.organizationId)
+        : null;
+      // Local desktop use has no organizations and sends through the user's own Resend key.
+      if (authEnabled() || request.userId) {
+        const bulkLimit = bulkEmailLimit(bulkOrg);
+        if (bulkLimit === 0) {
+          return reply.code(403).send({
+            error: 'Organizer Verification is required to email certificates to players.',
+          });
+        }
+        const recipients = targets.filter((i) => i.recipientEmail?.trim()).length;
+        if (recipients > 0) {
+          const cap = await tournamentStore.reserveEmailSends({
+            kind: 'bulk',
+            scopeKey: `org:${bulkOrg!.id}`,
+            count: recipients,
+            limit: bulkLimit,
+            tournamentId,
+            userId: request.userId ?? null,
+          });
+          if (!cap.allowed) {
+            return reply.code(429).send({
+              error: `Daily certificate email limit reached: ${cap.used} of ${cap.limit} used, and this send needs ${recipients}.`,
+            });
+          }
+        }
       }
 
       const subjectTpl =

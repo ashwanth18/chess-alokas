@@ -42,6 +42,19 @@ export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, 
       return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
     }
     const input = parsed.data;
+    if (
+      input.organizationId &&
+      request.userId &&
+      !(await store.isOrganizationMember(input.organizationId, request.userId, [
+        'owner',
+        'admin',
+        'director',
+      ]))
+    ) {
+      return reply.code(403).send({
+        error: 'You must be an owner, admin or director of that organization.',
+      });
+    }
     const now = new Date().toISOString();
     const tournamentId = crypto.randomUUID();
 

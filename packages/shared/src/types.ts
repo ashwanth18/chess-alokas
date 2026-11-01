@@ -219,7 +219,7 @@ export const TournamentSchema = z.object({
   /** Mass-email subject; merge tags {{playerName}} {{tournament}} {{certType}} {{serial}}. */
   certEmailSubject: z.string().nullable().optional(),
   certEmailBody: z.string().nullable().optional(),
-  /** Serial prefix, e.g. ARCC → ARCC/001/2026. Unique per tournament. */
+  /** Serial prefix, e.g. OPEN → OPEN/001/2026. Unique per tournament. */
   certSerialPrefix: z.string().min(1).max(32).nullable().optional(),
   certSerialPad: z.number().int().min(1).max(8).nullable().optional(),
   /** Next sequence number to allocate (server-authoritative). */
@@ -244,6 +244,8 @@ export const TournamentSchema = z.object({
   currency: z.string().optional(),
   paymentInstructions: z.string().nullable().optional(),
   paymentQrUrl: z.string().nullable().optional(),
+  /** When an Event Pass credit paid for publishing this event. Charged only once. */
+  eventCreditConsumedAt: z.string().datetime().nullable().optional(),
   registrationFormSchema: z
     .object({
       collectSchool: z.boolean().default(true),
@@ -494,7 +496,7 @@ export const CertificateIssueSchema = z.object({
   contentSha256: z.string(),
   byteSize: z.number().int().nonnegative(),
   status: CertificateIssueStatusSchema,
-  /** Unique per tournament, e.g. ARCC/001/2026. */
+  /** Unique per tournament, e.g. OPEN/001/2026. */
   serial: z.string().nullable().optional(),
   emailedAt: z.string().datetime().nullable().optional(),
   error: z.string().nullable().optional(),
@@ -514,8 +516,48 @@ export type SyncPushItem = z.infer<typeof SyncPushItemSchema>;
 export const SyncPushRequestSchema = z.object({
   clientId: z.string().min(1),
   items: z.array(SyncPushItemSchema),
+  /**
+   * Set by clients that read `rejected` from the response. Older clients omit it and
+   * get a whole-batch 4xx for a permission or quota problem, so their rows stay dirty.
+   */
+  reportRejections: z.boolean().optional(),
 });
 export type SyncPushRequest = z.infer<typeof SyncPushRequestSchema>;
+
+export const SyncRejectionCodeSchema = z.enum([
+  /** Someone edited this row more recently. Pull brings their copy down. */
+  'stale',
+  /** The caller does not own this tournament, or the row belongs to another one. */
+  'forbidden',
+  /** organizationId names an organization the caller cannot manage. */
+  'forbidden_organization',
+  /** Plan limit reached. */
+  'quota',
+  /** The round is confirmed. Undo the confirmation to change its games. */
+  'round_confirmed',
+  /** A floor-locked result can only be replaced by a director result. */
+  'result_locked',
+  /** The parent tournament is not on the server. */
+  'tournament_not_found',
+  /** The payload fails validation, or refers to rows outside this tournament. */
+  'invalid',
+]);
+export type SyncRejectionCode = z.infer<typeof SyncRejectionCodeSchema>;
+
+export const SyncRejectionSchema = z.object({
+  entity: SyncPushItemSchema.shape.entity,
+  id: z.string().uuid(),
+  code: SyncRejectionCodeSchema,
+  reason: z.string(),
+});
+export type SyncRejection = z.infer<typeof SyncRejectionSchema>;
+
+export const SyncPushResponseSchema = z.object({
+  accepted: z.number().int().nonnegative(),
+  rejected: z.array(SyncRejectionSchema),
+  serverTime: z.string(),
+});
+export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;
 
 export const SUPPORTED_STYLES: TournamentStyle[] = ['swiss', 'dutch'];
 export const COMING_SOON_STYLES: TournamentStyle[] = ['round_robin'];
@@ -780,7 +822,13 @@ export const TournamentRegistrationSchema = z.object({
   playerSnapshot: RegistrationPlayerSnapshotSchema,
   customAnswers: z.record(z.unknown()).default({}),
   paymentStatus: RegistrationPaymentStatusSchema.default('not_required'),
+  /** Legacy rows only; new receipts live in private storage. Never sent to clients. */
   receiptDataUrl: z.string().nullable().optional(),
+  /** Internal storage location. Never sent to clients. */
+  receiptStoragePath: z.string().nullable().optional(),
+  receiptContentType: z.string().nullable().optional(),
+  /** Set on API responses; fetch bytes from /tournaments/:id/registrations/:regId/receipt. */
+  hasReceipt: z.boolean().optional(),
   amountCents: z.number().int().nonnegative().default(0),
   status: RegistrationStatusSchema.default('pending'),
   reviewerNote: z.string().nullable().optional(),
@@ -788,6 +836,8 @@ export const TournamentRegistrationSchema = z.object({
   participantId: z.string().uuid().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  /** Organizer list only: another live registration has this name and no email separates them. */
+  possibleDuplicate: z.boolean().optional(),
 });
 export type TournamentRegistration = z.infer<typeof TournamentRegistrationSchema>;
 

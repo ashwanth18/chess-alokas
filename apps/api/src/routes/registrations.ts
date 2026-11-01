@@ -3,18 +3,80 @@ import { z } from 'zod';
 import {
   DEFAULT_REGISTRATION_FORM_CONFIG,
   RegistrationFormConfigSchema,
+  type Organization,
+  type OrganizationMemberRole,
   type RegistrationPaymentStatus,
   type RegistrationPlayerSnapshot,
   type TournamentRegistration,
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { optionalAuth, requireAuth } from '../auth.js';
+import { rateLimit, type RateLimitBucket } from '../lib/rateLimit.js';
+import {
+  MAX_RECEIPT_BYTES,
+  decodeReceiptDataUrl,
+  readReceipt,
+  saveReceipt,
+} from '../registrations/receipts.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
 }
 
 const DEFAULT_USER_ID = '00000000-0000-4000-8000-000000000001';
+
+const MANAGER_ROLES: OrganizationMemberRole[] = ['owner', 'admin', 'director'];
+
+const REGISTER_ATTEMPTS: RateLimitBucket = new Map();
+const REGISTER_MAX_PER_WINDOW = 30;
+const REGISTER_WINDOW_MS = 15 * 60 * 1000;
+
+function isBlockedOrganization(org: Organization | null): boolean {
+  return org?.verificationStatus === 'suspended' || org?.verificationStatus === 'rejected';
+}
+
+/** Ownerless rows exist only in local demo mode; with auth on, they belong to nobody. */
+async function canManageTournament(
+  store: Store,
+  tournament: { ownerId?: string | null; organizationId?: string | null },
+  id: string,
+  userId: string,
+): Promise<boolean> {
+  if (process.env['AUTH_DISABLED'] === '1' && !tournament.ownerId && !tournament.organizationId) {
+    return true;
+  }
+  return store.isTournamentOwnedBy(id, userId);
+}
+
+/** Strips internal receipt fields and the bytes of legacy rows from API responses. */
+function toClientRegistration(reg: TournamentRegistration): TournamentRegistration {
+  const { receiptDataUrl, receiptStoragePath, receiptContentType, ...rest } = reg;
+  return { ...rest, hasReceipt: Boolean(receiptDataUrl || receiptStoragePath) };
+}
+
+/**
+ * Two live registrations with one name, where at least one has no email to tell them apart.
+ * Only a hint for the organizer: two children can share a name, so both stay allowed.
+ * The same name and email is refused when registering.
+ */
+function withDuplicateHints(registrations: TournamentRegistration[]): TournamentRegistration[] {
+  const nameOf = (r: TournamentRegistration) => r.playerSnapshot.name.trim().toLowerCase();
+  const live = registrations.filter((r) => r.status !== 'cancelled' && r.status !== 'rejected');
+  const byName = new Map<string, TournamentRegistration[]>();
+  for (const reg of live) {
+    byName.set(nameOf(reg), [...(byName.get(nameOf(reg)) ?? []), reg]);
+  }
+  const hasEmail = (r: TournamentRegistration) => Boolean(r.playerSnapshot.email?.trim());
+  return registrations.map((reg) => {
+    const twins = byName.get(nameOf(reg))?.filter((other) => other.id !== reg.id) ?? [];
+    const isLive = reg.status !== 'cancelled' && reg.status !== 'rejected';
+    return {
+      ...reg,
+      possibleDuplicate:
+        isLive && twins.some((other) => !hasEmail(reg) || !hasEmail(other)),
+    };
+  });
+}
 
 function slugifyTournamentName(name: string): string {
   const base = name
@@ -74,13 +136,15 @@ const PublicRegisterBodySchema = z.object({
   email: z.string().email().nullable().optional().or(z.literal('')),
   phone: z.string().max(64).nullable().optional(),
   customAnswers: z.record(z.unknown()).optional(),
-  receiptDataUrl: z.string().max(5_000_000).nullable().optional(),
+  // base64 of MAX_RECEIPT_BYTES, plus the data URL prefix
+  receiptDataUrl: z.string().max(7_000_100).nullable().optional(),
 });
 
 const ReviewRegistrationBodySchema = z.object({
   action: z.enum(['approve', 'reject', 'waitlist']),
   reviewerNote: z.string().max(1000).nullable().optional(),
   categoryIds: z.array(z.string().uuid()).optional(),
+  confirmPaymentWithoutReceipt: z.boolean().optional(),
 });
 
 export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
@@ -116,7 +180,11 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
   app.get<{ Params: { slugOrId: string } }>('/public/events/:slugOrId', async (request, reply) => {
     const { slugOrId } = request.params;
     const tournament = await store.getTournamentBySlugOrId(slugOrId);
-    if (!tournament || tournament.deletedAt) {
+    if (
+      !tournament ||
+      tournament.deletedAt ||
+      !(tournament.isPublishedGlobal || tournament.registrationOpen)
+    ) {
       return reply.code(404).send({ error: 'Event not found' });
     }
 
@@ -125,6 +193,9 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       store.listParticipants(tournament.id),
       tournament.organizationId ? store.getOrganization(tournament.organizationId) : Promise.resolve(null),
     ]);
+    if (isBlockedOrganization(org)) {
+      return reply.code(404).send({ error: 'Event not found' });
+    }
 
     const sanitizedCategories = categories.map((c) => ({
       id: c.id,
@@ -139,12 +210,8 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       name: p.name,
       rating: p.rating ?? null,
       fideId: p.fideId ?? null,
-      school: p.school ?? null,
-      club: p.club ?? null,
-      city: p.city ?? null,
-      state: p.state ?? null,
-      country: p.country ?? null,
-      yearOfBirth: p.yearOfBirth ?? null,
+      // Rosters include minors: no school, club (imports often hold the school there),
+      // home city or birth year on public pages.
       categoryIds: p.categoryIds ?? [],
     }));
 
@@ -189,9 +256,19 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
   // 3. Submit tournament registration (supports 1-click playerProfileId autofill + receipt upload)
   app.post<{ Params: { slugOrId: string }; Body: unknown }>(
     '/public/events/:slugOrId/register',
-    { preHandler: optionalAuth },
+    { preHandler: optionalAuth, bodyLimit: 8 * 1024 * 1024 },
     async (request, reply) => {
       const { slugOrId } = request.params;
+      if (
+        !rateLimit(
+          REGISTER_ATTEMPTS,
+          `${slugOrId}:${request.ip || 'unknown'}`,
+          REGISTER_MAX_PER_WINDOW,
+          REGISTER_WINDOW_MS,
+        )
+      ) {
+        return reply.code(429).send({ error: 'Too many registrations. Try again later.' });
+      }
       const tournament = await store.getTournamentBySlugOrId(slugOrId);
       if (!tournament || tournament.deletedAt) {
         return reply.code(404).send({ error: 'Event not found' });
@@ -199,6 +276,23 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       if (!tournament.registrationOpen) {
         return reply.code(400).send({
           error: 'Registration is currently closed for this tournament.',
+        });
+      }
+      if (
+        tournament.registrationDeadline &&
+        new Date(tournament.registrationDeadline).getTime() < Date.now()
+      ) {
+        return reply.code(400).send({ error: 'The registration deadline has passed.' });
+      }
+      const eventOrg = tournament.organizationId
+        ? await store.getOrganization(tournament.organizationId)
+        : null;
+      if (isBlockedOrganization(eventOrg)) {
+        return reply.code(404).send({ error: 'Event not found' });
+      }
+      if ((tournament.entryFeeCents ?? 0) > 0 && !eventOrg?.canAcceptPaidRegistrations) {
+        return reply.code(403).send({
+          error: 'This organizer is not currently able to accept paid registrations.',
         });
       }
 
@@ -211,6 +305,12 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       }
 
       const input = parsed.data;
+      if (input.selectedCategoryId) {
+        const category = await store.getCategory(input.selectedCategoryId);
+        if (!category || category.deletedAt || category.tournamentId !== tournament.id) {
+          return reply.code(400).send({ error: 'That category is not part of this tournament.' });
+        }
+      }
       const userId = request.userId ?? null;
       let linkedProfileId: string | null = null;
 
@@ -235,7 +335,10 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         if (!profile) {
           return reply.code(404).send({ error: 'Selected player profile not found' });
         }
-        if (userId && profile.accountUserId !== userId) {
+        if (!userId) {
+          return reply.code(401).send({ error: 'Sign in to register with a saved player profile.' });
+        }
+        if (profile.accountUserId !== userId) {
           return reply.code(403).send({
             error: 'Player profile does not belong to the signed-in account',
           });
@@ -280,17 +383,30 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       }
 
       const feeCents = tournament.entryFeeCents ?? 0;
-      const receiptDataUrl = input.receiptDataUrl?.trim() || null;
+      const receiptInput = input.receiptDataUrl?.trim() || null;
+      const receipt = receiptInput ? decodeReceiptDataUrl(receiptInput) : null;
+      if (receiptInput && !receipt) {
+        return reply.code(400).send({
+          error: `Receipt must be a PNG, JPEG, WebP or PDF file of at most ${Math.floor(MAX_RECEIPT_BYTES / (1024 * 1024))} MB.`,
+        });
+      }
       const paymentStatus: RegistrationPaymentStatus =
         feeCents > 0
-          ? receiptDataUrl
+          ? receipt
             ? 'submitted'
             : 'pending_receipt'
           : 'not_required';
 
+      const participantCount = tournament.maxParticipants
+        ? (await store.listParticipants(tournament.id)).length
+        : 0;
+      const isFull =
+        tournament.maxParticipants != null && participantCount >= tournament.maxParticipants;
+
       const nowIso = new Date().toISOString();
+      const registrationId = crypto.randomUUID();
       const registration: TournamentRegistration = {
-        id: crypto.randomUUID(),
+        id: registrationId,
         tournamentId: tournament.id,
         playerProfileId: linkedProfileId,
         submittedByUserId: userId,
@@ -312,9 +428,11 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         },
         customAnswers: input.customAnswers ?? {},
         paymentStatus,
-        receiptDataUrl,
+        receiptDataUrl: null,
+        receiptStoragePath: null,
+        receiptContentType: receipt?.contentType ?? null,
         amountCents: feeCents,
-        status: 'pending',
+        status: isFull ? 'waitlisted' : 'pending',
         reviewerNote: null,
         reviewedAt: null,
         participantId: null,
@@ -322,8 +440,11 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         updatedAt: nowIso,
       };
 
+      if (receipt) {
+        registration.receiptStoragePath = await saveReceipt(tournament.id, registrationId, receipt);
+      }
       const created = await store.createTournamentRegistration(registration);
-      return reply.code(201).send({ registration: created });
+      return reply.code(201).send({ registration: toClientRegistration(created) });
     },
   );
 
@@ -338,7 +459,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       if (!existing || existing.deletedAt) {
         return reply.code(404).send({ error: 'Tournament not found' });
       }
-      if (existing.ownerId && !(await store.isTournamentOwnedBy(id, userId))) {
+      if (!(await canManageTournament(store, existing, id, userId))) {
         return reply.code(403).send({ error: 'Forbidden' });
       }
 
@@ -351,9 +472,21 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       }
 
       const data = parsed.data;
+      // An arbiter-only membership grants nothing here, and neither does a tournament that
+      // was attached to an organization its owner doesn't belong to.
       const org = existing.organizationId
         ? await store.getOrganization(existing.organizationId)
-        : (await store.listUserOrganizations(userId))[0] ?? null;
+        : ((await store.listUserOrganizations(userId)).find((o) =>
+            MANAGER_ROLES.includes(o.memberRole),
+          ) ?? null);
+      if (
+        org &&
+        existing.organizationId &&
+        request.userId &&
+        !(await store.isOrganizationMember(org.id, request.userId, MANAGER_ROLES))
+      ) {
+        return reply.code(403).send({ error: 'You are not a member of this organization.' });
+      }
 
       const nextPublishedGlobal =
         data.isPublishedGlobal !== undefined
@@ -362,23 +495,18 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       const nextFeeCents =
         data.entryFeeCents !== undefined ? data.entryFeeCents : (existing.entryFeeCents ?? 0);
 
-      if (org) {
-        if (nextPublishedGlobal && !org.canPublishGlobal) {
-          return reply.code(403).send({
-            error:
-              'Organizer Verification is required to publish tournaments to the global discovery feed.',
-            message:
-              'Organizer Verification is required to publish tournaments to the global discovery feed.',
-          });
-        }
-        if (nextFeeCents > 0 && !org.canAcceptPaidRegistrations) {
-          return reply.code(403).send({
-            error:
-              'Organizer Verification is required to collect paid entry fees.',
-            message:
-              'Organizer Verification is required to collect paid entry fees.',
-          });
-        }
+      if (isBlockedOrganization(org)) {
+        const message = 'This organization is suspended or rejected and cannot publish events.';
+        return reply.code(403).send({ error: message, message });
+      }
+      if (nextPublishedGlobal && !(org?.verificationStatus === 'verified' && org.canPublishGlobal)) {
+        const message =
+          'Organizer Verification is required to publish tournaments to the global discovery feed.';
+        return reply.code(403).send({ error: message, message });
+      }
+      if (nextFeeCents > 0 && !org?.canAcceptPaidRegistrations) {
+        const message = 'Organizer Verification is required to collect paid entry fees.';
+        return reply.code(403).send({ error: message, message });
       }
 
       let publicSlug =
@@ -397,7 +525,15 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         publicSlug = candidate;
       }
 
+      // An Event Pass pays for one published event. Republishing doesn't charge again.
+      const chargeCredit =
+        nextPublishedGlobal &&
+        org?.planTier === 'event_pass' &&
+        !existing.eventCreditConsumedAt;
+
       const updated = await store.updateTournament(id, {
+        // The feed joins on organization_id, so attach the org that passed the gate.
+        ...(org && !existing.organizationId ? { organizationId: org.id } : {}),
         ...(data.publicSlug !== undefined || publicSlug !== existing.publicSlug
           ? { publicSlug }
           : {}),
@@ -433,7 +569,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
           ? { registrationFormSchema: data.registrationFormSchema }
           : {}),
         updatedAt: new Date().toISOString(),
-      });
+      }, chargeCredit && org ? { chargeEventCreditTo: org.id } : undefined);
 
       if (!updated) {
         return reply.code(404).send({ error: 'Tournament not found' });
@@ -453,12 +589,52 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       if (!existing || existing.deletedAt) {
         return reply.code(404).send({ error: 'Tournament not found' });
       }
-      if (existing.ownerId && !(await store.isTournamentOwnedBy(id, userId))) {
+      if (!(await canManageTournament(store, existing, id, userId))) {
         return reply.code(403).send({ error: 'Forbidden' });
       }
 
       const registrations = await store.listTournamentRegistrations(id);
-      return { registrations };
+      return { registrations: withDuplicateHints(registrations.map(toClientRegistration)) };
+    },
+  );
+
+  // Organizer views a payment receipt. Bytes are served only from this authorised route.
+  app.get<{ Params: { id: string; regId: string } }>(
+    '/tournaments/:id/registrations/:regId/receipt',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id, regId } = request.params;
+      const userId = request.userId ?? DEFAULT_USER_ID;
+      const existing = await store.getTournament(id);
+      if (!existing || existing.deletedAt) {
+        return reply.code(404).send({ error: 'Tournament not found' });
+      }
+      if (!(await canManageTournament(store, existing, id, userId))) {
+        return reply.code(403).send({ error: 'Forbidden' });
+      }
+      const reg = (await store.listTournamentRegistrations(id)).find((r) => r.id === regId);
+      if (!reg) return reply.code(404).send({ error: 'Registration not found' });
+
+      let receipt: { contentType: string; bytes: Uint8Array } | null = null;
+      if (reg.receiptStoragePath) {
+        const bytes = await readReceipt(reg.receiptStoragePath);
+        if (bytes) {
+          receipt = {
+            contentType: reg.receiptContentType ?? 'application/octet-stream',
+            bytes,
+          };
+        }
+      } else if (reg.receiptDataUrl) {
+        receipt = decodeReceiptDataUrl(reg.receiptDataUrl);
+      }
+      if (!receipt) return reply.code(404).send({ error: 'Receipt not found' });
+
+      return reply
+        .header('Content-Type', receipt.contentType)
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Cache-Control', 'private, no-store')
+        .header('Content-Security-Policy', "default-src 'none'; sandbox")
+        .send(Buffer.from(receipt.bytes));
     },
   );
 
@@ -473,7 +649,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       if (!existing || existing.deletedAt) {
         return reply.code(404).send({ error: 'Tournament not found' });
       }
-      if (existing.ownerId && !(await store.isTournamentOwnedBy(id, userId))) {
+      if (!(await canManageTournament(store, existing, id, userId))) {
         return reply.code(403).send({ error: 'Forbidden' });
       }
 
@@ -486,7 +662,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       }
 
       const result = await store.reviewTournamentRegistration(id, regId, parsed.data);
-      return result;
+      return { ...result, registration: toClientRegistration(result.registration) };
     },
   );
 
@@ -497,7 +673,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
     async (request) => {
       const userId = request.userId ?? DEFAULT_USER_ID;
       const registrations = await store.listUserRegistrations(userId);
-      return { registrations };
+      return { registrations: registrations.map(toClientRegistration) };
     },
   );
 };

@@ -69,7 +69,8 @@ describe('playerProfiles routes, past participation claim & career dashboard', (
       prizePlaces: 3,
       awardScope: 'per_category',
       sharedPlaces: true,
-      ownerId: ORGANIZER_USER,
+      // A second organizer: accounts with no organization are limited to one tournament.
+      ownerId: '77777777-7777-4777-8777-777777777777',
       tableCount: 10,
       publicToken: 'livetoken5678',
       publicEnabled: true,
@@ -122,6 +123,7 @@ describe('playerProfiles routes, past participation claim & career dashboard', (
       name: 'Aarav Ashwanth',
       age: 10,
       fideId: 5820001,
+      email: 'Parent@Example.com',
       rating: 1450,
       customFields: {},
       categoryIds: [],
@@ -217,11 +219,11 @@ describe('playerProfiles routes, past participation claim & career dashboard', (
     expect(childProfile.relationship).toBe('child');
     expect(childProfile.isPrimary).toBe(false);
 
-    // 3. Claim past & live participations for the child profile via FIDE ID
+    // 3. Claim past & live participations for the child profile via the confirmed email
     const claimRes = await app.inject({
       method: 'POST',
       url: `/player/profiles/${childProfile.id}/claim`,
-      headers: { 'x-test-user-id': PARENT_USER },
+      headers: { 'x-test-user-id': PARENT_USER, 'x-test-user-email': 'parent@example.com' },
       payload: {},
     });
     expect(claimRes.statusCode).toBe(200);

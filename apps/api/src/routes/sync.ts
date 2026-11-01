@@ -2,6 +2,7 @@ import type { FastifyPluginAsync, FastifyPluginOptions, FastifyReply, FastifyReq
 import { SyncPushRequestSchema } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth } from '../auth.js';
+import type { SyncPushResult } from '../lib/syncEngine.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -21,8 +22,10 @@ export const syncPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) =
     if (isNaN(Date.parse(since))) {
       return reply.code(400).send({ error: '"since" must be a valid ISO datetime string' });
     }
+    // Taken before the queries, so a row written while they run is seen by the next pull.
+    const serverTime = new Date().toISOString();
     const data = await store.pullSince(since, request.userId ?? null);
-    return { ...data, serverTime: new Date().toISOString() };
+    return { ...data, serverTime };
   }
 
   async function handlePush(request: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) {
@@ -30,18 +33,26 @@ export const syncPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) =
     if (!parsed.success) {
       return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
     }
+    let outcome: SyncPushResult;
     try {
-      await store.pushSync(parsed.data.items, request.userId ?? null);
+      outcome = await store.pushSync(parsed.data.items, request.userId ?? null, {
+        strict: parsed.data.reportRejections !== true,
+      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Sync push failed';
       const status =
         err && typeof err === 'object' && 'statusCode' in err && typeof err.statusCode === 'number'
           ? err.statusCode
           : 500;
+      if (status >= 500) {
+        request.log.error(err);
+        return reply.code(500).send({ error: 'Sync push failed', message: 'Sync push failed' });
+      }
+      const message = err instanceof Error ? err.message : 'Sync push failed';
       return reply.code(status).send({ error: message, message });
     }
     return reply.code(200).send({
-      accepted: parsed.data.items.length,
+      accepted: outcome.accepted,
+      rejected: outcome.rejected,
       serverTime: new Date().toISOString(),
     });
   }

@@ -7,7 +7,10 @@ import {
 } from '@chess-alokas/shared';
 import { z } from 'zod';
 import type { Store } from '../db.js';
+import { rateLimit } from '../lib/rateLimit.js';
 import {
+  pinGenerationOf,
+  sessionMatchesPin,
   signArbiterSession,
   verifyArbiterPin,
   verifyArbiterSessionToken,
@@ -26,22 +29,6 @@ const pinAttempts = new Map<string, { count: number; resetAt: number }>();
 const RESULT_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
 const CARD_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
 const ALERT_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
-
-function rateLimit(
-  map: Map<string, { count: number; resetAt: number }>,
-  key: string,
-  max: number,
-  windowMs: number,
-): boolean {
-  const now = Date.now();
-  const cur = map.get(key);
-  if (!cur || now > cur.resetAt) {
-    map.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-  cur.count += 1;
-  return cur.count <= max;
-}
 
 function sessionFromRequest(request: { headers: Record<string, unknown> }): string | null {
   const auth = String(request.headers['authorization'] ?? '');
@@ -94,8 +81,7 @@ async function buildView(
   const sessionOk = Boolean(
     session &&
       session.tournamentId === table.tournamentId &&
-      pinRound != null &&
-      session.pinRound === pinRound,
+      sessionMatchesPin(session, pinMeta),
   );
 
   if (!sessionOk || pinRound == null) {
@@ -137,8 +123,9 @@ async function buildView(
     gameId: game.id,
     whiteId: game.whiteId,
     blackId: game.blackId,
-    whiteName: white?.name ?? null,
-    blackName: black?.name ?? null,
+    // Never show a name from another tournament, even if an older row points at one.
+    whiteName: white?.tournamentId === tournament.id ? white.name : null,
+    blackName: black?.tournamentId === tournament.id ? black.name : null,
     status,
     result: game.result,
     sessionOk: true,
@@ -196,6 +183,7 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
         tableId: table.id,
         tableNumber: table.tableNumber,
         pinRound: pinMeta.round,
+        pinGeneration: pinGenerationOf(pinMeta.hash)!,
         arbiterName: parsed.data.arbiterName || null,
       });
 
@@ -221,7 +209,7 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
       }
 
       const pinMeta = await store.getArbiterPinMeta(tournament.id);
-      if (pinMeta.round == null || session.pinRound !== pinMeta.round) {
+      if (pinMeta.round == null || !sessionMatchesPin(session, pinMeta)) {
         return reply.code(401).send({ error: 'PIN expired for this round. Enter the new PIN.' });
       }
 
@@ -307,7 +295,7 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
       }
 
       const pinMeta = await store.getArbiterPinMeta(tournament.id);
-      if (pinMeta.round == null || session.pinRound !== pinMeta.round) {
+      if (pinMeta.round == null || !sessionMatchesPin(session, pinMeta)) {
         return reply.code(401).send({ error: 'PIN expired for this round. Enter the new PIN.' });
       }
 
@@ -342,6 +330,7 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
         actorRole: 'floor',
         actorName,
         lock: true,
+        onlyIfOpen: true,
       });
       if (!updated) return reply.code(500).send({ error: 'Failed to save result' });
 
@@ -382,7 +371,7 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
       }
 
       const pinMeta = await store.getArbiterPinMeta(tournament.id);
-      if (pinMeta.round == null || session.pinRound !== pinMeta.round) {
+      if (pinMeta.round == null || !sessionMatchesPin(session, pinMeta)) {
         return reply.code(401).send({ error: 'PIN expired for this round. Enter the new PIN.' });
       }
 
@@ -442,7 +431,7 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
       }
 
       const pinMeta = await store.getArbiterPinMeta(tournament.id);
-      if (pinMeta.round == null || session.pinRound !== pinMeta.round) {
+      if (pinMeta.round == null || !sessionMatchesPin(session, pinMeta)) {
         return reply.code(401).send({ error: 'PIN expired for this round. Enter the new PIN.' });
       }
 

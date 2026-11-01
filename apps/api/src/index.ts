@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { createStore } from './db.js';
-import { authPlugin } from './auth.js';
+import { assertAuthConfiguredForProduction, authPlugin } from './auth.js';
 import { tournamentsPlugin } from './routes/tournaments.js';
 import { importPlugin } from './routes/import.js';
 import { pairingPlugin } from './routes/pairing.js';
@@ -20,12 +20,17 @@ import { playerProfilesPlugin } from './routes/playerProfiles.js';
 import { registrationsPlugin } from './routes/registrations.js';
 import { Sentry, sentryEnabled } from './sentry.js';
 
+assertAuthConfiguredForProduction();
+
 const PORT = Number(process.env['PORT'] ?? 3001);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
 
 const app = Fastify({
   logger: true,
   bodyLimit: 50 * 1024 * 1024,
+  // Number of reverse proxies in front of the API. Without this, request.ip is the
+  // proxy's address and every per-IP rate limit is shared by all clients.
+  trustProxy: Number(process.env['TRUST_PROXY_HOPS'] ?? 0) || false,
 });
 
 app.addHook('onRequest', async (request) => {

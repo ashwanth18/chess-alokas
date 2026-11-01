@@ -85,9 +85,7 @@ export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
         };
       } catch (err) {
         request.log.error(err);
-        return reply.code(500).send({
-          error: err instanceof Error ? err.message : 'Floor prepare failed',
-        });
+        return reply.code(500).send({ error: 'Floor prepare failed' });
       }
     },
   );

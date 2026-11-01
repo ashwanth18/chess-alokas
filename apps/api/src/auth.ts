@@ -6,6 +6,8 @@ declare module 'fastify' {
   interface FastifyRequest {
     userId?: string;
     user?: User;
+    /** Lowercased email, set only when Supabase says the address is confirmed. */
+    confirmedEmail?: string | null;
   }
 }
 
@@ -15,6 +17,50 @@ let sessionsSql: Sql | null | undefined;
 export function authEnabled(): boolean {
   if (process.env['AUTH_DISABLED'] === '1') return false;
   return Boolean(process.env['SUPABASE_URL'] && getSupabaseAnonOrSecret());
+}
+
+/** Test identities are honoured only in explicit demo mode, and never in production. */
+function testIdentityAllowed(): boolean {
+  return process.env['AUTH_DISABLED'] === '1' && process.env['NODE_ENV'] !== 'production';
+}
+
+/**
+ * Production must verify real JWTs. Without this check a missing env var would quietly
+ * turn every route public. The desktop sidecar and `pnpm dev` don't set NODE_ENV=production.
+ */
+export function assertAuthConfiguredForProduction(env: NodeJS.ProcessEnv = process.env): void {
+  if (env['NODE_ENV'] !== 'production') return;
+  if (env['AUTH_DISABLED'] === '1') {
+    throw new Error('Refusing to start: AUTH_DISABLED=1 is not allowed when NODE_ENV=production.');
+  }
+  const key =
+    env['SUPABASE_ANON_KEY'] ||
+    env['SUPABASE_PUBLISHABLE_KEY'] ||
+    env['SUPABASE_SECRET_KEY'] ||
+    env['SUPABASE_SERVICE_ROLE_KEY'];
+  if (!env['SUPABASE_URL'] || !key) {
+    throw new Error(
+      'Refusing to start: SUPABASE_URL and a Supabase key are required when NODE_ENV=production.',
+    );
+  }
+}
+
+function applyTestIdentity(request: FastifyRequest): void {
+  if (!testIdentityAllowed()) return;
+  const testUserId = request.headers['x-test-user-id'];
+  if (typeof testUserId === 'string' && testUserId.trim()) {
+    request.userId = testUserId.trim();
+  }
+  const testEmail = request.headers['x-test-user-email'];
+  if (typeof testEmail === 'string' && testEmail.trim()) {
+    request.confirmedEmail = testEmail.trim().toLowerCase();
+  }
+}
+
+/** Fails closed: no confirmation timestamp from Supabase means no confirmed email. */
+export function confirmedEmailOf(user: Pick<User, 'email' | 'email_confirmed_at'>): string | null {
+  if (!user.email || !user.email_confirmed_at) return null;
+  return user.email.trim().toLowerCase() || null;
 }
 
 function getSupabaseAnonOrSecret(): string | undefined {
@@ -69,7 +115,7 @@ export async function requirePlatformAdmin(
 ): Promise<void> {
   if (!authEnabled()) {
     const testAdmin = request.headers['x-test-admin'];
-    if (testAdmin === '0' || testAdmin === 'false') {
+    if (!testIdentityAllowed() || testAdmin === '0' || testAdmin === 'false') {
       return reply.code(403).send({ error: 'Forbidden', message: 'Platform admin required' });
     }
     return;
@@ -92,8 +138,8 @@ export async function requirePlatformAdmin(
       return reply.code(403).send({ error: 'Forbidden', message: 'Platform admin required' });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Admin check failed';
-    return reply.code(500).send({ error: message });
+    request.log.error(err);
+    return reply.code(500).send({ error: 'Admin check failed' });
   }
 }
 
@@ -114,10 +160,7 @@ function sessionIdFromBearer(request: FastifyRequest): string | null {
 
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (!authEnabled()) {
-    const testUserId = request.headers['x-test-user-id'];
-    if (typeof testUserId === 'string' && testUserId.trim()) {
-      request.userId = testUserId.trim();
-    }
+    applyTestIdentity(request);
     return;
   }
 
@@ -136,14 +179,12 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   }
   request.user = data.user;
   request.userId = data.user.id;
+  request.confirmedEmail = confirmedEmailOf(data.user);
 }
 
 export async function optionalAuth(request: FastifyRequest): Promise<void> {
   if (!authEnabled()) {
-    const testUserId = request.headers['x-test-user-id'];
-    if (typeof testUserId === 'string' && testUserId.trim()) {
-      request.userId = testUserId.trim();
-    }
+    applyTestIdentity(request);
     return;
   }
 
@@ -158,6 +199,7 @@ export async function optionalAuth(request: FastifyRequest): Promise<void> {
     if (!error && data.user) {
       request.user = data.user;
       request.userId = data.user.id;
+      request.confirmedEmail = confirmedEmailOf(data.user);
     }
   } catch {
     /* ignore invalid optional token */
@@ -247,8 +289,8 @@ export const authPlugin: FastifyPluginAsync = async (app) => {
       }));
       return { sessions, unavailable: false };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to list sessions';
-      return reply.code(500).send({ error: message });
+      request.log.error(err);
+      return reply.code(500).send({ error: 'Failed to list sessions' });
     }
   });
 
@@ -275,8 +317,8 @@ export const authPlugin: FastifyPluginAsync = async (app) => {
         if (deleted.length === 0) return reply.code(404).send({ error: 'Session not found' });
         return reply.code(204).send();
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to revoke session';
-        return reply.code(500).send({ error: message });
+        request.log.error(err);
+        return reply.code(500).send({ error: 'Failed to revoke session' });
       }
     },
   );
