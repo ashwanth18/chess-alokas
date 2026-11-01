@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { BrandCrown } from '../ui/BrandCrown';
 
 interface AuthShellProps {
   title: string;
@@ -25,7 +26,7 @@ export default function AuthShell({ title, subtitle, children }: AuthShellProps)
           )}
           <Link to={homeTo} className="auth-top-brand" title="Chess Alokas">
             <span className="landing-queen" aria-hidden>
-              ♕
+              <BrandCrown />
             </span>
             Chess Alokas
           </Link>
@@ -36,7 +37,7 @@ export default function AuthShell({ title, subtitle, children }: AuthShellProps)
           <div className="auth-brand">
             <Link to={homeTo} className="auth-brand-mark" aria-label="Chess Alokas">
               <span className="brand-knight" aria-hidden>
-                ♕
+                <BrandCrown />
               </span>
             </Link>
             <h1>{title}</h1>

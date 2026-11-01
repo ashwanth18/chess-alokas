@@ -11,6 +11,7 @@ import { useAuth } from '../auth/AuthContext';
 import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
 import { useDeskSync } from '../shells/deskSync';
 import { PENDING_SIGNUP_STORAGE_KEY } from '../lib/pendingSignup';
+import { BrandCrown } from '../ui/BrandCrown';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -205,7 +206,7 @@ export default function Layout() {
       <header className="topbar">
         <NavLink to={isPlayerWorkspace ? '/player' : '/app'} className="brand" onClick={closeMenu}>
           <span className="brand-knight" aria-hidden>
-            ♕
+            <BrandCrown />
           </span>
           <span className="brand-name">Chess Alokas</span>
         </NavLink>
@@ -223,7 +224,7 @@ export default function Layout() {
             className={() => `workspace-pill ${!isPlayerWorkspace ? 'active' : ''}`}
             onClick={closeMenu}
           >
-            ♕ Organizer Desk
+            Organizer Desk
           </NavLink>
         </div>
 

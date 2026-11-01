@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { GuardianConsentNotice } from '../components/LegalLinks';
 import { trackPageView } from '../lib/pageAnalytics';
+import { BrandCrown } from '../ui/BrandCrown';
 
 const RELATIONSHIP_LABELS: Record<PlayerRelationship, string> = {
   self: 'Self',
@@ -226,7 +227,7 @@ export default function EventRegistrationPage() {
       <header className="topbar">
         <Link to="/discover" className="brand">
           <span className="brand-knight" aria-hidden>
-            ♕
+            <BrandCrown />
           </span>
           <span className="brand-name">Chess Alokas</span>
         </Link>

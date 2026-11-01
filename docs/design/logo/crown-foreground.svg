@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Chess Alokas">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0dfb8"/>
+      <stop offset="1" stop-color="#c7a56c"/>
+    </linearGradient>
+  </defs>
+    <g transform="translate(133 128) scale(10.250)" fill="url(#gold)">
+    <circle cx="12" cy="4" r="2"/>
+    <circle cx="3.500" cy="7" r="2"/>
+    <circle cx="20.500" cy="7" r="2"/>
+    <path d="M3.900 9.600 7.600 13l3.200-7h2.400l3.200 7 3.700-3.400L18.400 18H5.600zM5 19.500h14a1 1 0 0 1 1 1v.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-.5a1 1 0 0 1 1-1z"/>
+  </g>
+</svg>

@@ -47,7 +47,7 @@ test('the boot splash is the brand green with the mark, not a glyph', async ({ r
   const html = await (await request.get('/login')).text();
   expect(html).not.toContain('♕');
   expect(html).toContain('#0f3d2e');
-  expect(html).toContain('<rect x="8" y="1"');
+  expect(html).toContain('<circle cx="12" cy="4"');
 });
 
 test('the PWA manifest uses the brand green', async ({ request }) => {

@@ -4,6 +4,7 @@ import type { PublicEventSummary } from '@chess-alokas/shared';
 import { apiListPublicEvents } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { trackPageView } from '../lib/pageAnalytics';
+import { BrandCrown } from '../ui/BrandCrown';
 
 const RADIUS_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: '10 km', value: 10 },
@@ -118,7 +119,7 @@ export default function DiscoverEventsPage() {
       <header className="topbar">
         <Link to={auth.user ? '/player' : '/'} className="brand">
           <span className="brand-knight" aria-hidden>
-            ♕
+            <BrandCrown />
           </span>
           <span className="brand-name">Chess Alokas</span>
         </Link>
@@ -129,7 +130,7 @@ export default function DiscoverEventsPage() {
                 ♟ Player Portal
               </Link>
               <Link to="/app" className="btn btn-sm btn-primary">
-                ♕ Organizer Desk
+                Organizer Desk
               </Link>
             </>
           ) : (

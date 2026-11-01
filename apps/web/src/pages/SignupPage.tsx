@@ -165,7 +165,7 @@ export default function SignupPage() {
           className={`cat-tab ${role === 'organizer' ? 'active' : ''}`}
           onClick={() => setRole('organizer')}
         >
-          ♕ Organizer / Academy
+          Organizer / Academy
         </button>
       </div>
       )}

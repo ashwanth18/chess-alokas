@@ -82,8 +82,7 @@ Packaged layout under `resources/`:
 
 ### App icon
 
-No icon is configured yet, so the default Electron icon ships. The only assets in `apps/web/public` show a letter “U”, which does not fit the name. Add a 512x512 or larger `resources/icon.png` and electron-builder picks it up.
-
+The app icon is the Alokas crown, `resources/icon.png` (1024x1024), generated from `docs/design/logo/crown.svg`. electron-builder picks it up for all platforms.
 ## Releases (CI)
 
 See the full checklist in [`deploy/PIPELINE.md`](../../deploy/PIPELINE.md) §2.

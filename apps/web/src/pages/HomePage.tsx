@@ -8,6 +8,7 @@ import TableSearch from '../components/TableSearch';
 import { matchesTextSearch } from '../lib/textSearch';
 import { styleLabel } from '@chess-alokas/pairing-engine';
 import { useAuth } from '../auth/AuthContext';
+import { BrandCrown } from '../ui/BrandCrown';
 
 const PAGE_SIZE = 10;
 
@@ -99,7 +100,7 @@ export default function HomePage() {
         <div className="hero-board-bg" aria-hidden="true" />
         <div className="hero-content">
           <h1 className="hero-title">
-            <span className="hero-knight">♕</span>
+            <span className="hero-knight"><BrandCrown /></span>
             Chess Alokas
           </h1>
           <p className="hero-tagline">
@@ -125,7 +126,7 @@ export default function HomePage() {
 
         {tournaments !== undefined && isEmpty && (
           <div className="empty-state">
-            <span className="empty-icon">♕</span>
+            <span className="empty-icon"><BrandCrown /></span>
             <h3>No tournaments yet</h3>
             <p>Create one here, or hit Sync if you already have cloud tournaments.</p>
             <div className="empty-actions">
