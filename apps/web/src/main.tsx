@@ -49,6 +49,8 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const TableScoringPage = lazy(() => import('./pages/TableScoringPage'));
 const LivePage = lazy(() => import('./pages/LivePage'));
 const LiveTvPage = lazy(() => import('./pages/LiveTvPage'));
+const PrivacyPage = lazy(() => import('./pages/legal/PrivacyPage'));
+const TermsPage = lazy(() => import('./pages/legal/TermsPage'));
 
 if (import.meta.env.VITE_DESKTOP !== '1') {
   void import('./pwaRegister');
@@ -105,6 +107,8 @@ function AppRoot() {
             <Route path="/discover" element={<DiscoverEventsPage />} />
             <Route path="/register/:slug" element={<EventRegistrationPage />} />
             <Route path="/invite/:token" element={<InvitePage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
             <Route
               element={
                 <RequireAuth>
