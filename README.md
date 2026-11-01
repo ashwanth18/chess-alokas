@@ -21,6 +21,8 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - Web + API: **`https://chess-manager.alokas.com`** (Dokploy)
 - **Deployment pipeline (ship web / desktop / migrations):** [`deploy/PIPELINE.md`](deploy/PIPELINE.md)
 - Dokploy one-time setup: [`deploy/DOKPLOY.md`](deploy/DOKPLOY.md)
+- Self-hosted Supabase migration guide: [`deploy/SUPABASE_MIGRATION.md`](deploy/SUPABASE_MIGRATION.md)
+- Engineering & agent rules handbook: [`docs/ENGINEERING_AND_AGENT_RULES.md`](docs/ENGINEERING_AND_AGENT_RULES.md)
 - Agent handoff: [`docs/AGENT_HANDOFF.md`](docs/AGENT_HANDOFF.md)
 
 ## Monorepo

@@ -190,6 +190,8 @@ Use when a feature needs web **and** desktop:
 | Doc | Purpose |
 |-----|---------|
 | [`DOKPLOY.md`](./DOKPLOY.md) | One-time VPS / DNS / env / Auth setup |
+| [`SUPABASE_MIGRATION.md`](./SUPABASE_MIGRATION.md) | Self-hosted Supabase on Dokploy options & migration playbook |
 | [`apps/desktop/README.md`](../apps/desktop/README.md) | Electron architecture & local builds |
+| [`docs/ENGINEERING_AND_AGENT_RULES.md`](../docs/ENGINEERING_AND_AGENT_RULES.md) | Engineering, RLS, testing & per-feature git/doc standards |
 | [`docs/AGENT_HANDOFF.md`](../docs/AGENT_HANDOFF.md) | Agent working memory |
 | Root [`README.md`](../README.md) | Product overview & local setup |

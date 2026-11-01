@@ -1,0 +1,30 @@
+---
+description: Core engineering, security, testing, documentation, and git commit rules for Chess Alokas 2.0
+alwaysApply: true
+---
+
+# Chess Alokas Engineering & Per-Feature Delivery Rules
+
+Always follow [`docs/ENGINEERING_AND_AGENT_RULES.md`](../../docs/ENGINEERING_AND_AGENT_RULES.md) and [`docs/AGENT_HANDOFF.md`](../../docs/AGENT_HANDOFF.md).
+
+## 1. Architecture & Security Invariants
+
+1. **Shared Contracts**: Put shared types, Zod schemas, and pure helpers in `packages/shared`.
+2. **Dual-Store Parity**: Every `Store` method in `apps/api/src/db.ts` must be implemented in both `MemoryStore` and `PostgresStore` with matching ownership and `tournament_id` guards.
+3. **Tenant & Role Security**:
+   - B2B Organizer actions must verify ownership or organization membership (`organizations` / `organization_members`) and enforce Sandbox Trial limits (`verification_status`, `plan_tier`, `max_tournaments_quota`, `max_players_per_tournament`, `can_publish_global`).
+   - Privileged columns (`profiles.is_platform_admin`, `organizations.verification_status`, `organizations.plan_tier`, `organizations.can_publish_global`) must never be writable by regular `authenticated` users via PostgREST RLS.
+4. **Migrations**: Create numbered, idempotent SQL files in `supabase/migrations/NNN_*.sql` with `ENABLE ROW LEVEL SECURITY` on all `public` tables.
+
+## 2. Mandatory Per-Feature Definition of Done (Test -> Document -> Commit)
+
+Whenever completing a feature or roadmap phase:
+
+1. **Verify**:
+   - Run `pnpm typecheck`, `pnpm test`, and `pnpm build` (plus `flutter test` when touching `apps/mobile`).
+   - Add unit/integration tests for new pairing, schema, or API store logic.
+2. **Document**:
+   - Create or update the relevant feature doc in `docs/`, update root `README.md` if routes/features/tables changed, and update `docs/AGENT_HANDOFF.md`.
+3. **Atomic Git Commit**:
+   - Stage only intentional code, migrations, tests, and docs (never `.env` or `.cursor/mcp.json`).
+   - Commit with a PowerShell-safe `git commit -m "..."` message.

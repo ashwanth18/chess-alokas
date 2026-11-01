@@ -31,6 +31,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 - [x] Platform admin dashboard: cross-account usage metrics, page-view analytics (`admin.ts`, `AdminPage.tsx`)
 - [x] Sentry error monitoring (free tier) — web, API, desktop
 - [x] Deep-scan security & workflow fixes across Web, Desktop, Pairing Engine, API, and DB (`023_fix_style_check_and_profiles_rls.sql`)
+- [x] Engineering & agent rules handbook (`docs/ENGINEERING_AND_AGENT_RULES.md`, `.cursor/rules/engineering.mdc`) + self-hosted Supabase migration guide (`deploy/SUPABASE_MIGRATION.md`)
 - [x] `scripts/replay-arcc-dutch.mts` — validation tool replaying ARCC 2026 through Dutch/bbp vs. actual results
 
 ## Auth model
@@ -59,6 +60,8 @@ Offline-first chess tournament manager with **per-manager accounts**:
 | `packages/pairing-engine/src/dutch/` | Dutch pairing (bbp.ts wraps `bbpPairings` binary) |
 | `packages/pairing-engine/src/standings.ts` | Tiebreak calculations |
 | `deploy/DOKPLOY.md` | VPS deploy checklist |
+| `deploy/SUPABASE_MIGRATION.md` | Self-hosted Supabase on Dokploy options & cutover playbook |
+| `docs/ENGINEERING_AND_AGENT_RULES.md` | Mandatory engineering, security, testing, docs & commit rules |
 | `scripts/replay-arcc-dutch.mts` | Replays a real event through Dutch/Swiss engines vs. actual results — validation tool, run with `npx tsx` |
 
 ## How to resume

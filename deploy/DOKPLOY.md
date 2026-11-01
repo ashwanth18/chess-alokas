@@ -3,6 +3,7 @@
 Domain: **`chess-manager.alokas.com`**
 
 > **Day-to-day shipping** (web push, desktop tags, migrations): see [`PIPELINE.md`](./PIPELINE.md).
+> **Self-hosting Supabase on Dokploy VPS** (future cutover options & runbook): see [`SUPABASE_MIGRATION.md`](./SUPABASE_MIGRATION.md).
 > This file is the **one-time** Dokploy / DNS / Auth setup checklist.
 
 ## 1. DNS
