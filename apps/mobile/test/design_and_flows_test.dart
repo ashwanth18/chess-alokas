@@ -13,9 +13,11 @@ import 'package:chess_alokas_mobile/services/device_location.dart';
 import 'package:chess_alokas_mobile/services/local_store.dart';
 import 'package:chess_alokas_mobile/theme/alokas_theme.dart';
 import 'package:chess_alokas_mobile/theme/alokas_tokens.dart';
+import 'package:chess_alokas_mobile/widgets/legal.dart';
 import 'package:chess_alokas_mobile/widgets/player_name.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 import 'fixtures/fake_api.dart';
 
@@ -1184,6 +1186,223 @@ void main() {
       expect(find.byKey(const Key('checkin-qr')), findsOneWidget);
       expect(find.byKey(const Key('checkin-not-confirmed')), findsOneWidget);
       expect(find.text('#12 · Under 12'), findsOneWidget);
+    });
+  });
+
+  group('Guardian consent', () {
+    const childId = '00000000-0000-4000-8000-00000000a002';
+    Map<String, dynamic> child() => {
+      'id': childId,
+      'isPrimary': false,
+      'relationship': 'child',
+      'fullName': 'Test Child One',
+      'yearOfBirth': 2015,
+    };
+
+    test('the rule matches packages/shared/src/guardianConsent.ts', () {
+      final now = DateTime(2026, 11, 1);
+      bool need(String? rel, int? year) => guardianConsentRequired(
+        relationship: rel,
+        yearOfBirth: year,
+        now: now,
+      );
+      expect(need('child', null), isTrue);
+      expect(need('child', 1990), isTrue);
+      expect(need('self', null), isFalse);
+      expect(need('self', 2000), isFalse);
+      expect(need('self', 2008), isTrue, reason: 'turning 18 this year');
+      expect(need('self', 2007), isFalse);
+      expect(need('student', null), isTrue);
+      expect(need('family', 1990), isFalse);
+      expect(need('family', 2015), isTrue);
+      expect(
+        guardianConsentRequired(
+          relationship: 'self',
+          dateOfBirth: '2008-12-31',
+          now: now,
+        ),
+        isTrue,
+      );
+      expect(
+        guardianConsentRequired(
+          relationship: 'self',
+          dateOfBirth: '2008-01-01',
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
+    FakeBackend backend() => FakeBackend({
+      'GET $_eventsPath': (_) => jsonResponse({
+        'events': [fakeEvent()],
+      }),
+      'GET $_detailPath': (_) => jsonResponse(_eventDetail(fakeEvent())),
+      ..._account(),
+      'GET /api/player/profiles': (_) => jsonResponse({
+        'profiles': [child()],
+      }),
+      'POST $_registerPath': (_) =>
+          jsonResponse({'registration': fakeRegistration()}, 201),
+    });
+
+    testWidgets('registering a child shows the line and sends consent', (
+      tester,
+    ) async {
+      final api = backend();
+      await _pump(tester, api, storage: _signedIn());
+      await _startRegistering(tester);
+
+      expect(find.byType(Checkbox), findsNothing);
+      expect(find.byKey(const Key('guardian-consent-notice')), findsOneWidget);
+      expect(find.textContaining('By submitting, you confirm'), findsOneWidget);
+
+      await _tapKey(tester, 'confirm-register-button');
+      final body = jsonDecode(api.sent('POST', _registerPath).single.body);
+      expect(body['guardianConsent'], isTrue);
+    });
+
+    testWidgets('no line and no consent for an adult registering themselves', (
+      tester,
+    ) async {
+      final api = FakeBackend({
+        'GET $_eventsPath': (_) => jsonResponse({
+          'events': [fakeEvent()],
+        }),
+        'GET $_detailPath': (_) => jsonResponse(_eventDetail(fakeEvent())),
+        ..._account(),
+        'POST $_registerPath': (_) =>
+            jsonResponse({'registration': fakeRegistration()}, 201),
+      });
+      await _pump(tester, api, storage: _signedIn());
+      await _startRegistering(tester);
+      expect(find.byKey(const Key('guardian-consent-notice')), findsNothing);
+      await _tapKey(tester, 'confirm-register-button');
+      final body = jsonDecode(api.sent('POST', _registerPath).single.body);
+      expect(body.containsKey('guardianConsent'), isFalse);
+    });
+
+    testWidgets('a child profile shows the line and sends consent', (
+      tester,
+    ) async {
+      Map<String, dynamic>? posted;
+      final api = FakeBackend({
+        'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
+        ..._account(),
+        'POST /api/player/profiles': (r) {
+          posted = jsonDecode(r.body) as Map<String, dynamic>;
+          return jsonResponse({'profile': fakeProfile()}, 201);
+        },
+      });
+      await _pump(tester, api, storage: _signedIn());
+      await tester.tap(find.text('Account'));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'open-add-profile-button');
+      // There is already one profile, so a new one defaults to child.
+      expect(find.byKey(const Key('guardian-consent-notice')), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('add-profile-fullname')),
+        'Test Child Two',
+      );
+      await _tapKey(tester, 'save-profile-button');
+      expect(posted!['guardianConsent'], isTrue);
+    });
+  });
+
+  group('Legal and account deletion', () {
+    Map<String, FakeHandler> routes(FakeHandler delete) => {
+      'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
+      ..._account(),
+      'DELETE /api/me': delete,
+    };
+
+    Future<void> openDialog(WidgetTester tester) async {
+      await tester.tap(find.text('Account'));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'open-delete-account');
+    }
+
+    testWidgets('links open the real pages', (tester) async {
+      final opened = <String>[];
+      final previous = LegalLink.opener;
+      LegalLink.opener = (uri) async {
+        opened.add(uri.toString());
+        return true;
+      };
+      addTearDown(() => LegalLink.opener = previous);
+      await _pump(tester, FakeBackend(routes((_) => jsonResponse(null, 204))));
+      await tester.tap(find.text('Account'));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'link-$privacyUrl');
+      await _tapKey(tester, 'link-$termsUrl');
+      expect(opened, [privacyUrl, termsUrl]);
+    });
+
+    testWidgets('sign-up shows the agreement with its links', (tester) async {
+      await _pump(tester, FakeBackend(routes((_) => jsonResponse(null, 204))));
+      await tester.tap(find.text('Account'));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'open-sign-in-button');
+      await _tapKey(tester, 'open-sign-up');
+      expect(find.byKey(const Key('signup-agreement')), findsOneWidget);
+      expect(find.byKey(const Key('link-$termsUrl')), findsWidgets);
+    });
+
+    testWidgets(
+      'deleting needs the email typed, says what stays, then signs out',
+      (tester) async {
+        final api = FakeBackend(routes((_) => http.Response('', 204)));
+        final storage = _signedIn();
+        final store = await _pump(tester, api, storage: storage);
+        await openDialog(tester);
+
+        expect(find.textContaining('Results stay'), findsOneWidget);
+        expect(
+          find.byKey(const Key('link-$privacyRetentionUrl')),
+          findsOneWidget,
+        );
+        final confirm = find.byKey(const Key('confirm-delete-account'));
+        expect(tester.widget<ElevatedButton>(confirm).onPressed, isNull);
+
+        await tester.enterText(
+          find.byKey(const Key('delete-account-email')),
+          'player@example.test',
+        );
+        await tester.pumpAndSettle();
+        await _tapKey(tester, 'confirm-delete-account');
+
+        expect(api.sent('DELETE', '/api/me'), hasLength(1));
+        expect(storage.value, isNull);
+        expect(find.byKey(const Key('open-sign-in-button')), findsOneWidget);
+        final keys = (store as InMemoryLocalStore).texts.keys;
+        expect(keys.where((k) => k.startsWith('draft_')), isEmpty);
+        expect(
+          keys.where((k) => k.startsWith('cache_') && k != 'cache_events.json'),
+          isEmpty,
+        );
+      },
+    );
+
+    testWidgets('a refusal says it was not deleted and stays signed in', (
+      tester,
+    ) async {
+      final api = FakeBackend(
+        routes(
+          (_) => jsonResponse({'error': 'Auth admin not configured'}, 503),
+        ),
+      );
+      final storage = _signedIn();
+      await _pump(tester, api, storage: storage);
+      await openDialog(tester);
+      await tester.enterText(
+        find.byKey(const Key('delete-account-email')),
+        'player@example.test',
+      );
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'confirm-delete-account');
+
+      expect(find.byKey(const Key('delete-account-error')), findsOneWidget);
+      expect(storage.value, isNotNull);
     });
   });
 

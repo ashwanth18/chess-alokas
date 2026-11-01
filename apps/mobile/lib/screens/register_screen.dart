@@ -6,6 +6,7 @@ import '../services/alokas_api.dart';
 import '../services/file_gateway.dart';
 import '../services/local_store.dart';
 import '../theme/alokas_theme.dart';
+import '../widgets/legal.dart';
 import '../widgets/message_card.dart';
 import '../widgets/player_name.dart';
 import 'event_screen.dart';
@@ -15,10 +16,15 @@ class RegistrationSelection {
   final String? categoryId;
   final Map<String, String> customAnswers;
 
+  /// Sent when this player's entry was submitted from a screen showing the
+  /// parent or guardian line.
+  final bool guardianConsent;
+
   const RegistrationSelection({
     required this.profile,
     this.categoryId,
     this.customAnswers = const {},
+    this.guardianConsent = false,
   });
 }
 
@@ -81,6 +87,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// retry cannot create a duplicate.
   final Map<String, RegistrationRecord?> _submitted = {};
   final Map<String, TextEditingController> _answerControllers = {};
+
   ReceiptFile? _receipt;
   String? _receiptError;
   String? _stepError;
@@ -311,6 +318,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           profile: profile,
           categoryId: _categories[profile.id],
           customAnswers: _answers[profile.id] ?? const {},
+          guardianConsent: profile.registrationNeedsConsent,
         ),
     ];
     setState(() {
@@ -479,6 +487,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (isLast &&
+                  _selectedProfiles.any((p) => p.registrationNeedsConsent))
+                const GuardianConsentNotice(
+                  key: Key('guardian-consent-notice'),
+                ),
               if (isLast)
                 ElevatedButton(
                   key: const Key('confirm-register-button'),

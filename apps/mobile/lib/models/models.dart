@@ -442,6 +442,39 @@ class EventDetail {
   }
 }
 
+/// True, false, or null when nothing says how old the player is. Same rule as
+/// packages/shared/src/guardianConsent.ts. Self-reported, never verified. A year
+/// alone can't tell whether this year's birthday has passed, so someone turning
+/// 18 this year counts as under 18.
+bool? isUnder18({int? yearOfBirth, String? dateOfBirth, DateTime? now}) {
+  final today = now ?? DateTime.now();
+  final dob = dateOfBirth == null ? null : DateTime.tryParse(dateOfBirth);
+  if (dob != null) {
+    final eighteenth = DateTime(dob.year + 18, dob.month, dob.day);
+    return today.isBefore(eighteenth);
+  }
+  return yearOfBirth == null ? null : today.year - yearOfBirth <= 18;
+}
+
+/// Whether a parent or guardian's consent is needed before saving this player:
+/// a child always; a person's own profile only if it says they are under 18;
+/// anything else unless the age shows an adult.
+bool guardianConsentRequired({
+  String? relationship,
+  int? yearOfBirth,
+  String? dateOfBirth,
+  DateTime? now,
+}) {
+  if (relationship == 'child') return true;
+  final under18 = isUnder18(
+    yearOfBirth: yearOfBirth,
+    dateOfBirth: dateOfBirth,
+    now: now,
+  );
+  if (relationship == 'self') return under18 == true;
+  return under18 != false;
+}
+
 class MobilePlayerProfile {
   final String id;
   final String fullName;
@@ -462,6 +495,10 @@ class MobilePlayerProfile {
   final String? country;
   final String? email;
   final String? phone;
+  final String? dateOfBirth;
+
+  /// When a parent or guardian consented for this profile; null if never.
+  final String? guardianConsentAt;
 
   /// The row as the API gave it, for the offline copy.
   final Map<String, dynamic>? raw;
@@ -486,8 +523,18 @@ class MobilePlayerProfile {
     this.country,
     this.email,
     this.phone,
+    this.dateOfBirth,
+    this.guardianConsentAt,
     this.raw,
   });
+
+  /// Asked at every registration, even with a saved profile, because each entry
+  /// goes to a new organizer.
+  bool get registrationNeedsConsent => guardianConsentRequired(
+    relationship: relationship,
+    yearOfBirth: yearOfBirth,
+    dateOfBirth: dateOfBirth,
+  );
 
   /// Age reached in the current calendar year; null if the birth year is unknown.
   int? get age => ageInYear(DateTime.now().year);
@@ -571,6 +618,8 @@ class MobilePlayerProfile {
       country: _string(json['country']),
       email: _string(json['email']),
       phone: _string(json['phone']),
+      dateOfBirth: dateOfBirth,
+      guardianConsentAt: _string(json['guardianConsentAt']),
       raw: json,
     );
   }

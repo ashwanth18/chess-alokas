@@ -342,6 +342,7 @@ class AlokasApiClient {
     String? categoryId,
     ReceiptFile? receipt,
     Map<String, String> customAnswers = const {},
+    bool guardianConsent = false,
   }) {
     return _readJson(
       _request(
@@ -353,6 +354,7 @@ class AlokasApiClient {
             'selectedCategoryId': categoryId,
           if (receipt != null) 'receiptDataUrl': receipt.toDataUrl(),
           if (customAnswers.isNotEmpty) 'customAnswers': customAnswers,
+          if (guardianConsent) 'guardianConsent': true,
         },
         authed: true,
         timeout: receipt == null ? _defaultTimeout : _uploadTimeout,
@@ -410,6 +412,20 @@ class AlokasApiClient {
       );
     }
     return result;
+  }
+
+  /// `DELETE /me`. On success this device forgets the session straight away;
+  /// the sign-in account no longer exists to tell.
+  Future<ApiResult<void>> deleteAccount() async {
+    final outcome = await _request('DELETE', '/me', authed: true);
+    switch (outcome) {
+      case ApiFailure(:final message, :final statusCode):
+        return ApiFailure(message, statusCode: statusCode);
+      case ApiSuccess(value: final response):
+        if (response.statusCode != 204) return _failureFrom(response);
+        await _setSession(null);
+        return const ApiSuccess(null);
+    }
   }
 
   // ---- Live tournament ----

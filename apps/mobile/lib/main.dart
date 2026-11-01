@@ -358,6 +358,17 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     await _api.signOut();
   }
 
+  /// The account is gone only once the server says so; then so is this phone's
+  /// copy of it.
+  Future<ApiResult<void>> _deleteAccount() async {
+    final result = await _api.deleteAccount();
+    if (result is ApiSuccess<void>) {
+      await _cache.clearAccounts();
+      await _drafts.clearAll();
+    }
+    return result;
+  }
+
   Future<void> _refreshEvents() {
     setState(() {
       _eventsLoading = true;
@@ -599,6 +610,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         categoryId: selection.categoryId,
         receipt: receipt,
         customAnswers: selection.customAnswers,
+        guardianConsent: selection.guardianConsent,
       );
       attempts.add(
         RegistrationAttempt(profile: selection.profile, result: result),
@@ -777,6 +789,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         onResendConfirmation: _api.auth.resendConfirmation,
         onRequestPasswordReset: _api.auth.requestPasswordReset,
         onSignOut: _signOut,
+        onDeleteAccount: _deleteAccount,
         themeChoice: _theme,
         onThemeChanged: _chooseTheme,
         registrations: _registrations,

@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/alokas_api.dart';
 import '../services/file_gateway.dart';
 import '../theme/alokas_theme.dart';
+import '../widgets/legal.dart';
 import '../widgets/message_card.dart';
 import '../widgets/player_name.dart';
 
@@ -36,6 +37,7 @@ class ProfilesScreen extends StatelessWidget {
   final Future<ApiResult<void>> Function(String email) onResendConfirmation;
   final Future<ApiResult<void>> Function(String email) onRequestPasswordReset;
   final Future<void> Function() onSignOut;
+  final Future<ApiResult<void>> Function() onDeleteAccount;
   final AlokasThemeChoice themeChoice;
   final ValueChanged<AlokasThemeChoice> onThemeChanged;
 
@@ -68,6 +70,7 @@ class ProfilesScreen extends StatelessWidget {
     required this.onResendConfirmation,
     required this.onRequestPasswordReset,
     required this.onSignOut,
+    required this.onDeleteAccount,
     required this.themeChoice,
     required this.onThemeChanged,
     required this.registrations,
@@ -156,6 +159,17 @@ class ProfilesScreen extends StatelessWidget {
       case ApiFailure(:final message):
         _say(context, 'Claim failed: $message');
     }
+  }
+
+  void _openDeleteAccount(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => _DeleteAccountDialog(
+        email: signedInEmail ?? '',
+        onDelete: onDeleteAccount,
+        onDeleted: () => _say(context, 'Your account was deleted.'),
+      ),
+    );
   }
 
   void _openSignInSheet(BuildContext context) {
@@ -262,6 +276,21 @@ class ProfilesScreen extends StatelessWidget {
             for (final profile in profiles) _buildProfile(context, profile),
           ],
         ],
+        const SizedBox(height: 16),
+        const Wrap(
+          spacing: 8,
+          children: [
+            LegalLink('Privacy Policy', privacyUrl),
+            LegalLink('Terms', termsUrl),
+          ],
+        ),
+        if (_signedIn)
+          TextButton(
+            key: const Key('open-delete-account'),
+            style: TextButton.styleFrom(foregroundColor: context.pal.flag),
+            onPressed: () => _openDeleteAccount(context),
+            child: const Text('Delete my account'),
+          ),
       ],
     );
     if (!_signedIn) return list;
@@ -438,6 +467,155 @@ class ProfilesScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Says what goes and what stays, and asks for the email typed out, as the
+/// website does. The sign-out happens only once the server confirms.
+class _DeleteAccountDialog extends StatefulWidget {
+  final String email;
+  final Future<ApiResult<void>> Function() onDelete;
+  final VoidCallback onDeleted;
+
+  const _DeleteAccountDialog({
+    required this.email,
+    required this.onDelete,
+    required this.onDeleted,
+  });
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  final TextEditingController _typed = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _typed.dispose();
+    super.dispose();
+  }
+
+  bool get _matches => _typed.text.trim() == widget.email;
+
+  Future<void> _delete() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final result = await widget.onDelete();
+    if (!mounted) return;
+    switch (result) {
+      case ApiSuccess():
+        Navigator.of(context).pop();
+        widget.onDeleted();
+      case ApiFailure(:final message):
+        setState(() {
+          _busy = false;
+          _error = 'Your account was not deleted. $message';
+        });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pal;
+    Widget point(String lead, String rest) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: '$lead ',
+              style: atype(14, weight: 700, color: p.ink, height: 1.35),
+            ),
+            TextSpan(
+              text: rest,
+              style: atype(14, color: p.ink2, height: 1.35),
+            ),
+          ],
+        ),
+      ),
+    );
+    return AlertDialog(
+      title: const Text('Delete your account?'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This cannot be undone. Your sign-in and player profiles are '
+              'removed. What stays:',
+              style: atype(16, color: p.ink, height: 1.35),
+            ),
+            const SizedBox(height: 8),
+            point(
+              'Your registrations',
+              'lose their contact details. Open entries are cancelled. An '
+                  'approved entry keeps the player\u2019s name for the organizer.',
+            ),
+            point(
+              'Receipts',
+              'stay for 30 days, so organizers can settle payments, and are '
+                  'then deleted.',
+            ),
+            point(
+              'Results stay.',
+              'Roster entries, games and certificates in an organizer\u2019s '
+                  'event remain with that event.',
+            ),
+            point(
+              'Tournaments or organizations you run',
+              'are handed on or closed, as the policy explains.',
+            ),
+            point(
+              'This phone',
+              'forgets the account\u2019s saved matches and unsent registrations.',
+            ),
+            const LegalLink('How long we keep data', privacyRetentionUrl),
+            const SizedBox(height: 8),
+            Text(
+              'Type ${widget.email} to confirm',
+              style: atype(14, weight: 600, color: p.ink),
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              key: const Key('delete-account-email'),
+              controller: _typed,
+              autocorrect: false,
+              keyboardType: TextInputType.emailAddress,
+              onChanged: (_) => setState(() {}),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                key: const Key('delete-account-error'),
+                style: atype(14, weight: 600, color: p.flag, height: 1.3),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(),
+          child: const Text('Keep my account'),
+        ),
+        ElevatedButton(
+          key: const Key('confirm-delete-account'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: p.flag,
+            foregroundColor: p.flagWash,
+          ),
+          onPressed: _busy || !_matches ? null : _delete,
+          child: Text(_busy ? 'Deleting...' : 'Delete account'),
+        ),
+      ],
     );
   }
 }
@@ -694,7 +872,20 @@ class _AuthSheetState extends State<_AuthSheet> {
           const SizedBox(height: 12),
           _passwordField(true),
           ..._feedback(),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          Text(
+            'By creating an account you agree to the Terms and Privacy Policy.',
+            key: const Key('signup-agreement'),
+            style: atype(14, color: p.ink2, height: 1.3),
+          ),
+          const Wrap(
+            spacing: 8,
+            children: [
+              LegalLink('Terms', termsUrl),
+              LegalLink('Privacy Policy', privacyUrl),
+            ],
+          ),
+          const SizedBox(height: 8),
           _primary(
             const Key('sign-up-submit'),
             'Create account',
@@ -854,6 +1045,7 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
     for (final field in _fieldOrder) field: GlobalKey(),
   };
   Map<String, String> _fieldErrors = const {};
+
   late final TextEditingController _name;
   late final TextEditingController _username;
   late final TextEditingController _yearOfBirth;
@@ -909,6 +1101,17 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
     return value.isEmpty ? null : value;
   }
 
+  /// Same rule as the server: judged on what the form says now, unless consent
+  /// is already on record for this profile.
+  bool get _needsConsent {
+    if (widget.existing?.guardianConsentAt != null) return false;
+    return guardianConsentRequired(
+      relationship: _relationship,
+      yearOfBirth: int.tryParse(_yearOfBirth.text.trim()),
+      dateOfBirth: widget.existing?.dateOfBirth,
+    );
+  }
+
   /// Builds the request body, or records why the form cannot be sent. A number
   /// that does not parse is an error rather than being dropped without a word.
   Map<String, dynamic>? _collect() {
@@ -950,6 +1153,7 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
     _fieldErrors = errors;
     if (errors.isNotEmpty) return null;
     return {
+      if (_needsConsent) 'guardianConsent': true,
       'fullName': name,
       'username': _text(_username),
       'relationship': _relationship,
@@ -1038,11 +1242,12 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
         keyboardType: keyboardType,
         scrollPadding: const EdgeInsets.all(72),
         onChanged: (_) {
-          if (_fieldErrors.containsKey(field)) {
-            setState(() {
+          // The birth year can change whether consent is needed.
+          setState(() {
+            if (_fieldErrors.containsKey(field)) {
               _fieldErrors = {..._fieldErrors}..remove(field);
-            });
-          }
+            }
+          });
         },
         decoration: InputDecoration(
           labelText: label,
@@ -1177,7 +1382,11 @@ class _ProfileFormDialogState extends State<_ProfileFormDialog> {
               ),
             ),
           ),
-          // Outside the scrolling part, so it cannot end up off screen.
+          // Outside the scrolling part, so they cannot end up off screen.
+          if (_needsConsent) ...[
+            const SizedBox(height: 10),
+            const GuardianConsentNotice(key: Key('guardian-consent-notice')),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 10),
             Text(
