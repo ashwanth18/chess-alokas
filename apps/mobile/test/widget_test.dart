@@ -959,7 +959,7 @@ void main() {
       expect(find.text('Test Player One'), findsWidgets);
     });
 
-    testWidgets('claim shows the real claimedCount', (tester) async {
+    testWidgets('Find my past tournaments shows the real claimedCount', (tester) async {
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
         ..._accountRoutes(),
@@ -974,12 +974,33 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Claimed 7 past tournament entries for Test Player One.'),
+        find.text('Found 7 past tournaments for Test Player One'),
         findsOneWidget,
       );
+      expect(find.text('Find my past tournaments'), findsOneWidget);
+      expect(find.textContaining('Claim'), findsNothing);
     });
 
-    testWidgets('a failed claim reports failure, not a count', (tester) async {
+    testWidgets('Find my past tournaments says when nothing matched', (
+      tester,
+    ) async {
+      final backend = FakeBackend({
+        'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
+        ..._accountRoutes(),
+        'POST $_profilesPath/$fakeProfileId/claim': (_) =>
+            jsonResponse({'claimedCount': 0, 'participantIds': const []}),
+      });
+      await _pumpApp(tester, backend, storage: _signedInStorage());
+      await tester.tap(find.text('Account'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('claim-$fakeProfileId')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No matches found'), findsOneWidget);
+    });
+
+    testWidgets('a failed search reports failure, not a count', (tester) async {
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
         ..._accountRoutes(),
@@ -994,10 +1015,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Claim failed: Player profile not found'),
+        find.text('Could not search: Player profile not found'),
         findsOneWidget,
       );
-      expect(find.textContaining('Claimed '), findsNothing);
+      expect(find.textContaining('Found '), findsNothing);
     });
 
     test('age uses the given year, and an unknown birth year stays unknown', () {

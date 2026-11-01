@@ -153,11 +153,11 @@ class ProfilesScreen extends StatelessWidget {
         _say(
           context,
           value == 0
-              ? 'No past entries matched. An entry must use your account email and the exact name ${profile.fullName}.'
-              : 'Claimed $value past tournament ${value == 1 ? "entry" : "entries"} for ${profile.fullName}.',
+              ? 'No matches found'
+              : 'Found ${pluralize(value, 'past tournament')} for ${displayPlayerName(profile.fullName)}',
         );
       case ApiFailure(:final message):
-        _say(context, 'Claim failed: $message');
+        _say(context, 'Could not search: $message');
     }
   }
 
@@ -449,7 +449,7 @@ class ProfilesScreen extends StatelessWidget {
                 OutlinedButton(
                   key: Key('claim-${prof.id}'),
                   onPressed: () => _claim(context, prof),
-                  child: const Text('Claim Past Tournaments'),
+                  child: const Text('Find my past tournaments'),
                 ),
                 TextButton(
                   key: Key('edit-${prof.id}'),

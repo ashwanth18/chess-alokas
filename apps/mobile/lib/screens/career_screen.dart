@@ -318,8 +318,8 @@ class CareerScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              'No tournaments linked to this player. If they have played '
-              'before, try "Claim Past Tournaments" on the Account tab.',
+              'No tournaments yet. Played before? Try "Find my past '
+              'tournaments" on the Account tab.',
               style: atype(16, color: p.ink2),
             ),
           ),
