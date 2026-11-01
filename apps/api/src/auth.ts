@@ -222,7 +222,7 @@ export const authPlugin: FastifyPluginAsync = async (app) => {
       return reply.code(401).send({ error: 'Unauthorized' });
     }
     if (!request.userId || !request.user) {
-      return { id: null, email: null, displayName: null, identities: [] };
+      return { id: null, email: null, displayName: null };
     }
     const service = getServiceSupabase();
     let displayName: string | null = null;
@@ -238,10 +238,6 @@ export const authPlugin: FastifyPluginAsync = async (app) => {
       id: request.userId,
       email: request.user.email ?? null,
       displayName,
-      identities: (request.user.identities ?? []).map((i) => ({
-        provider: i.provider,
-        identityId: i.identity_id,
-      })),
     };
   });
 

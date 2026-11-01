@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { clearReturnTo, resolveReturnTo } from '../auth/returnTo';
 import AuthShell from '../components/AuthShell';
 import BootIssueCard from '../components/BootIssueCard';
 import { trackPageView } from '../lib/pageAnalytics';
@@ -14,6 +15,9 @@ const isDesktop =
 export default function LoginPage() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [returnTo] = useState(() => resolveReturnTo(location.search));
+  const destination = returnTo ?? '/app';
   const [tab, setTab] = useState<Tab>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,7 +31,12 @@ export default function LoginPage() {
     trackPageView({ routeKey: 'login', path: '/login' });
   }, []);
 
-  if (!auth.loading && auth.user) return <Navigate to="/app" replace />;
+  const signedIn = !auth.loading && Boolean(auth.user);
+  useEffect(() => {
+    if (signedIn) clearReturnTo();
+  }, [signedIn]);
+
+  if (signedIn) return <Navigate to={destination} replace />;
 
   async function onPassword(e: FormEvent) {
     e.preventDefault();
@@ -36,7 +45,7 @@ export default function LoginPage() {
     const res = await auth.signInWithPassword(email.trim(), password);
     setBusy(false);
     if (res.error) setError(res.error);
-    else navigate('/app');
+    else navigate(destination);
   }
 
   async function onSendOtp(e: FormEvent) {
@@ -63,7 +72,7 @@ export default function LoginPage() {
     const res = await auth.verifyOtp(email.trim(), otp.trim());
     setBusy(false);
     if (res.error) setError(res.error);
-    else navigate('/app');
+    else navigate(destination);
   }
 
   return (
@@ -163,39 +172,6 @@ export default function LoginPage() {
                   : 'Send code / magic link'}
           </button>
         </form>
-      )}
-
-      {isDesktop ? (
-        <p className="form-hint">
-          Google and GitHub sign-in are not available in the desktop app. If your account only uses
-          them, set a password at{' '}
-          <a href="https://chess-manager.alokas.com/account" target="_blank" rel="noreferrer">
-            chess-manager.alokas.com
-          </a>{' '}
-          first.
-        </p>
-      ) : (
-        <>
-          <div className="auth-divider">or continue with</div>
-          <div className="auth-oauth">
-            <button
-              type="button"
-              className="btn btn-outline"
-              disabled={!auth.configured || busy}
-              onClick={() => void auth.signInWithOAuth('google')}
-            >
-              Google
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline"
-              disabled={!auth.configured || busy}
-              onClick={() => void auth.signInWithOAuth('github')}
-            >
-              GitHub
-            </button>
-          </div>
-        </>
       )}
 
       {error && <div className="form-error">{error}</div>}

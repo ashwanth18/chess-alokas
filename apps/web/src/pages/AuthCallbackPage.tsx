@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { clearReturnTo, peekReturnTo } from '../auth/returnTo';
 import AuthShell from '../components/AuthShell';
 import { reportBootIssue } from '../lib/bootDiagnostics';
 import BootIssueCard from '../components/BootIssueCard';
@@ -15,7 +16,12 @@ export default function AuthCallbackPage() {
       return;
     }
     const params = new URLSearchParams(window.location.search);
-    const errParam = params.get('error_description') || params.get('error');
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const errParam =
+      params.get('error_description') ||
+      params.get('error') ||
+      hash.get('error_description') ||
+      hash.get('error');
     if (errParam) {
       reportBootIssue('AUTH_SESSION_FAILED', errParam);
       setError(errParam);
@@ -27,7 +33,9 @@ export default function AuthCallbackPage() {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
-      navigate('/app', { replace: true });
+      const returnTo = peekReturnTo();
+      clearReturnTo();
+      navigate(returnTo ?? '/app', { replace: true });
     };
 
     const timer = window.setTimeout(() => {

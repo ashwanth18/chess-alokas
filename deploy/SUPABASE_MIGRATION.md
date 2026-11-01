@@ -23,7 +23,7 @@ This guide documents our options and step-by-step runbook for migrating Chess Al
    - Used by Fastify (`postgres` client with `prepare: false`) in `apps/api/src/db.ts`, `apps/api/src/certificates/store.ts`, `apps/api/src/routes/admin.ts`, and `apps/api/src/routes/publicAnalytics.ts`.
    - Schema is defined in ordered SQL migrations under `supabase/migrations/` (`001_initial.sql` onward) using extensions `pgcrypto` and `pg_trgm`.
 2. **Supabase Auth (`GoTrue` + `auth.users` / `auth.sessions`)**:
-   - Web (`apps/web/src/auth/AuthContext.tsx`), Desktop, and Flutter Mobile (`apps/mobile`) use Supabase Auth for email/password, 6-digit OTP, and OAuth.
+   - Web (`apps/web/src/auth/AuthContext.tsx`), Desktop, and Flutter Mobile (`apps/mobile`) use Supabase Auth for email/password and 6-digit OTP.
    - API (`apps/api/src/auth.ts`) verifies Bearer JWTs via `client.auth.getUser(token)` and queries `auth.users` / `auth.sessions` over SQL for session management and `/admin/overview`.
    - Trigger `on_auth_user_created` (`supabase/migrations/005_auth_owners.sql`) auto-creates `public.profiles` rows.
 3. **Supabase Realtime (`postgres_changes`)**:

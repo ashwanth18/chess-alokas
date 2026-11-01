@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { resolveApiBaseUrl } from '../api/client';
@@ -50,14 +50,6 @@ export default function AccountPage() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sessionsUnavailable, setSessionsUnavailable] = useState<string | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
-
-  const providers = useMemo(() => {
-    const ids = auth.user?.identities ?? [];
-    return ids.map((i) => ({
-      provider: i.provider,
-      identityId: i.identity_id,
-    }));
-  }, [auth.user]);
 
   const initials = (auth.displayName || auth.user?.email || '?')
     .split(/\s+/)
@@ -207,11 +199,6 @@ export default function AccountPage() {
           <h2>{auth.displayName || 'Tournament manager'}</h2>
           <p>{auth.user.email}</p>
           <div className="account-badges">
-            {providers.map((p) => (
-              <span key={p.identityId} className="account-badge">
-                {p.provider}
-              </span>
-            ))}
             {auth.isPlatformAdmin && (
               <span className="account-badge account-badge-admin">Platform admin</span>
             )}
@@ -343,42 +330,6 @@ export default function AccountPage() {
           >
             Refresh
           </button>
-        </section>
-
-        <section className="account-panel">
-          <h3>Connected accounts</h3>
-          <ul className="account-identity-list">
-            {providers.map((p) => (
-              <li key={p.identityId}>
-                <span>{p.provider}</span>
-                {providers.length > 1 && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => void auth.unlinkIdentity(p.identityId)}
-                  >
-                    Unlink
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-          <div className="auth-oauth">
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => void auth.linkIdentity('google')}
-            >
-              Link Google
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => void auth.linkIdentity('github')}
-            >
-              Link GitHub
-            </button>
-          </div>
         </section>
 
         <section className="account-panel danger">

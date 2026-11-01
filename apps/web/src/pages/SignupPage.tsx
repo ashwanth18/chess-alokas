@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { clearReturnTo, resolveReturnTo } from '../auth/returnTo';
 import AuthShell from '../components/AuthShell';
 import { trackPageView } from '../lib/pageAnalytics';
 import { apiCreateOrganization, apiCreatePlayerProfile } from '../api/client';
@@ -9,15 +10,15 @@ import { PENDING_SIGNUP_STORAGE_KEY } from '../lib/pendingSignup';
 
 type SignupRole = 'participant' | 'organizer';
 
-const isDesktop =
-  Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
-  import.meta.env.VITE_DESKTOP === '1';
-
-
 export default function SignupPage() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const [role, setRole] = useState<SignupRole>('participant');
+  const location = useLocation();
+  const [returnTo] = useState(() => resolveReturnTo(location.search));
+  // Someone invited to a team isn't choosing between player and organizer.
+  const organizerLink = new URLSearchParams(location.search).get('role') === 'organizer';
+  const joiningTeam = !organizerLink && Boolean(returnTo?.startsWith('/invite/'));
+  const [role, setRole] = useState<SignupRole>(organizerLink ? 'organizer' : 'participant');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -33,8 +34,13 @@ export default function SignupPage() {
     trackPageView({ routeKey: 'signup', path: '/signup' });
   }, []);
 
-  if (!auth.loading && auth.user) {
-    return <Navigate to={role === 'participant' ? '/player' : '/app'} replace />;
+  const signedIn = !auth.loading && Boolean(auth.user);
+  useEffect(() => {
+    if (signedIn && returnTo) clearReturnTo();
+  }, [signedIn, returnTo]);
+
+  if (signedIn) {
+    return <Navigate to={returnTo ?? (role === 'participant' ? '/player' : '/app')} replace />;
   }
 
   async function onSubmit(e: FormEvent) {
@@ -73,7 +79,7 @@ export default function SignupPage() {
           rememberPendingSignup();
         }
         setBusy(false);
-        navigate('/app', { replace: true });
+        navigate(returnTo ?? '/app', { replace: true });
         return;
       } else {
         if (displayName.trim()) {
@@ -85,7 +91,7 @@ export default function SignupPage() {
           });
         }
         setBusy(false);
-        navigate('/player', { replace: true });
+        navigate(returnTo ?? '/player', { replace: true });
         return;
       }
     }
@@ -118,8 +124,9 @@ export default function SignupPage() {
     return (
       <AuthShell title="Check your email" subtitle="One more step to finish your account">
         <p className="form-hint" role="status">
-          We sent a confirmation link to <strong>{message}</strong>. Open it, then sign in. If it
-          doesn’t arrive in a few minutes, check your spam folder.
+          We sent a confirmation link to <strong>{message}</strong>. Open it, then sign in.
+          {joiningTeam && ' You’ll go straight back to your invite.'} If it doesn’t arrive in a few
+          minutes, check your spam folder.
         </p>
         <Link className="btn btn-primary" to="/login">
           Go to sign in
@@ -132,11 +139,14 @@ export default function SignupPage() {
     <AuthShell
       title="Create account"
       subtitle={
-        role === 'participant'
+        joiningTeam
+          ? 'Use the email address your invite was sent to'
+          : role === 'participant'
           ? 'Free global player & family portal for live pairings, ratings, and certificates'
           : 'Run FIDE Swiss & Dutch tournaments with instant Sandbox Trial access'
       }
     >
+      {!joiningTeam && (
       <div className="auth-tabs" role="tablist" aria-label="Account role">
         <button
           type="button"
@@ -157,10 +167,15 @@ export default function SignupPage() {
           ♕ Organizer / Academy
         </button>
       </div>
+      )}
 
       <form className="auth-form" onSubmit={(e) => void onSubmit(e)}>
         <label>
-          {role === 'participant' ? 'Your full name (Player or Parent)' : 'Your name (Director)'}
+          {joiningTeam
+            ? 'Your full name'
+            : role === 'participant'
+              ? 'Your full name (Player or Parent)'
+              : 'Your name (Director)'}
           <input
             className="input"
             value={displayName}
@@ -245,34 +260,13 @@ export default function SignupPage() {
         <button className="btn btn-primary" type="submit" disabled={busy || !auth.configured}>
           {busy
             ? 'Creating…'
-            : role === 'participant'
+            : joiningTeam
+              ? 'Create account and continue'
+              : role === 'participant'
               ? 'Create Player / Family Account'
               : 'Start Organizer Sandbox Trial'}
         </button>
       </form>
-      {!isDesktop && (
-        <>
-          <div className="auth-divider">or</div>
-          <div className="auth-oauth">
-            <button
-              type="button"
-              className="btn btn-outline"
-              disabled={!auth.configured}
-              onClick={() => void auth.signInWithOAuth('google')}
-            >
-              Google
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline"
-              disabled={!auth.configured}
-              onClick={() => void auth.signInWithOAuth('github')}
-            >
-              GitHub
-            </button>
-          </div>
-        </>
-      )}
       {error && <div className="form-error">{error}</div>}
       {message && <p className="form-hint">{message}</p>}
       <p className="auth-footer">

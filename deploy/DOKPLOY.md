@@ -25,7 +25,8 @@ Create an **A record** (or CNAME) for `chess-manager.alokas.com` pointing at you
 | `SUPABASE_URL` | api + web build | `https://….supabase.co` |
 | `SUPABASE_SECRET_KEY` | api only | server secret / service_role |
 | `SUPABASE_ANON_KEY` | api + web build | publishable/anon for JWT verify + client |
-| `RESEND_API_KEY` / `RESEND_FROM` | api | optional certificate email |
+| `RESEND_API_KEY` / `RESEND_FROM` | api | certificate email and team invites. Without it, invites still work: the owner copies the link |
+| `PUBLIC_APP_URL` | api | optional, base of invite links. Defaults to `https://chess-manager.alokas.com` |
 | `SENTRY_DSN` | api | Node/Fastify DSN (free plan) |
 | `VITE_SENTRY_DSN` | web build | React DSN (same or separate project) |
 | `VITE_SENTRY_ORG_URL` | web build | optional Admin link to Issues |
@@ -42,17 +43,17 @@ Web build args are wired in compose from `SUPABASE_URL` / `SUPABASE_ANON_KEY` / 
      - `https://chess-manager.alokas.com/auth/reset`
      - `http://localhost:5173/auth/callback`
      - `http://localhost:5173/auth/reset`
+     - `com.alokas.chess://login-callback` (mobile app email links)
 2. **Providers**
-   - Email: enable password + OTP / magic link
-   - Google OAuth: Client ID/secret from Google Cloud Console
-   - GitHub OAuth: Client ID/secret from GitHub Developer Settings
-3. Confirm migration `005_auth_owners.sql` is applied (`owner_id`, `profiles`, RLS).
+   - Email is the only sign-in method: keep it enabled, with password and OTP / magic link.
+   - **Confirm email must stay on.** Team invites trust a confirmed address. With it off, Supabase marks every sign-up as confirmed, so anyone could register an invited address and take the invite.
+   - Every other provider stays off.
+3. **Custom SMTP is required before launch**: follow 4b part A. Supabase's built-in mailer allows only a handful of emails per hour, so sign-up confirmations, email codes and password resets start failing as soon as real people use it.
+4. Confirm migration `005_auth_owners.sql` is applied (`owner_id`, `profiles`, RLS).
 
-## 4b. Branded auth emails (hide Supabase)
+## 4b. Auth emails
 
-Default Supabase SMTP sends from Supabase and looks generic. For production:
-
-### A. Custom SMTP (From address)
+### A. Custom SMTP (required)
 
 1. In [Resend](https://resend.com) (you may already use it for certificates): verify domain `alokas.com` (or a subdomain like `mail.alokas.com`) and create an API key.
 2. Supabase → **Authentication → SMTP Settings** → enable custom SMTP:
@@ -89,7 +90,7 @@ Sign up on the site → create tournament → Sync → Issue digital.
 
 ## 6. Desktop
 
-Packaged Electron uses `https://chess-manager.alokas.com/api` by default. Users sign in with password or email code (Google and GitHub are web only); they never paste secret keys.
+Packaged Electron uses `https://chess-manager.alokas.com/api` by default. Users sign in with password or email code; they never paste secret keys.
 
 Downloads: landing page at `/` links to [GitHub Releases](https://github.com/ashwanth18/chess-alokas/releases/latest) (Windows / Linux / macOS). Publish with `git tag vX.Y.Z && git push origin vX.Y.Z`.
 

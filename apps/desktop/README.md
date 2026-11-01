@@ -119,7 +119,7 @@ Backups contain player names and contact details, are not encrypted, and rely on
 
 ## Sign-in
 
-Email and password, and the emailed 6-digit code, work in the app. Google and GitHub are hidden because the browser cannot hand the session back to the app, and password reset opens in the browser for the same reason. An account that only uses Google or GitHub must set a password on the website first.
+Sign-in is by email only: password, or the emailed 6-digit code. Password reset opens in the browser, because a link in an email can't hand the session back to the app.
 
 If the saved token has expired and the auth server cannot be reached, the app stays signed in for local work with no token, so cloud calls are refused until a refresh succeeds. Only a rejection from the auth server, or signing out, ends the session.
 
