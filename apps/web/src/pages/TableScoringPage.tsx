@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { ArbiterScorableResult, GameCardType } from '@chess-alokas/shared';
+import type {
+  ArbiterScorableResult,
+  FloorZoneBoard,
+  GameCardType,
+} from '@chess-alokas/shared';
 import {
   ILLEGAL_MOVE_LIMIT,
   WARNING_LIMIT,
@@ -8,10 +12,12 @@ import {
   isAbsenceResult,
 } from '@chess-alokas/shared';
 import {
+  apiPublicTableCallChief,
   apiPublicTableCard,
   apiPublicTableGet,
-  apiPublicTableResult,
+  apiPublicTableSetResult,
   apiPublicTableSession,
+  apiPublicTableZone,
   checkOnline,
   type FloorTableView,
   type PlayerCardCounts,
@@ -24,14 +30,59 @@ import {
   saveFloorCredentials,
 } from '../lib/floorCredentials';
 
+function isNetworkError(raw: string): boolean {
+  return /abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(raw);
+}
+
 function networkErrorMessage(raw: string): string {
-  if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(raw)) {
-    return 'No connection — reconnect and try again. The result was not saved.';
+  if (isNetworkError(raw)) {
+    return 'No connection — reconnect and try again.';
   }
   return raw;
 }
 
 const SESSION_KEY = (slug: string) => `chess-alokas-arbiter-session:${slug}`;
+const LAST_SESSION_KEY = 'chess-alokas-arbiter-last-token';
+const OFFLINE_QUEUE_KEY = 'alokas-floor-offline-queue';
+
+export type OfflineFloorResultItem = {
+  slug: string;
+  token: string;
+  result: ArbiterScorableResult;
+  arbiterName?: string;
+  tableNumber?: number;
+  queuedAt: string;
+};
+
+function loadOfflineQueue(): OfflineFloorResultItem[] {
+  try {
+    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as OfflineFloorResultItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOfflineQueue(items: OfflineFloorResultItem[]): void {
+  try {
+    if (items.length === 0) {
+      localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    } else {
+      localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(items));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function enqueueOfflineResult(item: OfflineFloorResultItem): OfflineFloorResultItem[] {
+  const existing = loadOfflineQueue().filter((q) => q.slug !== item.slug);
+  const next = [...existing, item];
+  saveOfflineQueue(next);
+  return next;
+}
 
 const RESULT_OPTIONS: { value: ArbiterScorableResult; label: string; hint: string }[] = [
   { value: '1-0', label: 'White wins', hint: '1–0' },
@@ -42,9 +93,17 @@ const RESULT_OPTIONS: { value: ArbiterScorableResult; label: string; hint: strin
   { value: '0-0', label: 'Both absent', hint: '0–0' },
 ];
 
+const CHIEF_ARBITER_PRESETS = [
+  'Illegal move dispute',
+  'Clock malfunction',
+  'Player missing',
+] as const;
+
+type ZoneRangeFilter = 'all' | '1-15' | '16-30' | '31+' | 'pending';
+
 function loadSession(slug: string): string | null {
   try {
-    return sessionStorage.getItem(SESSION_KEY(slug));
+    return sessionStorage.getItem(SESSION_KEY(slug)) || sessionStorage.getItem(LAST_SESSION_KEY);
   } catch {
     return null;
   }
@@ -53,6 +112,7 @@ function loadSession(slug: string): string | null {
 function saveSession(slug: string, token: string) {
   try {
     sessionStorage.setItem(SESSION_KEY(slug), token);
+    sessionStorage.setItem(LAST_SESSION_KEY, token);
   } catch {
     /* ignore */
   }
@@ -61,6 +121,7 @@ function saveSession(slug: string, token: string) {
 function clearSession(slug: string) {
   try {
     sessionStorage.removeItem(SESSION_KEY(slug));
+    sessionStorage.removeItem(LAST_SESSION_KEY);
   } catch {
     /* ignore */
   }
@@ -201,6 +262,34 @@ export default function TableScoringPage() {
     typeof navigator !== 'undefined' ? navigator.onLine : true,
   );
 
+  // Phase 3: View Mode Toggle (Single Table vs Zone Grid)
+  const [viewMode, setViewMode] = useState<'single' | 'zone'>('single');
+  const [zoneRange, setZoneRange] = useState<ZoneRangeFilter>('all');
+  const [zoneBoards, setZoneBoards] = useState<FloorZoneBoard[]>([]);
+  const [zoneLoading, setZoneLoading] = useState(false);
+  const [zoneSelectedByTable, setZoneSelectedByTable] = useState<
+    Record<number, ArbiterScorableResult | undefined>
+  >({});
+  const [zoneBusyTable, setZoneBusyTable] = useState<number | null>(null);
+
+  // Phase 3: Call Chief Arbiter state
+  const [chiefSheetOpen, setChiefSheetOpen] = useState(false);
+  const [chiefTargetTable, setChiefTargetTable] = useState<{
+    slug: string;
+    tableNumber: number;
+  } | null>(null);
+  const [chiefReason, setChiefReason] = useState<string>(CHIEF_ARBITER_PRESETS[0]);
+  const [chiefCustomNote, setChiefCustomNote] = useState('');
+  const [chiefBusy, setChiefBusy] = useState(false);
+  const [chiefBanner, setChiefBanner] = useState<string | null>(null);
+
+  // Phase 3: Offline Result Queue state
+  const [offlineQueue, setOfflineQueue] = useState<OfflineFloorResultItem[]>(() =>
+    loadOfflineQueue(),
+  );
+  const [offlineBanner, setOfflineBanner] = useState<string | null>(null);
+  const [flushingQueue, setFlushingQueue] = useState(false);
+
   useEffect(() => {
     setToken(slug ? loadSession(slug) : null);
     setSelected(null);
@@ -229,6 +318,19 @@ export default function TableScoringPage() {
     };
   }, []);
 
+  const refreshZone = useCallback(
+    async (session = token) => {
+      if (!slug || !session) return;
+      setZoneLoading(true);
+      const res = await apiPublicTableZone(slug, session);
+      setZoneLoading(false);
+      if (res.ok) {
+        setZoneBoards(res.data.boards);
+      }
+    },
+    [slug, token],
+  );
+
   const refresh = useCallback(
     async (session = token) => {
       if (!slug) return;
@@ -238,7 +340,7 @@ export default function TableScoringPage() {
       setLoading(false);
       if (!res.ok) {
         setError(networkErrorMessage(res.error));
-        if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(res.error)) {
+        if (isNetworkError(res.error)) {
           setOnline(false);
         }
         setView(null);
@@ -259,6 +361,8 @@ export default function TableScoringPage() {
       if (res.data.status === 'needs_pin' && session) {
         clearSession(slug);
         setToken(null);
+      } else if (res.data.sessionOk && session) {
+        saveSession(slug, session);
       }
     },
     [slug, token],
@@ -267,6 +371,58 @@ export default function TableScoringPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (viewMode === 'zone' && token && view?.sessionOk) {
+      void refreshZone(token);
+    }
+  }, [viewMode, token, view?.sessionOk, refreshZone]);
+
+  // Flush offline result queue automatically when online becomes true
+  const flushOfflineResultQueue = useCallback(async () => {
+    const queued = loadOfflineQueue();
+    if (queued.length === 0 || flushingQueue) return;
+    setFlushingQueue(true);
+    const remaining: OfflineFloorResultItem[] = [];
+    let submittedCount = 0;
+
+    for (const item of queued) {
+      const res = await apiPublicTableSetResult(
+        item.slug,
+        item.token,
+        item.result,
+        item.arbiterName || arbiterName.trim() || 'Floor Arbiter',
+      );
+      if (res.ok) {
+        submittedCount += 1;
+      } else if (isNetworkError(res.error)) {
+        remaining.push(item);
+      } else {
+        // Non-network rejection (e.g. 409 already locked or round closed) — drop from queue
+        submittedCount += 1;
+      }
+    }
+
+    saveOfflineQueue(remaining);
+    setOfflineQueue(remaining);
+    setFlushingQueue(false);
+
+    if (submittedCount > 0) {
+      setOfflineBanner(
+        remaining.length === 0
+          ? `Synced ${submittedCount} queued offline result${submittedCount === 1 ? '' : 's'}!`
+          : `Synced ${submittedCount} result(s); ${remaining.length} still waiting for connection.`,
+      );
+      void refresh();
+      if (viewMode === 'zone') void refreshZone();
+    }
+  }, [arbiterName, flushingQueue, refresh, refreshZone, viewMode]);
+
+  useEffect(() => {
+    if (online && offlineQueue.length > 0) {
+      void flushOfflineResultQueue();
+    }
+  }, [online, offlineQueue.length, flushOfflineResultQueue]);
 
   async function submitPin(e: React.FormEvent) {
     e.preventDefault();
@@ -282,11 +438,11 @@ export default function TableScoringPage() {
     }
     setBusy(true);
     setError(null);
-    const res = await apiPublicTableSession(slug, pin.trim());
+    const res = await apiPublicTableSession(slug, pin.trim(), name);
     setBusy(false);
     if (!res.ok) {
       setError(networkErrorMessage(res.error));
-      if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(res.error)) {
+      if (isNetworkError(res.error)) {
         setOnline(false);
       }
       return;
@@ -341,26 +497,49 @@ export default function TableScoringPage() {
     }
   }
 
+  function queueResultOffline(
+    targetSlug: string,
+    targetResult: ArbiterScorableResult,
+    targetTableNumber?: number,
+  ) {
+    if (!token) return;
+    const next = enqueueOfflineResult({
+      slug: targetSlug,
+      token,
+      result: targetResult,
+      arbiterName: arbiterName.trim() || 'Floor Arbiter',
+      tableNumber: targetTableNumber,
+      queuedAt: new Date().toISOString(),
+    });
+    setOfflineQueue(next);
+    setOfflineBanner('Saved offline — will auto-submit when Wi-Fi reconnects');
+    setError(null);
+  }
+
   async function confirmResult() {
     if (!slug || !token || !selected || busy) return;
+    const name = arbiterName.trim() || 'Floor Arbiter';
+
     if (!online) {
-      setError('No connection — result was not saved. Reconnect and confirm again.');
+      queueResultOffline(slug, selected, view?.tableNumber);
+      setConfirming(false);
+      setSelected(null);
       return;
     }
-    const name = arbiterName.trim();
-    if (name.length < 1) {
-      setError('Enter your name before confirming');
-      return;
-    }
+
     setBusy(true);
     setError(null);
-    const res = await apiPublicTableResult(slug, token, selected, name);
+    const res = await apiPublicTableSetResult(slug, token, selected, name);
     setBusy(false);
     if (!res.ok) {
-      setError(networkErrorMessage(res.error));
-      if (/abort|timeout|timed out|failed to fetch|network|load failed|offline/i.test(res.error)) {
+      if (isNetworkError(res.error)) {
         setOnline(false);
+        queueResultOffline(slug, selected, view?.tableNumber);
+        setConfirming(false);
+        setSelected(null);
+        return;
       }
+      setError(networkErrorMessage(res.error));
       if (/PIN|session|expired/i.test(res.error)) {
         clearSession(slug);
         setToken(null);
@@ -381,6 +560,97 @@ export default function TableScoringPage() {
     setSelected(null);
   }
 
+  async function submitZoneBoardResult(board: FloorZoneBoard) {
+    const picked = zoneSelectedByTable[board.tableNumber];
+    if (!token || !picked || zoneBusyTable !== null) return;
+    const name = arbiterName.trim() || 'Floor Arbiter';
+
+    if (!online) {
+      queueResultOffline(board.slug, picked, board.tableNumber);
+      setZoneBoards((prev) =>
+        prev.map((b) =>
+          b.tableNumber === board.tableNumber
+            ? { ...b, result: picked, locked: true }
+            : b,
+        ),
+      );
+      return;
+    }
+
+    setZoneBusyTable(board.tableNumber);
+    setError(null);
+    const res = await apiPublicTableSetResult(board.slug, token, picked, name);
+    setZoneBusyTable(null);
+
+    if (!res.ok) {
+      if (isNetworkError(res.error)) {
+        setOnline(false);
+        queueResultOffline(board.slug, picked, board.tableNumber);
+        setZoneBoards((prev) =>
+          prev.map((b) =>
+            b.tableNumber === board.tableNumber
+              ? { ...b, result: picked, locked: true }
+              : b,
+          ),
+        );
+        return;
+      }
+      setError(`Table ${board.tableNumber}: ${networkErrorMessage(res.error)}`);
+      return;
+    }
+
+    setOnline(true);
+    setZoneBoards((prev) =>
+      prev.map((b) =>
+        b.tableNumber === board.tableNumber
+          ? { ...b, result: picked, locked: true }
+          : b,
+      ),
+    );
+    if (board.tableNumber === view?.tableNumber && res.data.table) {
+      setView(res.data.table);
+    }
+  }
+
+  async function submitCallChief(e: React.FormEvent) {
+    e.preventDefault();
+    if (!token || chiefBusy) return;
+    const targetSlug = chiefTargetTable?.slug || slug;
+    const targetNum = chiefTargetTable?.tableNumber ?? view?.tableNumber ?? 1;
+    const finalReason =
+      chiefReason === '__custom__' ? chiefCustomNote.trim() : chiefReason.trim();
+    if (!finalReason) {
+      setError('Select or enter a reason for the Chief Arbiter alert.');
+      return;
+    }
+    setChiefBusy(true);
+    setError(null);
+    const res = await apiPublicTableCallChief(
+      targetSlug,
+      token,
+      finalReason,
+      arbiterName.trim() || undefined,
+    );
+    setChiefBusy(false);
+    if (!res.ok) {
+      setError(networkErrorMessage(res.error));
+      return;
+    }
+    setChiefSheetOpen(false);
+    setChiefCustomNote('');
+    setChiefBanner(`Chief Arbiter alerted for Table ${targetNum}`);
+  }
+
+  const filteredZoneBoards = useMemo(() => {
+    return zoneBoards.filter((b) => {
+      if (zoneRange === '1-15') return b.tableNumber >= 1 && b.tableNumber <= 15;
+      if (zoneRange === '16-30') return b.tableNumber >= 16 && b.tableNumber <= 30;
+      if (zoneRange === '31+') return b.tableNumber >= 31;
+      if (zoneRange === 'pending') return !b.locked && !b.isBye && b.result === 'pending';
+      return true;
+    });
+  }, [zoneBoards, zoneRange]);
+
   if (!slug) {
     return (
       <div className="table-score-page">
@@ -389,8 +659,11 @@ export default function TableScoringPage() {
     );
   }
 
+  const isUnlocked = Boolean(view && view.sessionOk && view.status !== 'needs_pin');
+
   const showScan =
     view &&
+    viewMode === 'single' &&
     (view.status === 'locked' ||
       view.status === 'bye' ||
       view.status === 'no_game' ||
@@ -406,15 +679,189 @@ export default function TableScoringPage() {
             <span className="status-label">{online ? 'Online' : 'Offline'}</span>
           </span>
         </div>
-        <h1>Table {view?.tableNumber ?? '…'}</h1>
+        <h1>
+          {viewMode === 'zone'
+            ? `Floor Zone · Round ${view?.round ?? view?.pinRound ?? '—'}`
+            : `Table ${view?.tableNumber ?? '…'}`}
+        </h1>
         {view && <p className="table-score-tour">{view.tournamentName}</p>}
       </header>
 
       {!online && (
         <div className="table-score-offline" role="status">
           <strong>No internet</strong>
-          <span>Results will not save until this phone is back online. Do not leave the table yet.</span>
+          <span>
+            You can still confirm results — they will be saved in the offline queue and
+            auto-submitted when Wi-Fi reconnects.
+          </span>
         </div>
+      )}
+
+      {(offlineBanner || offlineQueue.length > 0) && (
+        <div
+          className="table-score-card"
+          role="status"
+          style={{
+            borderColor: '#f59e0b',
+            background: 'rgba(245, 158, 11, 0.12)',
+            marginBottom: '0.85rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <div>
+              <strong>
+                {offlineBanner || 'Saved offline — will auto-submit when Wi-Fi reconnects'}
+              </strong>
+              {offlineQueue.length > 0 && (
+                <p className="form-hint" style={{ margin: '0.2rem 0 0' }}>
+                  {offlineQueue.length} result{offlineQueue.length === 1 ? '' : 's'} queued (
+                  {offlineQueue
+                    .map((q) => (q.tableNumber ? `Table ${q.tableNumber}: ${q.result}` : q.result))
+                    .join(', ')}
+                  )
+                </p>
+              )}
+            </div>
+            {offlineQueue.length > 0 && online && (
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={flushingQueue}
+                onClick={() => void flushOfflineResultQueue()}
+              >
+                {flushingQueue ? 'Syncing…' : 'Sync now'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {chiefBanner && (
+        <div
+          className="table-score-card"
+          role="status"
+          style={{
+            borderColor: '#10b981',
+            background: 'rgba(16, 185, 129, 0.12)',
+            marginBottom: '0.85rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <strong>🚨 {chiefBanner}</strong>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => setChiefBanner(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {isUnlocked && (
+        <div
+          className="table-score-card"
+          style={{
+            padding: '0.75rem',
+            marginBottom: '0.85rem',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.5rem',
+          }}
+        >
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn btn-sm ${viewMode === 'single' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setViewMode('single')}
+            >
+              Single Table ({view?.tableNumber ?? '…'})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${viewMode === 'zone' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setViewMode('zone')}
+            >
+              Zone Grid (All Tables)
+            </button>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm floor-btn-red"
+            onClick={() => {
+              setChiefTargetTable({
+                slug,
+                tableNumber: view?.tableNumber ?? 1,
+              });
+              setChiefSheetOpen(true);
+            }}
+          >
+            🚨 Call Chief Arbiter
+          </button>
+        </div>
+      )}
+
+      {chiefSheetOpen && (
+        <form
+          className="table-score-card"
+          onSubmit={(e) => void submitCallChief(e)}
+          style={{ borderColor: '#ef4444', marginBottom: '0.85rem' }}
+        >
+          <h2>🚨 Call Chief Arbiter — Table {chiefTargetTable?.tableNumber ?? view?.tableNumber}</h2>
+          <p className="form-hint">
+            Sends an immediate high-visibility alert to the Tournament Director desk.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', margin: '0.65rem 0' }}>
+            {CHIEF_ARBITER_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                className={`btn btn-sm ${chiefReason === preset ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setChiefReason(preset)}
+              >
+                {preset}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`btn btn-sm ${chiefReason === '__custom__' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setChiefReason('__custom__')}
+            >
+              Custom note…
+            </button>
+          </div>
+          {chiefReason === '__custom__' && (
+            <label>
+              Describe issue
+              <input
+                className="input"
+                value={chiefCustomNote}
+                onChange={(e) => setChiefCustomNote(e.target.value)}
+                maxLength={300}
+                placeholder="e.g. Score sheet disagreement on move 28"
+                required
+              />
+            </label>
+          )}
+          <div className="table-score-actions" style={{ marginTop: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={chiefBusy}
+              onClick={() => setChiefSheetOpen(false)}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn floor-btn-red" disabled={chiefBusy}>
+              {chiefBusy ? 'Alerting…' : 'Send Alert to Chief Arbiter'}
+            </button>
+          </div>
+        </form>
       )}
 
       {loading && !view && <p className="form-hint">Loading table…</p>}
@@ -424,7 +871,7 @@ export default function TableScoringPage() {
         <form className="table-score-card" onSubmit={(e) => void submitPin(e)}>
           <h2>Unlock table</h2>
           <p className="form-hint">
-            Your name is saved on this phone. The PIN is remembered until the director rotates it.
+            Your name is saved on this phone. The PIN unlocks all tables in this round.
           </p>
           <label>
             Your name
@@ -463,7 +910,152 @@ export default function TableScoringPage() {
         </form>
       )}
 
-      {view && view.sessionOk && view.status === 'no_game' && (
+      {isUnlocked && viewMode === 'zone' && (
+        <div className="table-score-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+            <h2 style={{ margin: 0 }}>Zone Grid ({filteredZoneBoards.length} tables)</h2>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              disabled={zoneLoading}
+              onClick={() => void refreshZone()}
+            >
+              {zoneLoading ? 'Refreshing…' : 'Refresh Zone'}
+            </button>
+          </div>
+
+          <div className="live-round-pills" style={{ marginBottom: '0.85rem' }}>
+            {(
+              [
+                { id: 'all', label: 'All' },
+                { id: '1-15', label: '1–15' },
+                { id: '16-30', label: '16–30' },
+                { id: '31+', label: '31+' },
+                { id: 'pending', label: 'Pending Only' },
+              ] as const
+            ).map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                className={`live-round-pill ${zoneRange === pill.id ? 'active' : ''}`}
+                onClick={() => setZoneRange(pill.id)}
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
+
+          {zoneLoading && zoneBoards.length === 0 ? (
+            <p className="form-hint">Loading zone boards…</p>
+          ) : filteredZoneBoards.length === 0 ? (
+            <p className="form-hint">No tables match this filter.</p>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {filteredZoneBoards.map((board) => {
+                const picked = zoneSelectedByTable[board.tableNumber];
+                const isPending = !board.locked && !board.isBye && board.result === 'pending';
+                return (
+                  <div
+                    key={board.tableNumber}
+                    className="board-card"
+                    style={{
+                      padding: '0.85rem',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '10px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <strong>Table {board.tableNumber}</strong>
+                        {board.categoryName && (
+                          <span className="player-chip-badge">{board.categoryName}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span
+                          className={`live-result-pill ${isPending ? 'is-pending' : 'is-done'}`}
+                        >
+                          {board.isBye
+                            ? 'BYE'
+                            : board.result === 'pending'
+                              ? 'Pending'
+                              : board.result}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => {
+                            if (token) saveSession(board.slug, token);
+                            setViewMode('single');
+                            navigate(`/t/${board.slug}`);
+                          }}
+                        >
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          title="Call Chief Arbiter for this table"
+                          onClick={() => {
+                            setChiefTargetTable({
+                              slug: board.slug,
+                              tableNumber: board.tableNumber,
+                            });
+                            setChiefSheetOpen(true);
+                          }}
+                        >
+                          🚨
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: '0.95rem', marginBottom: isPending ? '0.6rem' : 0 }}>
+                      <div>⚪ <strong>{board.whiteName ?? '—'}</strong></div>
+                      {!board.isBye && (
+                        <div>⚫ <strong>{board.blackName ?? '—'}</strong></div>
+                      )}
+                    </div>
+
+                    {isPending && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+                        {RESULT_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            className={`btn btn-sm ${picked === opt.value ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() =>
+                              setZoneSelectedByTable((prev) => ({
+                                ...prev,
+                                [board.tableNumber]: opt.value,
+                              }))
+                            }
+                          >
+                            {opt.value}
+                          </button>
+                        ))}
+                        {picked && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            disabled={zoneBusyTable === board.tableNumber}
+                            onClick={() => void submitZoneBoardResult(board)}
+                          >
+                            {zoneBusyTable === board.tableNumber
+                              ? 'Saving…'
+                              : `Confirm ${picked}`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {view && view.sessionOk && viewMode === 'single' && view.status === 'no_game' && (
         <div className="table-score-card">
           <h2>No game this round</h2>
           <p className="form-hint">
@@ -472,14 +1064,14 @@ export default function TableScoringPage() {
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'confirmed_closed' && (
+      {view && view.sessionOk && viewMode === 'single' && view.status === 'confirmed_closed' && (
         <div className="table-score-card">
           <h2>Round closed</h2>
           <p className="form-hint">The director has confirmed this round. Scoring is locked.</p>
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'bye' && (
+      {view && view.sessionOk && viewMode === 'single' && view.status === 'bye' && (
         <div className="table-score-card">
           <h2>Bye</h2>
           <p className="form-hint">
@@ -488,7 +1080,7 @@ export default function TableScoringPage() {
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'locked' && (
+      {view && view.sessionOk && viewMode === 'single' && view.status === 'locked' && (
         <div className="table-score-card is-locked">
           <h2>Result locked</h2>
           <p className="table-score-round">Round {view.round}</p>
@@ -506,7 +1098,7 @@ export default function TableScoringPage() {
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'pending' && cardPending && (
+      {view && view.sessionOk && viewMode === 'single' && view.status === 'pending' && cardPending && (
         <div className="table-score-card">
           <h2>
             Issue {cardPending.cardType === 'warning' ? 'yellow warning' : 'red illegal-move'} card
@@ -557,7 +1149,7 @@ export default function TableScoringPage() {
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'pending' && !confirming && !cardPending && (
+      {view && view.sessionOk && viewMode === 'single' && view.status === 'pending' && !confirming && !cardPending && (
         <div className="table-score-card">
           <p className="table-score-round">Round {view.round}</p>
           {arbiterName.trim() && (
@@ -609,7 +1201,7 @@ export default function TableScoringPage() {
         </div>
       )}
 
-      {view && view.sessionOk && view.status === 'pending' && confirming && selected && !cardPending && (
+      {view && view.sessionOk && viewMode === 'single' && view.status === 'pending' && confirming && selected && !cardPending && (
         <div className="table-score-card">
           <h2>Confirm result</h2>
           <p className="table-score-round">
@@ -638,10 +1230,10 @@ export default function TableScoringPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !online}
+              disabled={busy}
               onClick={() => void confirmResult()}
             >
-              {busy ? 'Saving…' : online ? 'Confirm result' : 'Waiting for connection…'}
+              {busy ? 'Saving…' : online ? 'Confirm result' : 'Save offline (queue)'}
             </button>
           </div>
         </div>
@@ -656,7 +1248,7 @@ export default function TableScoringPage() {
           >
             Scan next table
           </button>
-          <p className="form-hint">Opens the camera — or scan with your phone camera app.</p>
+          <p className="form-hint">Opens the camera — or switch to Zone Grid above.</p>
         </div>
       )}
 
@@ -664,6 +1256,7 @@ export default function TableScoringPage() {
         <TableQrScanner
           onSlug={(next) => {
             setScanning(false);
+            if (token) saveSession(next, token);
             navigate(`/t/${next}`);
           }}
           onClose={() => setScanning(false)}

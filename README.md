@@ -14,6 +14,8 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - **Auth & Multi-Tenant B2B Organizations** — email/password, OTP/magic link, Google & GitHub; role-based signup (`Player / Parent` vs `Organizer / Academy`), Sandbox Trial quotas (1 tournament / 24 players), and Platform Admin B2B verification
 - **Global Player & Family Portal (`/player`)** — manage `Self` + `Child / Student` sub-profiles under one parent account, claim past tournaments, Live Matchday Companion card (board, color, opponent, score), career W/D/L stats, and Digital Certificate Vault
 - **GPS Tournament Discovery & 1-Click Registration (`/discover`, `/register/:slug`)** — Haversine GPS nearby event search, shareable registration forms with 1-click family profile autofill, DuitNow/QR payment receipt upload, and organizer approval queue that auto-populates the tournament roster
+- **Floor Arbiter Zone Grid, Chief Arbiter Alerts & Offline Queue (`/t/:slug`)** — score an entire zone of tables (`1–15`, `16–30`, `31+`, `Pending Only`) from one round PIN unlock, raise one-tap `"Call Chief Arbiter"` alerts to the Director Desk, and queue floor results offline when venue Wi-Fi drops
+- **Morning Roll Call Check-In & Venue TV / Projector Mode (`/live/:token/tv`)** — check in arriving players on the `Players` tab and exclude unchecked no-shows before Round 1; display auto-rotating pairings, category standings, and a round countdown clock on 1080p/4K venue screens
 - **Certificates** — PDF designer, print pack, Issue digital → Supabase Storage (or local disk)
 - **Desktop app** — Electron shell; production builds use cloud API (no user secrets)
 - **Simulator** — generate players, auto-play rounds, visualize boards/standings/diagnostics
@@ -27,6 +29,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - Engineering & agent rules handbook: [`docs/ENGINEERING_AND_AGENT_RULES.md`](docs/ENGINEERING_AND_AGENT_RULES.md)
 - Organizations & Player Portal feature guide: [`docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md`](docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md)
 - Registration & GPS Discovery feature guide: [`docs/FEATURES_REGISTRATION_AND_DISCOVERY.md`](docs/FEATURES_REGISTRATION_AND_DISCOVERY.md)
+- Floor Arbiter Zone Grid, Chief Arbiter Alerts & Venue TV guide: [`docs/FEATURES_ARBITER_AND_VENUE_TV.md`](docs/FEATURES_ARBITER_AND_VENUE_TV.md)
 - Agent handoff: [`docs/AGENT_HANDOFF.md`](docs/AGENT_HANDOFF.md)
 
 ## Monorepo
@@ -161,6 +164,8 @@ pnpm --filter @chess-alokas/pairing-engine test
 | GET/POST | `/public/events/:slugOrId`, `/public/events/:slugOrId/register` | Public event details & 1-click player/family registration with receipt upload |
 | PATCH | `/tournaments/:id/publishing` | Configure registration slug, GPS venue, entry fee, payment QR & global discovery |
 | GET/POST | `/tournaments/:id/registrations`, `/tournaments/:id/registrations/:regId/review` | Organizer registration queue & 1-click roster approval |
+| GET/POST | `/public/tables/:slug/zone`, `/public/tables/:slug/call-chief` | Floor arbiter Zone Grid view & Call Chief Arbiter alert |
+| GET/POST | `/tournaments/:id/floor/alerts`, `/tournaments/:id/floor/alerts/:alertId/resolve` | List & resolve active Chief Arbiter floor alerts |
 
 ## Typical flow
 

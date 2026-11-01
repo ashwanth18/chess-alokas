@@ -848,3 +848,35 @@ export function haversineDistanceKm(
   return Math.round(R * c * 10) / 10;
 }
 
+// ---------------------------------------------------------------------------
+// Floor Arbiter Zone Grid & Chief Arbiter Alerts (Phase 3)
+// ---------------------------------------------------------------------------
+
+export const FloorAlertSchema = z.object({
+  id: z.string().uuid(),
+  tournamentId: z.string().uuid(),
+  round: z.number().int().positive(),
+  tableNumber: z.number().int().positive(),
+  gameId: z.string().uuid().nullable(),
+  arbiterName: z.string().nullable(),
+  reason: z.string().min(1).max(300),
+  createdAt: z.string().datetime(),
+  resolvedAt: z.string().datetime().nullable(),
+});
+export type FloorAlert = z.infer<typeof FloorAlertSchema>;
+
+export const FloorZoneBoardSchema = z.object({
+  tableNumber: z.number().int().positive(),
+  slug: z.string(),
+  gameId: z.string().uuid().nullable(),
+  categoryId: z.string().uuid().nullable(),
+  categoryName: z.string().nullable(),
+  whiteName: z.string().nullable(),
+  blackName: z.string().nullable(),
+  result: GameResultSchema.nullable(),
+  isBye: z.boolean(),
+  locked: z.boolean(),
+});
+export type FloorZoneBoard = z.infer<typeof FloorZoneBoardSchema>;
+
+

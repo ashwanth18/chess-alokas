@@ -15,6 +15,7 @@ import { displaySchool, displayYearOfBirth } from '../lib/importParse';
 import type {
   FilterGroup,
   FilterOp,
+  FloorAlert,
   GameCardType,
   GameResult,
   TiebreakKey,
@@ -63,6 +64,8 @@ import {
   apiFloorPrepare,
   apiFloorRotatePin,
   apiFloorListTables,
+  apiFloorListAlerts,
+  apiFloorResolveAlert,
   apiDirectorSetGameResult,
   apiDirectorIssueCard,
   apiDirectorRemoveCard,
@@ -268,6 +271,12 @@ export default function TournamentPage() {
   const [cardBusyId, setCardBusyId] = useState<string | null>(null);
   const [cardMsg, setCardMsg] = useState<string | null>(null);
   const [fideLookupOpen, setFideLookupOpen] = useState(false);
+
+  // Phase 3: Chief Arbiter Alerts & Morning Roll Call Check-In
+  const [floorAlerts, setFloorAlerts] = useState<FloorAlert[]>([]);
+  const [alertBusyId, setAlertBusyId] = useState<string | null>(null);
+  const [rollCallMode, setRollCallMode] = useState(false);
+  const [rollCallNotice, setRollCallNotice] = useState<string | null>(null);
 
   // Phase 2: Registrations & Discovery state
   const [registrations, setRegistrations] = useState<TournamentRegistration[]>([]);
@@ -675,10 +684,11 @@ export default function TournamentPage() {
     }
   }
 
-  // Live floor/director cards: Realtime → refetch; poll backup when Realtime fails.
+  // Live floor/director cards & Chief Arbiter alerts: Realtime → refetch; poll backup when Realtime fails.
   useEffect(() => {
     if (!id || tab !== 'pairings') {
       setRoundCards([]);
+      setFloorAlerts([]);
       return;
     }
     let cancelled = false;
@@ -686,10 +696,14 @@ export default function TournamentPage() {
     let pollHandle: number | null = null;
 
     const refreshCards = async () => {
-      const res = await apiListGameCards(id, displayRound);
+      const [res, alertsRes] = await Promise.all([
+        apiListGameCards(id, displayRound),
+        apiFloorListAlerts(id, true),
+      ]);
       if (cancelled) return;
       if (res.ok && res.data?.cards) setRoundCards(res.data.cards);
       else setRoundCards([]);
+      if (alertsRes.ok && alertsRes.data?.alerts) setFloorAlerts(alertsRes.data.alerts);
     };
 
     void refreshCards();
@@ -716,16 +730,105 @@ export default function TournamentPage() {
       pollHandle = window.setInterval(() => void refreshCards(), 4_000);
     }
 
+    const alertsPoll = window.setInterval(() => {
+      void apiFloorListAlerts(id, true).then((r) => {
+        if (!cancelled && r.ok) setFloorAlerts(r.data.alerts);
+      });
+    }, 6_000);
+
     const onFocus = () => void refreshCards();
     window.addEventListener('focus', onFocus);
 
     return () => {
       cancelled = true;
       unsub();
+      window.clearInterval(alertsPoll);
       if (pollHandle != null) window.clearInterval(pollHandle);
       window.removeEventListener('focus', onFocus);
     };
   }, [id, tab, displayRound]);
+
+  async function handleResolveFloorAlert(alertId: string) {
+    if (!id || alertBusyId) return;
+    setAlertBusyId(alertId);
+    try {
+      const res = await apiFloorResolveAlert(id, alertId);
+      if (res.ok) {
+        setFloorAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      }
+    } finally {
+      setAlertBusyId(null);
+    }
+  }
+
+  async function togglePlayerCheckIn(player: LocalParticipant) {
+    const currentlyChecked = Boolean(player.customFields?.checkedIn);
+    const nextChecked = !currentlyChecked;
+    const nextFields = {
+      ...(player.customFields ?? {}),
+      checkedIn: nextChecked,
+    };
+    const round1Paired = (games ?? []).some((g) => !g.deletedAt && g.round === 1);
+    const reactivated =
+      nextChecked && !round1Paired && isExcludedFromRound(player, 1)
+        ? withReactivatedFrom(player, 1)
+        : null;
+    await db.participants.update(player.id, {
+      customFields: nextFields,
+      ...(reactivated
+        ? {
+            excludedRounds: reactivated.excludedRounds ?? [],
+            withdrawnFromRound: reactivated.withdrawnFromRound ?? null,
+          }
+        : {}),
+      updatedAt: nowIso(),
+      dirty: 1,
+    });
+    void syncOnline().catch(() => {});
+  }
+
+  async function handleCheckInAll(checked: boolean) {
+    if (!participants?.length) return;
+    const now = nowIso();
+    for (const p of participants) {
+      await db.participants.update(p.id, {
+        customFields: { ...(p.customFields ?? {}), checkedIn: checked },
+        updatedAt: now,
+        dirty: 1,
+      });
+    }
+    setRollCallNotice(
+      checked
+        ? `Marked all ${participants.length} players as checked in.`
+        : 'Cleared check-in status for all players.',
+    );
+    void syncOnline().catch(() => {});
+  }
+
+  async function handleMarkUncheckedAbsentRound1() {
+    if (!participants?.length) return;
+    const unchecked = participants.filter(
+      (p) => !Boolean(p.customFields?.checkedIn) && !isExcludedFromRound(p, 1),
+    );
+    if (unchecked.length === 0) {
+      setRollCallNotice('All active players are already checked in or marked absent for Round 1.');
+      return;
+    }
+    const now = nowIso();
+    for (const p of unchecked) {
+      const patch = withAbsentThisRound(p, 1);
+      await db.participants.update(p.id, {
+        excludedRounds: patch.excludedRounds ?? [],
+        withdrawnFromRound: patch.withdrawnFromRound ?? null,
+        updatedAt: now,
+        dirty: 1,
+      });
+    }
+    setRollCallNotice(
+      `Marked ${unchecked.length} unchecked player(s) absent for Round 1. They will be skipped when Round 1 is paired.`,
+    );
+    void syncOnline().catch(() => {});
+  }
 
   const boardsForRound = (games ?? [])
     .filter((g) => {
@@ -1696,6 +1799,16 @@ export default function TournamentPage() {
               {caps.importRequiresLateWarning ? 'Late entry' : 'Import Players'}
             </Link>
           )}
+          {tournament.publicEnabled && tournament.publicToken && (
+            <Link
+              to={`/live/${tournament.publicToken}/tv`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-outline"
+            >
+              📺 Open TV / Projector Mode
+            </Link>
+          )}
           <Link to={`/certificates?tournament=${id}`} className="btn btn-outline">
             Certificates
           </Link>
@@ -1863,6 +1976,14 @@ export default function TournamentPage() {
                     >
                       Copy link
                     </button>
+                    <Link
+                      to={`/live/${tournament.publicToken}/tv`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-sm btn-outline"
+                    >
+                      📺 Open TV / Projector Mode
+                    </Link>
                     <button
                       type="button"
                       className="btn btn-sm btn-outline"
@@ -1981,23 +2102,93 @@ export default function TournamentPage() {
         <div className="tab-panel">
           <div className="tab-actions">
             <span className="count-label">{participants?.length ?? 0} participants</span>
-            {caps?.canImport && (
-              <div className="tab-actions-buttons">
-                <Link to={importHref} className="btn btn-sm btn-outline">
-                  {caps.importRequiresLateWarning ? 'Late entry CSV' : 'Import CSV'}
-                </Link>
-                {(participants?.length ?? 0) > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline"
-                    onClick={() => setFideLookupOpen(true)}
-                  >
-                    Look up FIDE ratings
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="tab-actions-buttons">
+              {(participants?.length ?? 0) > 0 && caps?.stage !== 'completed' && (
+                <button
+                  type="button"
+                  className={`btn btn-sm ${rollCallMode ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => {
+                    setRollCallMode((v) => !v);
+                    setRollCallNotice(null);
+                  }}
+                >
+                  {rollCallMode ? '✓ Check-In Roll Call (Active)' : 'Check-In Roll Call'}
+                </button>
+              )}
+              {caps?.canImport && (
+                <>
+                  <Link to={importHref} className="btn btn-sm btn-outline">
+                    {caps.importRequiresLateWarning ? 'Late entry CSV' : 'Import CSV'}
+                  </Link>
+                  {(participants?.length ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      onClick={() => setFideLookupOpen(true)}
+                    >
+                      Look up FIDE ratings
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
+
+          {rollCallMode && (participants?.length ?? 0) > 0 && (
+            <div
+              className="admin-panel"
+              style={{
+                marginBottom: '1rem',
+                padding: '0.85rem 1rem',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+              }}
+            >
+              <div>
+                <strong>
+                  Checked in:{' '}
+                  {(participants ?? []).filter((p) => Boolean(p.customFields?.checkedIn)).length} /{' '}
+                  {participants?.length ?? 0}
+                </strong>
+                <p className="admin-metric-detail" style={{ margin: '0.15rem 0 0' }}>
+                  Tick arriving players at the registration desk, then mark remaining no-shows
+                  absent before pairing Round 1.
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => void handleCheckInAll(true)}
+                >
+                  Check In All
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => void handleCheckInAll(false)}
+                >
+                  Clear All
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={() => void handleMarkUncheckedAbsentRound1()}
+                >
+                  Mark Unchecked Players Absent for Round 1
+                </button>
+              </div>
+            </div>
+          )}
+
+          {rollCallNotice && (
+            <p className="form-hint stage-banner-ok" role="status" style={{ marginBottom: '0.75rem' }}>
+              {rollCallNotice}
+            </p>
+          )}
           {fideLookupOpen && id && participants && (
             <FideLookupModal
               tournamentId={id}
@@ -2040,6 +2231,7 @@ export default function TournamentPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  {rollCallMode && <th>Check-in</th>}
                   <th title="Start rank">Start</th>
                   <th>Name</th>
                   <th>FIDE</th>
@@ -2065,8 +2257,29 @@ export default function TournamentPage() {
                     caps?.stage !== 'completed' &&
                     (!roundPaired ||
                       Boolean(tournament && canEditRoundResults(tournament, absenceRound)));
+                  const isCheckedIn = Boolean(p.customFields?.checkedIn);
                   return (
                   <tr key={p.id}>
+                    {rollCallMode && (
+                      <td>
+                        <label
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            cursor: 'pointer',
+                            fontWeight: isCheckedIn ? 600 : 400,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isCheckedIn}
+                            onChange={() => void togglePlayerCheckIn(p)}
+                          />
+                          <span>{isCheckedIn ? 'Present' : 'Unchecked'}</span>
+                        </label>
+                      </td>
+                    )}
                     <td>{startRank}</td>
                     <td>{p.name}</td>
                     <td>
@@ -2589,6 +2802,52 @@ export default function TournamentPage() {
 
       {tab === 'pairings' && (
         <div className="tab-panel">
+          {floorAlerts.length > 0 && (
+            <div
+              role="alert"
+              style={{
+                border: '2px solid #ef4444',
+                background: 'rgba(239, 68, 68, 0.14)',
+                borderRadius: '10px',
+                padding: '0.85rem 1rem',
+                marginBottom: '1rem',
+                display: 'grid',
+                gap: '0.5rem',
+              }}
+            >
+              {floorAlerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <div>
+                    <strong>
+                      🚨 Table {alert.tableNumber} needs Chief Arbiter (Arbiter:{' '}
+                      {alert.arbiterName || 'Floor'} — {alert.reason})
+                    </strong>
+                    <span className="admin-metric-detail" style={{ marginLeft: '0.6rem' }}>
+                      Round {alert.round}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    disabled={alertBusyId === alert.id}
+                    onClick={() => void handleResolveFloorAlert(alert.id)}
+                  >
+                    {alertBusyId === alert.id ? 'Resolving…' : 'Resolve / Dismiss'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {tournament &&
             (caps?.stage === 'ready' ||
               caps?.stage === 'in_progress' ||

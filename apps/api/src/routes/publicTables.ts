@@ -3,13 +3,14 @@ import {
   ArbiterScorableResultSchema,
   GameCardTypeSchema,
   emptyCardCounts,
+  type FloorZoneBoard,
 } from '@chess-alokas/shared';
 import { z } from 'zod';
 import type { Store } from '../db.js';
 import {
   signArbiterSession,
   verifyArbiterPin,
-  verifyArbiterSession,
+  verifyArbiterSessionToken,
 } from '../floor/pin.js';
 import type { FloorTableView } from '../floor/types.js';
 import {
@@ -24,6 +25,7 @@ type Opts = { store: Store };
 const pinAttempts = new Map<string, { count: number; resetAt: number }>();
 const RESULT_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
 const CARD_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
+const ALERT_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
 
 function rateLimit(
   map: Map<string, { count: number; resetAt: number }>,
@@ -88,12 +90,10 @@ async function buildView(
 
   const pinMeta = await store.getArbiterPinMeta(tournament.id);
   const pinRound = pinMeta.round;
-  const session = verifyArbiterSession(sessionToken);
+  const session = verifyArbiterSessionToken(sessionToken);
   const sessionOk = Boolean(
     session &&
       session.tournamentId === table.tournamentId &&
-      session.tableId === table.id &&
-      session.tableNumber === table.tableNumber &&
       pinRound != null &&
       session.pinRound === pinRound,
   );
@@ -165,7 +165,12 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
         return reply.code(429).send({ error: 'Too many PIN attempts. Try again later.' });
       }
 
-      const parsed = z.object({ pin: z.string().min(4).max(8) }).safeParse(request.body);
+      const parsed = z
+        .object({
+          pin: z.string().min(4).max(8),
+          arbiterName: z.string().trim().max(80).optional(),
+        })
+        .safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: 'Invalid PIN' });
       }
@@ -191,10 +196,81 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
         tableId: table.id,
         tableNumber: table.tableNumber,
         pinRound: pinMeta.round,
+        arbiterName: parsed.data.arbiterName || null,
       });
 
       const view = await buildView(store, table.slug, token);
       return { token, table: view };
+    },
+  );
+
+  app.get<{ Params: { slug: string } }>(
+    '/public/tables/:slug/zone',
+    async (request, reply) => {
+      const table = await store.getTableBySlug(request.params.slug);
+      if (!table) return reply.code(404).send({ error: 'Table not found' });
+
+      const tournament = await store.getTournament(table.tournamentId);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Table not found' });
+      }
+
+      const session = verifyArbiterSessionToken(sessionFromRequest(request));
+      if (!session || session.tournamentId !== table.tournamentId) {
+        return reply.code(401).send({ error: 'PIN session required' });
+      }
+
+      const pinMeta = await store.getArbiterPinMeta(tournament.id);
+      if (pinMeta.round == null || session.pinRound !== pinMeta.round) {
+        return reply.code(401).send({ error: 'PIN expired for this round. Enter the new PIN.' });
+      }
+
+      const round = pinMeta.round;
+      const [games, participants, categories] = await Promise.all([
+        store.listGames(tournament.id, { round }),
+        store.listParticipants(tournament.id),
+        store.listCategories(tournament.id),
+      ]);
+
+      const maxBoard = games.reduce((max, g) => Math.max(max, g.board), 0);
+      let tables = await store.listTables(tournament.id);
+      if (maxBoard > tables.length) {
+        tables = await store.ensureTables(tournament.id, maxBoard);
+      }
+
+      const tableByNumber = new Map(tables.map((t) => [t.tableNumber, t]));
+      const participantById = new Map(participants.map((p) => [p.id, p]));
+      const categoryById = new Map(categories.map((c) => [c.id, c]));
+      const confirmedClosed = (tournament.confirmedRounds ?? 0) >= round;
+
+      const sortedGames = [...games].sort((a, b) => a.board - b.board);
+      const boards: FloorZoneBoard[] = sortedGames.map((g) => {
+        const tbl = tableByNumber.get(g.board);
+        const isBye = Boolean(g.isBye || g.result === 'bye');
+        const locked = Boolean(
+          confirmedClosed || g.resultLockedAt || isBye || g.result !== 'pending',
+        );
+        return {
+          tableNumber: g.board,
+          slug: tbl?.slug ?? table.slug,
+          gameId: g.id,
+          categoryId: g.categoryId,
+          categoryName: categoryById.get(g.categoryId)?.name ?? null,
+          whiteName: (g.whiteId ? participantById.get(g.whiteId)?.name : null) ?? null,
+          blackName: (g.blackId ? participantById.get(g.blackId)?.name : null) ?? null,
+          result: g.result,
+          isBye,
+          locked,
+        };
+      });
+
+      return {
+        tournamentId: tournament.id,
+        tournamentName: tournament.name,
+        round,
+        arbiterName: session.arbiterName ?? null,
+        boards,
+      };
     },
   );
 
@@ -209,24 +285,19 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
       const parsed = z
         .object({
           result: ArbiterScorableResultSchema,
-          confirm: z.literal(true),
-          arbiterName: z.string().trim().min(1).max(80),
+          confirm: z.boolean().optional().default(true),
+          arbiterName: z.string().trim().min(1).max(80).optional(),
         })
         .safeParse(request.body);
-      if (!parsed.success) {
+      if (!parsed.success || !parsed.data.confirm) {
         return reply.code(400).send({ error: 'Invalid result payload (result + arbiter name required)' });
       }
 
       const table = await store.getTableBySlug(request.params.slug);
       if (!table) return reply.code(404).send({ error: 'Table not found' });
 
-      const session = verifyArbiterSession(sessionFromRequest(request));
-      if (
-        !session ||
-        session.tournamentId !== table.tournamentId ||
-        session.tableId !== table.id ||
-        session.tableNumber !== table.tableNumber
-      ) {
+      const session = verifyArbiterSessionToken(sessionFromRequest(request));
+      if (!session || session.tournamentId !== table.tournamentId) {
         return reply.code(401).send({ error: 'PIN session required' });
       }
 
@@ -265,16 +336,75 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
         return reply.code(409).send({ error: absenceBlock });
       }
 
+      const actorName = parsed.data.arbiterName || session.arbiterName || 'Floor Arbiter';
       const updated = await store.recordGameResult(game.id, {
         result: parsed.data.result,
         actorRole: 'floor',
-        actorName: parsed.data.arbiterName,
+        actorName,
         lock: true,
       });
       if (!updated) return reply.code(500).send({ error: 'Failed to save result' });
 
       const view = await buildView(store, table.slug, sessionFromRequest(request));
       return { ok: true, table: view };
+    },
+  );
+
+  app.post<{ Params: { slug: string }; Body: unknown }>(
+    '/public/tables/:slug/call-chief',
+    async (request, reply) => {
+      const ip = request.ip || 'unknown';
+      if (!rateLimit(ALERT_ATTEMPTS, `${request.params.slug}:${ip}`, 30, 15 * 60 * 1000)) {
+        return reply.code(429).send({ error: 'Too many requests. Try again later.' });
+      }
+
+      const parsed = z
+        .object({
+          reason: z.string().trim().min(1).max(300),
+          arbiterName: z.string().trim().min(1).max(80).optional(),
+        })
+        .safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'Reason is required (max 300 chars)' });
+      }
+
+      const table = await store.getTableBySlug(request.params.slug);
+      if (!table) return reply.code(404).send({ error: 'Table not found' });
+
+      const session = verifyArbiterSessionToken(sessionFromRequest(request));
+      if (!session || session.tournamentId !== table.tournamentId) {
+        return reply.code(401).send({ error: 'PIN session required' });
+      }
+
+      const tournament = await store.getTournament(table.tournamentId);
+      if (!tournament || tournament.deletedAt) {
+        return reply.code(404).send({ error: 'Table not found' });
+      }
+
+      const pinMeta = await store.getArbiterPinMeta(tournament.id);
+      if (pinMeta.round == null || session.pinRound !== pinMeta.round) {
+        return reply.code(401).send({ error: 'PIN expired for this round. Enter the new PIN.' });
+      }
+
+      const game = await store.findGameForTable(
+        tournament.id,
+        table.tableNumber,
+        pinMeta.round,
+      );
+
+      const alert = await store.createFloorAlert({
+        id: crypto.randomUUID(),
+        tournamentId: tournament.id,
+        round: pinMeta.round,
+        tableNumber: table.tableNumber,
+        gameId: game?.id ?? null,
+        arbiterName: parsed.data.arbiterName || session.arbiterName || null,
+        reason: parsed.data.reason,
+        createdAt: new Date().toISOString(),
+        resolvedAt: null,
+      });
+
+      return { alert };
     },
   );
 
@@ -301,13 +431,8 @@ export const publicTablesPlugin: FastifyPluginAsync<Opts> = async (app, opts) =>
       const table = await store.getTableBySlug(request.params.slug);
       if (!table) return reply.code(404).send({ error: 'Table not found' });
 
-      const session = verifyArbiterSession(sessionFromRequest(request));
-      if (
-        !session ||
-        session.tournamentId !== table.tournamentId ||
-        session.tableId !== table.id ||
-        session.tableNumber !== table.tableNumber
-      ) {
+      const session = verifyArbiterSessionToken(sessionFromRequest(request));
+      if (!session || session.tournamentId !== table.tournamentId) {
         return reply.code(401).send({ error: 'PIN session required' });
       }
 

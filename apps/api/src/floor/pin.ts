@@ -8,6 +8,7 @@ export type ArbiterSessionPayload = {
   tableId: string;
   tableNumber: number;
   pinRound: number;
+  arbiterName?: string | null;
   exp: number;
 };
 
@@ -80,6 +81,8 @@ export function verifyArbiterSession(token: string | undefined | null): ArbiterS
     return null;
   }
 }
+
+export const verifyArbiterSessionToken = verifyArbiterSession;
 
 /** Unguessable public slug for a table station (~128 bits). */
 export function generateTableSlug(): string {

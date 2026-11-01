@@ -347,10 +347,15 @@ export default function LivePage() {
       <header className="live-header">
         <div className="live-header-row">
           <p className="live-brand">Chess Alokas Live</p>
-          <span className="table-score-conn" title={online ? 'Online' : 'Offline'}>
-            <span className={`status-dot ${online ? 'online' : 'offline'}`} />
-            <span className="status-label">{online ? 'Online' : 'Offline'}</span>
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <Link to={`/live/${token}/tv`} className="btn btn-sm btn-outline">
+              📺 TV / Projector View
+            </Link>
+            <span className="table-score-conn" title={online ? 'Online' : 'Offline'}>
+              <span className={`status-dot ${online ? 'online' : 'offline'}`} />
+              <span className="status-label">{online ? 'Online' : 'Offline'}</span>
+            </span>
+          </div>
         </div>
         <h1>{data.tournament.name}</h1>
         <p className="live-meta">

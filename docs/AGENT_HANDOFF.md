@@ -2,7 +2,7 @@
 
 **Read this first** when context is full or starting a new session on this repo.
 
-Last updated: 2026-11-01 (Chess Alokas 2.0 Phase 2: GPS Tournament Discovery `/discover`, Shareable Registration Forms `/register/:slug` with 1-Click Family Profile Autofill & Payment Receipt Upload, and Organizer Approval Queue — migration `026`)
+Last updated: 2026-11-01 (Chess Alokas 2.0 Phase 3: Floor Arbiter Zone Grid, Chief Arbiter Alerts, Offline Floor Queue, Morning Roll Call Check-In, and Live Venue TV / Projector Mode `/live/:token/tv` — migration `027`)
 
 ## What this product is
 
@@ -35,6 +35,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 - [x] `scripts/replay-arcc-dutch.mts` — validation tool replaying ARCC 2026 through Dutch/bbp vs. actual results
 - [x] **Chess Alokas 2.0 Phase 1**: Multi-tenant B2B `organizations` & `organization_members` (`024_organizations_and_roles.sql`), Sandbox Trial quota enforcement (`1` tournament / `24` players), Platform Admin B2B approval actions (`/admin`), Global `player_profiles` & family sub-profiles (`025_player_profiles.sql`), and Web Participant Portal (`/player` + Workspace Switcher)
 - [x] **Chess Alokas 2.0 Phase 2**: Tournament Discovery & Shareable Registrations (`026_tournament_discovery_and_registrations.sql`), GPS Haversine nearby search (`/discover`), 1-click family/player registration with payment receipt upload (`/register/:slug`), B2B verification gate for global publishing/paid fees, and Organizer `Registrations` approval queue in `TournamentPage.tsx`
+- [x] **Chess Alokas 2.0 Phase 3**: Floor Arbiter Zone Grid (`GET /public/tables/:slug/zone`), Call Chief Arbiter alerts (`027_floor_alerts_and_checkin.sql`, `POST /public/tables/:slug/call-chief`, `/tournaments/:id/floor/alerts`), Offline Floor Result Queue (`alokas-floor-offline-queue`), Morning Roll Call check-in on `Players` tab, and Live Venue TV / Projector Mode (`/live/:token/tv`, `LiveTvPage.tsx`)
 
 ## Auth model
 
@@ -50,8 +51,9 @@ Offline-first chess tournament manager with **per-manager accounts**:
 | `apps/web/src/auth/` | AuthProvider |
 | `apps/web/src/pages/LoginPage.tsx` | Password / OTP / OAuth |
 | `apps/web/src/pages/AccountPage.tsx` | Profile, security, identities, delete |
-| `apps/web/src/pages/TableScoringPage.tsx` | Floor arbiter PIN/QR result entry |
+| `apps/web/src/pages/TableScoringPage.tsx` | Floor arbiter PIN/QR result entry, Zone Grid view, Call Chief Arbiter & offline queue |
 | `apps/web/src/pages/LivePage.tsx` | Public live pairings/standings viewer |
+| `apps/web/src/pages/LiveTvPage.tsx` | 1080p/4K Venue TV & Projector display (`/live/:token/tv`) with countdown clock & auto-paging |
 | `apps/web/src/pages/AdminPage.tsx` | Platform admin dashboard + B2B organization approvals |
 | `apps/web/src/pages/PlayerPortalPage.tsx` | Participant & Family Portal (`/player`): live matchday card, career stats, certificate vault |
 | `apps/web/src/pages/DiscoverEventsPage.tsx` | Public tournament discovery (`/discover`) with Haversine GPS nearby search |
@@ -72,6 +74,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 | `docs/ENGINEERING_AND_AGENT_RULES.md` | Mandatory engineering, security, testing, docs & commit rules |
 | `docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md` | Multi-tenant B2B organizations, Sandbox Trial, and `/player` portal docs |
 | `docs/FEATURES_REGISTRATION_AND_DISCOVERY.md` | Tournament discovery (GPS), `/register/:slug` 1-click autofill, and organizer approval queue docs |
+| `docs/FEATURES_ARBITER_AND_VENUE_TV.md` | Floor Arbiter Zone Grid, Chief Arbiter alerts, Offline queue, Roll Call check-in & Venue TV mode docs |
 | `scripts/replay-arcc-dutch.mts` | Replays a real event through Dutch/Swiss engines vs. actual results — validation tool, run with `npx tsx` |
 
 ## How to resume

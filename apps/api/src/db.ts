@@ -31,6 +31,7 @@ import {
   RegistrationPlayerSnapshot,
   RegistrationStatus,
   PublicEventSummary,
+  FloorAlert,
   DEFAULT_REGISTRATION_FORM_CONFIG,
   assignCategories,
   haversineDistanceKm,
@@ -223,6 +224,11 @@ export interface Store {
       categoryIds?: string[];
     },
   ): Promise<{ registration: TournamentRegistration; participant: Participant | null }>;
+
+  // Floor Chief Arbiter Alerts (Phase 3)
+  createFloorAlert(alert: FloorAlert): Promise<FloorAlert>;
+  listFloorAlerts(tournamentId: string, activeOnly?: boolean): Promise<FloorAlert[]>;
+  resolveFloorAlert(id: string): Promise<FloorAlert | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +251,7 @@ export class MemoryStore implements Store {
   private playerProfiles = new Map<string, PlayerProfile>();
   private certificateIssues = new Map<string, CertificateIssue>();
   private registrations = new Map<string, TournamentRegistration>();
+  private floorAlerts = new Map<string, FloorAlert>();
   private resultEvents: Array<{
     id: string;
     gameId: string;
@@ -1633,6 +1640,34 @@ export class MemoryStore implements Store {
     this.registrations.set(regId, updatedReg);
     return { registration: updatedReg, participant: null };
   }
+
+  // ---- Floor Chief Arbiter Alerts (Phase 3) ----
+
+  async createFloorAlert(alert: FloorAlert): Promise<FloorAlert> {
+    this.floorAlerts.set(alert.id, alert);
+    return alert;
+  }
+
+  async listFloorAlerts(tournamentId: string, activeOnly = true): Promise<FloorAlert[]> {
+    return [...this.floorAlerts.values()]
+      .filter(
+        (a) =>
+          a.tournamentId === tournamentId &&
+          (!activeOnly || a.resolvedAt == null),
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async resolveFloorAlert(id: string): Promise<FloorAlert | null> {
+    const existing = this.floorAlerts.get(id);
+    if (!existing) return null;
+    const updated: FloorAlert = {
+      ...existing,
+      resolvedAt: existing.resolvedAt ?? new Date().toISOString(),
+    };
+    this.floorAlerts.set(id, updated);
+    return updated;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2023,6 +2058,18 @@ interface GameCardRow {
   deleted_at: Date | string | null;
 }
 
+interface FloorAlertRow {
+  id: string;
+  tournament_id: string;
+  round: number;
+  table_number: number;
+  game_id: string | null;
+  arbiter_name: string | null;
+  reason: string;
+  created_at: Date | string;
+  resolved_at: Date | string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers – row → domain type
 // ---------------------------------------------------------------------------
@@ -2114,6 +2161,20 @@ function rowToTournamentTable(row: TournamentTableRow): TournamentTable {
     tableNumber: row.table_number,
     slug: row.slug,
     createdAt: toIso(row.created_at)!,
+  };
+}
+
+function rowToFloorAlert(row: FloorAlertRow): FloorAlert {
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    round: Number(row.round),
+    tableNumber: Number(row.table_number),
+    gameId: row.game_id ?? null,
+    arbiterName: row.arbiter_name ?? null,
+    reason: row.reason,
+    createdAt: toIso(row.created_at)!,
+    resolvedAt: toIso(row.resolved_at) ?? null,
   };
 }
 
@@ -4205,6 +4266,50 @@ export class PostgresStore implements Store {
       registration: rowToTournamentRegistration(updatedRows[0]!),
       participant: null,
     };
+  }
+
+  // ---- Floor Chief Arbiter Alerts (Phase 3) ----
+
+  async createFloorAlert(alert: FloorAlert): Promise<FloorAlert> {
+    const rows = await this.sql<FloorAlertRow[]>`
+      INSERT INTO floor_alerts (
+        id, tournament_id, round, table_number, game_id, arbiter_name, reason, created_at, resolved_at
+      )
+      VALUES (
+        ${alert.id}, ${alert.tournamentId}, ${alert.round}, ${alert.tableNumber},
+        ${alert.gameId ?? null}, ${alert.arbiterName ?? null}, ${alert.reason},
+        ${alert.createdAt}, ${alert.resolvedAt ?? null}
+      )
+      RETURNING *
+    `;
+    return rowToFloorAlert(rows[0]!);
+  }
+
+  async listFloorAlerts(tournamentId: string, activeOnly = true): Promise<FloorAlert[]> {
+    const rows = activeOnly
+      ? await this.sql<FloorAlertRow[]>`
+          SELECT * FROM floor_alerts
+          WHERE tournament_id = ${tournamentId} AND resolved_at IS NULL
+          ORDER BY created_at DESC
+        `
+      : await this.sql<FloorAlertRow[]>`
+          SELECT * FROM floor_alerts
+          WHERE tournament_id = ${tournamentId}
+          ORDER BY created_at DESC
+        `;
+    return rows.map(rowToFloorAlert);
+  }
+
+  async resolveFloorAlert(id: string): Promise<FloorAlert | null> {
+    const now = new Date().toISOString();
+    const rows = await this.sql<FloorAlertRow[]>`
+      UPDATE floor_alerts
+      SET resolved_at = COALESCE(resolved_at, ${now})
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    const row = rows[0];
+    return row ? rowToFloorAlert(row) : null;
   }
 }
 

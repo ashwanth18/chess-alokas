@@ -15,6 +15,8 @@ import type {
   PublicEventSummary,
   RegistrationFormConfig,
   TournamentRegistration,
+  FloorAlert,
+  FloorZoneBoard,
   FilterGroup,
 } from '@chess-alokas/shared';
 import { supabase } from '../lib/supabase';
@@ -382,12 +384,67 @@ export async function apiPublicTableGet(slug: string, sessionToken?: string | nu
   });
 }
 
-export async function apiPublicTableSession(slug: string, pin: string) {
+export async function apiPublicTableSession(
+  slug: string,
+  pin: string,
+  arbiterName?: string,
+) {
   return req<{ token: string; table: FloorTableView }>(
     `/public/tables/${encodeURIComponent(slug)}/session`,
     {
       method: 'POST',
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ pin, ...(arbiterName ? { arbiterName } : {}) }),
+    },
+  );
+}
+
+export async function apiPublicTableZone(slug: string, token: string) {
+  return req<{
+    tournamentId: string;
+    tournamentName: string;
+    round: number;
+    arbiterName: string | null;
+    boards: FloorZoneBoard[];
+  }>(`/public/tables/${encodeURIComponent(slug)}/zone`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Arbiter-Session': token,
+    },
+  });
+}
+
+export async function apiPublicTableCallChief(
+  slug: string,
+  token: string,
+  reason: string,
+  arbiterName?: string,
+) {
+  return req<{ alert: FloorAlert }>(
+    `/public/tables/${encodeURIComponent(slug)}/call-chief`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Arbiter-Session': token,
+      },
+      body: JSON.stringify({ reason, ...(arbiterName ? { arbiterName } : {}) }),
+    },
+  );
+}
+
+export async function apiFloorListAlerts(tournamentId: string, activeOnly = true) {
+  const qs = activeOnly ? '' : '?activeOnly=false';
+  return req<{ alerts: FloorAlert[] }>(
+    `/tournaments/${encodeURIComponent(tournamentId)}/floor/alerts${qs}`,
+  );
+}
+
+export async function apiFloorResolveAlert(tournamentId: string, alertId: string) {
+  return req<{ alert: FloorAlert }>(
+    `/tournaments/${encodeURIComponent(tournamentId)}/floor/alerts/${encodeURIComponent(alertId)}/resolve`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
     },
   );
 }
@@ -402,11 +459,16 @@ export async function apiPublicTableResult(
     `/public/tables/${encodeURIComponent(slug)}/result`,
     {
       method: 'POST',
-      headers: { 'X-Arbiter-Session': sessionToken },
+      headers: {
+        Authorization: `Bearer ${sessionToken}`,
+        'X-Arbiter-Session': sessionToken,
+      },
       body: JSON.stringify({ result, confirm: true, arbiterName }),
     },
   );
 }
+
+export const apiPublicTableSetResult = apiPublicTableResult;
 
 export async function apiPublicTableCard(
   slug: string,

@@ -116,4 +116,32 @@ export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
       return { arbiterPin, arbiterPinRound: parsed.data.pinRound };
     },
   );
+
+  app.get<{ Params: { id: string }; Querystring: { activeOnly?: string } }>(
+    '/tournaments/:id/floor/alerts',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const activeOnly = request.query.activeOnly !== 'false';
+      const alerts = await store.listFloorAlerts(id, activeOnly);
+      return { alerts };
+    },
+  );
+
+  app.post<{ Params: { id: string; alertId: string } }>(
+    '/tournaments/:id/floor/alerts/:alertId/resolve',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id, alertId } = request.params;
+      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      const allForTournament = await store.listFloorAlerts(id, false);
+      if (!allForTournament.some((a) => a.id === alertId)) {
+        return reply.code(404).send({ error: 'Alert not found' });
+      }
+      const alert = await store.resolveFloorAlert(alertId);
+      if (!alert) return reply.code(404).send({ error: 'Alert not found' });
+      return { alert };
+    },
+  );
 };

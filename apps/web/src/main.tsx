@@ -33,6 +33,7 @@ import EventRegistrationPage from './pages/EventRegistrationPage';
 import LandingPage from './pages/LandingPage';
 import TableScoringPage from './pages/TableScoringPage';
 import LivePage from './pages/LivePage';
+import LiveTvPage from './pages/LiveTvPage';
 
 const isDesktop =
   Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) ||
@@ -170,6 +171,7 @@ function AppRoot() {
           <Route path="/auth/reset" element={<ResetPasswordPage />} />
           <Route path="/t/:slug" element={<TableScoringPage />} />
           <Route path="/live/:token" element={<LivePage />} />
+          <Route path="/live/:token/tv" element={<LiveTvPage />} />
           <Route path="/live/:token/p/:playerId" element={<LivePage />} />
           <Route path="/discover" element={<DiscoverEventsPage />} />
           <Route path="/register/:slug" element={<EventRegistrationPage />} />
