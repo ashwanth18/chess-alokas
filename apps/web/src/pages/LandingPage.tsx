@@ -1,748 +1,657 @@
+import { useEffect, type MouseEvent } from 'react';
+import { preload } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import archivoUrl from '../design/fonts/archivo-latin-wdth-normal.woff2?url';
 import { trackPageView } from '../lib/pageAnalytics';
-import { trackProductEvent } from '../lib/productTelemetry';
+import Downloads from './landing/Downloads';
+import {
+  CertificateVisual,
+  FloorVisual,
+  Mark,
+  PairingSheet,
+  ParentVisual,
+  RegistrationQueue,
+  StandingsSheet,
+  TvVisual,
+} from './landing/visuals';
+import './landing/landing.css';
 
-type PlatformKey = 'windows' | 'linux' | 'macos';
+/*
+ * Accuracy is a hard rule on this page: every claim must be true of the code. Do not add
+ * testimonials, customer counts, logos, prices, endorsements, WhatsApp automation or a payment
+ * gateway. Sign-in is described as email only. Illustrations use invented names.
+ */
 
-type OptionId =
-  | 'win-setup'
-  | 'win-portable'
-  | 'mac-arm64'
-  | 'mac-x64'
-  | 'linux-appimage';
+const SITE = 'https://chess-manager.alokas.com/';
+const TITLE = 'Chess Alokas: chess tournament software for organizers, arbiters and parents';
+const DESCRIPTION =
+  'Swiss and FIDE Dutch pairings, floor result entry by PIN and QR, DuitNow receipt approval, live pages for parents, venue TV and certificates. The desk keeps working when the Wi-Fi drops.';
 
-const RELEASES_API =
-  import.meta.env.VITE_GITHUB_RELEASES_API ??
-  'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
+const STRUCTURED_DATA = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Chess Alokas',
+  url: SITE,
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web, Windows, macOS, Linux',
+  description: DESCRIPTION,
+});
 
-const RELEASE_BASE =
-  import.meta.env.VITE_DOWNLOAD_RELEASE_BASE ??
-  'https://github.com/ashwanth18/chess-alokas/releases/latest/download';
-
-interface DownloadOptionDef {
-  id: OptionId;
-  platform: PlatformKey;
-  label: string;
-  detail: string;
-  /** Used when GitHub API is unavailable */
-  fallbackUrl: string;
-  match: (assetName: string) => boolean;
-}
-
-const DOWNLOAD_OPTIONS: DownloadOptionDef[] = [
-  {
-    id: 'win-setup',
-    platform: 'windows',
-    label: 'Installer',
-    detail: 'Recommended · Windows 10/11',
-    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-Setup-win-x64.exe`,
-    match: (n) => n.includes('setup') && n.includes('win') && n.endsWith('.exe'),
-  },
-  {
-    id: 'win-portable',
-    platform: 'windows',
-    label: 'Portable',
-    detail: 'No install · run from a folder',
-    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-Portable-win-x64.exe`,
-    match: (n) => n.includes('portable') && n.includes('win') && n.endsWith('.exe'),
-  },
-  {
-    id: 'mac-arm64',
-    platform: 'macos',
-    label: 'Apple Silicon',
-    detail: 'M1, M2, M3, M4',
-    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-mac-arm64.dmg`,
-    match: (n) =>
-      (n.includes('mac') || n.includes('darwin')) &&
-      n.includes('arm64') &&
-      n.endsWith('.dmg') &&
-      !n.includes('blockmap'),
-  },
-  {
-    id: 'mac-x64',
-    platform: 'macos',
-    label: 'Intel',
-    detail: 'Intel Macs',
-    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-mac-x64.dmg`,
-    match: (n) =>
-      (n.includes('mac') || n.includes('darwin')) &&
-      (n.includes('x64') || n.includes('x86_64') || n.includes('intel')) &&
-      n.endsWith('.dmg') &&
-      !n.includes('blockmap') &&
-      !n.includes('arm64'),
-  },
-  {
-    id: 'linux-appimage',
-    platform: 'linux',
-    label: 'AppImage',
-    detail: 'Most distributions · x86_64',
-    fallbackUrl: `${RELEASE_BASE}/Chess-Alokas-linux-x64.AppImage`,
-    match: (n) =>
-      (n.includes('appimage') || (n.includes('linux') && n.endsWith('.appimage'))) &&
-      !n.includes('blockmap') &&
-      !n.endsWith('.zsync'),
-  },
+const NAV = [
+  { href: '#round', label: 'How a round runs' },
+  { href: '#offline', label: 'Offline' },
+  { href: '#pricing', label: 'Trial' },
+  { href: '#download', label: 'Download' },
+  { href: '#faq', label: 'FAQ' },
 ];
 
-interface ResolvedOption {
-  id: OptionId;
-  platform: PlatformKey;
-  label: string;
-  detail: string;
-  url: string | null;
-  available: boolean;
-}
-
-function detectClientHints(): { platform: PlatformKey | null; preferArm: boolean } {
-  if (typeof navigator === 'undefined') return { platform: null, preferArm: false };
-  const ua = navigator.userAgent.toLowerCase();
-  const platform = navigator.platform?.toLowerCase() ?? '';
-  const arch = (
-    navigator as Navigator & { userAgentData?: { architecture?: string } }
-  ).userAgentData?.architecture?.toLowerCase();
-  const preferArm = arch === 'arm' || ua.includes('arm64') || ua.includes('aarch64');
-
-  if (ua.includes('win')) return { platform: 'windows', preferArm: false };
-  if (ua.includes('linux') && !ua.includes('android')) {
-    return { platform: 'linux', preferArm };
-  }
-  if (ua.includes('mac') || platform.includes('mac')) {
-    // Most Mac browsers still report "MacIntel"; default to Apple Silicon when unknown.
-    return { platform: 'macos', preferArm: arch ? preferArm : true };
-  }
-  return { platform: null, preferArm: false };
-}
-
-function isRecommended(option: ResolvedOption, hints: ReturnType<typeof detectClientHints>): boolean {
-  if (!hints.platform || option.platform !== hints.platform) return false;
-  if (option.id === 'win-setup') return true;
-  if (option.id === 'linux-appimage') return true;
-  if (option.id === 'mac-arm64') return hints.preferArm;
-  if (option.id === 'mac-x64') return !hints.preferArm;
-  return false;
-}
-
-function WindowsIcon() {
-  return (
-    <svg className="landing-os-icon" viewBox="0 0 24 24" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 13 7.5 1.1v-7.2H3v6.1ZM11.5 4.25 21 3v8.5h-9.5V4.25ZM11.5 21 21 21.75V12.5h-9.5V21Z"
-      />
-    </svg>
-  );
-}
-
-function AppleIcon() {
-  return (
-    <svg className="landing-os-icon" viewBox="0 0 24 24" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M16.4 12.7c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.7 0-1.7-.7-2.8-.7-1.4 0-2.8.9-3.5 2.2-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.8-.7s1.6.7 2.8.7c1.2 0 1.9-1 2.6-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.2-.8-2.2-3.7Zm-2-6.2c.6-.7 1-1.7.9-2.7-0.9.1-1.9.6-2.5 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 1.9-.4 2.5-1.2Z"
-      />
-    </svg>
-  );
-}
-
-function LinuxIcon() {
-  return (
-    <svg className="landing-os-icon" viewBox="0 0 24 24" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M12.5 2.2c-1.4 0-2.4 1.5-2.2 3 .1.8.4 1.5.4 2.3 0 .4-.3.6-.7.8-1.7.7-3.1 2.2-3.1 4.3 0 1.3.6 2.4 1.4 3.2l-.4 1.4c-.4 1.4.2 2.4 1.4 2.8.5.2 1 .1 1.4-.1.5.8 1.3 1.4 2.3 1.4s1.8-.6 2.3-1.4c.4.2.9.3 1.4.1 1.2-.4 1.8-1.4 1.4-2.8l-.4-1.4c.8-.8 1.4-1.9 1.4-3.2 0-2.1-1.4-3.6-3.1-4.3-.4-.2-.7-.4-.7-.8 0-.8.3-1.5.4-2.3.2-1.5-.8-3-2.2-3Zm-1.8 4.6c.3 0 .6.3.6.6s-.3.6-.6.6-.6-.3-.6-.6.3-.6.6-.6Zm3.6 0c.3 0 .6.3.6.6s-.3.6-.6.6-.6-.3-.6-.6.3-.6.6-.6Zm-4.2 3.1c.8.4 1.6.6 2.4.6s1.6-.2 2.4-.6c.2 1.1-.3 2.1-1.1 2.6-.4.2-.8.4-1.3.4s-.9-.1-1.3-.4c-.8-.5-1.3-1.5-1.1-2.6Z"
-      />
-    </svg>
-  );
-}
-
-const PLATFORM_META: Record<
-  PlatformKey,
-  { label: string; Icon: () => ReactElement }
-> = {
-  windows: { label: 'Windows', Icon: WindowsIcon },
-  macos: { label: 'macOS', Icon: AppleIcon },
-  linux: { label: 'Linux', Icon: LinuxIcon },
-};
-
-const PLATFORM_ORDER: PlatformKey[] = ['windows', 'macos', 'linux'];
-
-const FEATURES = [
+const ROLES = [
   {
-    title: 'Keeps working offline',
-    body: 'Once you have signed in online, the app reopens without internet. Swiss pairing, results and standings all work on the device, and sync when you reconnect. Floor PINs, QR stickers, the live page and FIDE Dutch pairing on the web need a connection.',
-    glyph: '♟',
+    who: 'Organizers and academies',
+    body: 'Set up categories, take entries, pair rounds and finish with standings and certificates, from one desk. Your staff join your academy on their own accounts.',
+    items: ['CSV and Excel import', 'Online registration', 'Roll call', 'Certificates'],
   },
   {
-    title: 'Swiss & FIDE Dutch',
-    body: 'Your own Swiss engine for everyday events, plus official FIDE Dutch boards from bbpPairings v6 — the 2026 handbook pairing program — when it counts.',
-    glyph: '♞',
+    who: 'Arbiters',
+    body: 'Scan the sticker on the table, enter the round PIN and score from your phone. Cover one board or a whole zone, and call the chief when something needs a decision.',
+    items: ['No account needed', 'One PIN per round', 'Zone view', 'Keeps results if Wi-Fi drops'],
   },
   {
-    title: 'Certificates',
-    body: 'Design once, issue hundreds. Print packs or send signed digital PDFs straight from the standings you just finalized.',
-    glyph: '📜',
-  },
-  {
-    title: 'One account, everywhere',
-    body: 'Sign in once. Start a round on the tournament hall desktop, check standings from your phone browser — same data, always in sync.',
-    glyph: '♛',
+    who: 'Parents and players',
+    body: 'Open the link from the organizer and search for your child. Board, colour, opponent and standings are on the phone you already have.',
+    items: ['No app to install', 'No account for the live page', 'Family profiles if you want them'],
   },
 ];
 
 const STEPS = [
   {
-    title: 'Sign up',
-    body: 'Email magic link, a password, or Google / GitHub. Thirty seconds, no card required.',
-  },
-  {
+    who: 'Desk',
     title: 'Build the field',
-    body: 'Import a CSV or add players by hand. Categories, ratings, and byes all fall into place.',
+    body: 'Import a CSV or Excel file and map its columns, add players by hand, or approve online registrations. Categories filter on age, gender or rating, so players land in the right section.',
   },
   {
-    title: 'Run the rounds',
-    body: 'Pair with one click, enter results at the board, watch standings update live.',
+    who: 'Desk',
+    title: 'Call the roll',
+    body: 'Check players in as they arrive. One action marks everyone still unchecked as absent for round 1, so no-shows are not paired.',
   },
   {
-    title: 'Wrap it up',
-    body: 'Issue certificates, export final standings, sync to the cloud whenever you’re back online.',
+    who: 'Desk',
+    title: 'Pair the round',
+    body: 'Generate the round, category by category. Boards are numbered, byes are assigned, and a new floor PIN is issued for arbiters.',
+  },
+  {
+    who: 'Floor',
+    title: 'Play and score',
+    body: 'Arbiters enter results from their phones and log warnings and illegal moves. The director can enter any result at the desk too.',
+  },
+  {
+    who: 'Hall',
+    title: 'Keep everyone informed',
+    body: 'Results reach the public live page and the venue TV as they sync, so people can check their board without coming to the desk.',
+  },
+  {
+    who: 'Desk',
+    title: 'Confirm and move on',
+    body: 'Confirm the round to lock its results, check the standings against your tiebreak order, and pair the next one. After the last round, go to certificates.',
   },
 ];
 
-function fallbackOptions(): ResolvedOption[] {
-  return DOWNLOAD_OPTIONS.map((o) => ({
-    id: o.id,
-    platform: o.platform,
-    label: o.label,
-    detail: o.detail,
-    url: o.fallbackUrl,
-    available: Boolean(o.fallbackUrl),
-  }));
+const TIEBREAKS = [
+  'Buchholz',
+  'Buchholz Cut-1',
+  'Sonneborn-Berger',
+  'Progressive',
+  'Direct encounter',
+  'Wins',
+  'Rating',
+  'Seed',
+];
+
+const FLOOR_FACTS = [
+  ['QR stickers', 'Download a PDF of stickers, one per table. A scan opens that board.'],
+  ['One PIN per round', 'A six-digit PIN unlocks every board for that round. Changing the PIN ends older sessions.'],
+  ['Single board or zone', 'Switch to the zone view to score all boards, a range such as 1 to 15, or only the pending ones.'],
+  ['First result stands', 'If two arbiters score the same board, the second is refused and told so. The director can still make a correction.'],
+  ['Call the chief', 'One tap sends an illegal move dispute, clock problem, missing player or a custom note to a banner on the desk.'],
+  ['Wi-Fi drops', 'A result confirmed with no connection stays on the phone and sends itself when the connection returns.'],
+];
+
+const OFFLINE_ROWS = [
+  {
+    who: 'Director, in the browser',
+    works: 'Reopening the app, editing players, built-in Swiss pairing, entering results, confirming rounds, standings.',
+    waits: 'FIDE Dutch pairing, floor PINs, QR stickers and sync.',
+  },
+  {
+    who: 'Director, desktop app',
+    works: 'All of the above, plus FIDE Dutch pairing on Windows and Linux, and automatic local backups.',
+    waits: 'Floor PINs, QR stickers and sync. FIDE Dutch pairing on macOS, where there is no local engine.',
+  },
+  {
+    who: 'Floor arbiter',
+    works: 'Entering results once the page is unlocked. They are kept on the phone and sent automatically later.',
+    waits: 'The first PIN unlock, and delivery of results to the desk.',
+  },
+  {
+    who: 'Parents and venue TV',
+    works: 'What is already on screen stays there. The parent page says it has no internet.',
+    waits: 'Anything newer. These pages read from the cloud, so they need a connection, and the desk needs to have synced.',
+  },
+];
+
+const FAQ: { q: string; a: React.ReactNode }[] = [
+  {
+    q: 'What actually happens if the Wi-Fi drops mid-round?',
+    a: 'The desk carries on: results, confirmations and standings are saved on the device. Floor phones hold their results and send them when they reconnect. The live page and TV stop updating until both the desk and the cloud can talk again. When two devices have changed the same record offline, the most recent change wins, except that a result locked by a floor arbiter can only be replaced by a director.',
+  },
+  {
+    q: 'Do I need to be online at all?',
+    a: 'Yes, at least once. Each device must sign in online before it can reopen offline. FIDE Dutch pairing in the browser, floor PINs, QR stickers and the public pages also need a connection.',
+  },
+  {
+    q: 'What does it cost?',
+    a: (
+      <>
+        The trial is free and sign-up does not ask for a card. It allows one tournament and up to 24
+        players, and new tournaments can be started for 14 days. Larger events, public listing and
+        paid entries need your academy to be verified by our team. See{' '}
+        <a href="#pricing">trial and verification</a>.
+      </>
+    ),
+  },
+  {
+    q: 'Is Chess Alokas endorsed by FIDE?',
+    a: 'No. FIDE Dutch rounds use bbpPairings, a separate Dutch-system pairing program. Chess Alokas itself has no FIDE endorsement. Check your federation’s requirements before using it for a rated event, and note that it does not currently export TRF tournament reports.',
+  },
+  {
+    q: 'Which formats are supported?',
+    a: 'Swiss, using the built-in engine, and FIDE Dutch Swiss, using bbpPairings. Round robin is planned and not available yet.',
+  },
+  {
+    q: 'Does it take payments or send WhatsApp messages?',
+    a: 'No to both. There is no payment gateway: parents pay your academy directly by DuitNow or bank transfer and upload the receipt for you to approve. There is no WhatsApp automation either, but live and registration pages are ordinary links you can share anywhere.',
+  },
+  {
+    q: 'Can I print pairings and standings?',
+    a: 'Not from the app yet. QR stickers and certificates download as PDF files you can print. Pairings and standings are on screen, on the live page and on the venue TV.',
+  },
+  {
+    q: 'Do parents or arbiters need an account?',
+    a: 'Not for the live page, and not for floor scoring, which uses the sticker and round PIN. Parents can register a child without an account too. An account adds saved family profiles, a matchday card, tournament history and certificates.',
+  },
+  {
+    q: 'How do I sign in?',
+    a: 'With your email address, using a password or a code sent to your email. The website and the desktop app use the same account.',
+  },
+  {
+    q: 'Where is my tournament data kept?',
+    a: 'On your device, in the browser’s local database or the desktop app, with a copy in the Chess Alokas cloud when you sync. Public live pages show player names, so turn them on only when you are ready to share them. Desktop backups are not encrypted, so treat exported files as personal data.',
+  },
+  {
+    q: 'Which languages does it support?',
+    a: 'English only today.',
+  },
+];
+
+function closeMenu(e: MouseEvent<HTMLElement>) {
+  if ((e.target as HTMLElement).closest('a')) {
+    e.currentTarget.closest('details')?.removeAttribute('open');
+  }
 }
-
-/** Scroll-triggered reveal — fires once, and no-ops (renders visible immediately)
- * when the visitor has asked for reduced motion. */
-function useReveal<T extends HTMLElement>(): [React.RefObject<T | null>, boolean] {
-  const ref = useRef<T | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const reduceMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (reduceMotion) {
-      setVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.2, rootMargin: '0px 0px -8% 0px' },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
-  return [ref, visible];
-}
-
-const FLOATING_GLYPHS = ['♜', '♝', '♞', '♟', '♚'];
 
 export default function LandingPage() {
   const auth = useAuth();
-  const clientHints = useMemo(() => detectClientHints(), []);
-  const [options, setOptions] = useState<ResolvedOption[]>(fallbackOptions);
-  const [loadingDownloads, setLoadingDownloads] = useState(true);
-  const [scrolled, setScrolled] = useState(false);
+  preload(archivoUrl, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
 
   useEffect(() => {
     trackPageView({ routeKey: 'landing', path: '/' });
+    document.title = TITLE;
   }, []);
 
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(RELEASES_API, {
-          headers: { Accept: 'application/vnd.github+json' },
-        });
-        if (!res.ok) {
-          if (!cancelled) setLoadingDownloads(false);
-          return;
-        }
-        const body = (await res.json()) as {
-          assets?: { name: string; browser_download_url: string }[];
-        };
-        const assets = body.assets ?? [];
-        if (cancelled) return;
-
-        setOptions(
-          DOWNLOAD_OPTIONS.map((def) => {
-            const hit = assets.find((a) => def.match(a.name.toLowerCase()));
-            return {
-              id: def.id,
-              platform: def.platform,
-              label: def.label,
-              detail: def.detail,
-              url: hit?.browser_download_url ?? def.fallbackUrl,
-              available: Boolean(hit?.browser_download_url || def.fallbackUrl),
-            };
-          }),
-        );
-      } catch {
-        /* keep fallbacks */
-      } finally {
-        if (!cancelled) setLoadingDownloads(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const platforms = PLATFORM_ORDER.map((key) => ({
-    key,
-    ...PLATFORM_META[key],
-    options: options.filter((o) => o.platform === key),
-    isClientOs: clientHints.platform === key,
-  })).sort((a, b) => Number(b.isClientOs) - Number(a.isClientOs));
-
-  const floaters = useMemo(
-    () =>
-      Array.from({ length: 10 }, (_, i) => ({
-        glyph: FLOATING_GLYPHS[i % FLOATING_GLYPHS.length]!,
-        left: `${(i * 37 + 6) % 100}%`,
-        top: `${(i * 53 + 12) % 100}%`,
-        size: 1.1 + ((i * 7) % 5) * 0.35,
-        duration: 14 + ((i * 11) % 9),
-        delay: -((i * 3) % 12),
-      })),
-    [],
-  );
-
-  const [mockRef, mockVisible] = useReveal<HTMLDivElement>();
-  const [engineRef, engineVisible] = useReveal<HTMLElement>();
-  const [featuresRef, featuresVisible] = useReveal<HTMLElement>();
-  const [stepsRef, stepsVisible] = useReveal<HTMLElement>();
-  const [downloadRef, downloadVisible] = useReveal<HTMLElement>();
-  const [ctaRef, ctaVisible] = useReveal<HTMLElement>();
-
-  const appCta = auth.user ? (
-    <Link to="/app" className="btn btn-primary btn-lg landing-shine">
-      Open app
-    </Link>
-  ) : (
-    <>
-      <Link to="/signup" className="btn btn-primary btn-lg landing-shine">
-        Create free account
-      </Link>
-      <Link to="/login" className="btn btn-outline btn-lg">
-        Sign in
-      </Link>
-    </>
-  );
+  const signedIn = Boolean(auth.user);
+  const primaryTo = signedIn ? '/app' : '/signup';
+  const primaryLabel = signedIn ? 'Open the app' : 'Start a trial tournament';
 
   return (
-    <div className="landing-page">
-      <header className={`landing-top${scrolled ? ' is-scrolled' : ''}`}>
-        <span className="landing-logo">
-          <span className="landing-queen" aria-hidden>
-            ♕
-          </span>
-          Chess Alokas
-        </span>
-        <nav className="landing-nav">
-          <Link to="/discover" className="btn btn-sm btn-ghost landing-nav-link">
-            Explore events
-          </Link>
-          <a href="#engine" className="btn btn-sm btn-ghost landing-nav-link">
-            Pairing engine
+    <div className="lp">
+      <meta property="og:type" content="website" />
+      <meta property="og:site_name" content="Chess Alokas" />
+      <meta property="og:title" content={TITLE} />
+      <meta property="og:description" content={DESCRIPTION} />
+      <meta property="og:url" content={SITE} />
+      <meta name="twitter:card" content="summary" />
+      <link rel="canonical" href={SITE} />
+      <script type="application/ld+json">{STRUCTURED_DATA}</script>
+
+      <a className="lp-skip" href="#lp-main">
+        Skip to content
+      </a>
+
+      <header className="lp-top">
+        <div className="lp-wrap lp-top-in">
+          <a className="lp-mark" href="#lp-main" aria-label="Chess Alokas, top of page">
+            <Mark />
+            Chess Alokas
           </a>
-          <a href="#features" className="btn btn-sm btn-ghost landing-nav-link">
-            Features
-          </a>
-          <a href="#download" className="btn btn-sm btn-ghost landing-nav-link">
-            Download
-          </a>
-          {auth.user ? (
-            <Link to="/app" className="btn btn-sm btn-primary">
-              Dashboard
+          <nav className="lp-nav" aria-label="Page sections">
+            {NAV.map((n) => (
+              <a key={n.href} href={n.href}>
+                {n.label}
+              </a>
+            ))}
+          </nav>
+          <div className="lp-top-act">
+            <Link className="lp-toplink lp-hide-xs" to="/discover">
+              Find a tournament
             </Link>
-          ) : (
-            <>
-              <Link to="/login" className="btn btn-sm btn-ghost">
+            {signedIn ? null : (
+              <Link className="lp-toplink" to="/login">
                 Sign in
               </Link>
-              <Link to="/signup" className="btn btn-sm btn-outline">
-                Sign up
-              </Link>
-            </>
-          )}
-        </nav>
+            )}
+            <Link className="lp-btn lp-btn-sm lp-btn-primary lp-hide-xs" to={primaryTo}>
+              {signedIn ? 'Open the app' : 'Create account'}
+            </Link>
+            <details className="lp-menu">
+              <summary>Menu</summary>
+              <nav aria-label="Page sections, menu" onClick={closeMenu}>
+                {NAV.map((n) => (
+                  <a key={n.href} href={n.href}>
+                    {n.label}
+                  </a>
+                ))}
+                <Link to="/discover">Find a tournament</Link>
+                <Link to={primaryTo}>{signedIn ? 'Open the app' : 'Create account'}</Link>
+              </nav>
+            </details>
+          </div>
+        </div>
       </header>
 
-      <section className="landing-hero">
-        <div className="landing-hero-aurora" aria-hidden />
-        <div className="landing-hero-board" aria-hidden />
-        <div className="landing-hero-floaters" aria-hidden>
-          {floaters.map((f, i) => (
-            <span
-              key={i}
-              className="landing-floater"
-              style={{
-                left: f.left,
-                top: f.top,
-                fontSize: `${f.size}rem`,
-                animationDuration: `${f.duration}s`,
-                animationDelay: `${f.delay}s`,
-              }}
-            >
-              {f.glyph}
-            </span>
-          ))}
-        </div>
-
-        <div className="landing-hero-copy">
-          <p className="landing-eyebrow">
-            <span className="landing-eyebrow-dot" aria-hidden />
-            Now pairing with bbpPairings&nbsp;v6 — the 2026 FIDE handbook engine
-          </p>
-          <h1 className="landing-brand">
-            Run the tournament.
-            <br />
-            <span className="landing-brand-accent">Not the spreadsheet.</span>
-          </h1>
-          <p className="landing-lede">
-            Pair rounds, track standings, and print certificates — in the browser or as a desktop
-            app. Built for the tournament hall: when the Wi-Fi drops you keep pairing and scoring,
-            and it syncs when you’re back online.
-          </p>
-          <div className="landing-cta">{appCta}</div>
-          <div className="landing-hero-chips">
-            <span className="landing-chip">♜ Swiss &amp; FIDE Dutch</span>
-            <span className="landing-chip">⚡ Keeps working when Wi-Fi drops</span>
-            <span className="landing-chip">✓ Free to start</span>
-          </div>
-        </div>
-
-        <div className="landing-hero-visual" aria-hidden>
-          <PairingGlyph />
-        </div>
-      </section>
-
-      <section className="landing-preview">
-        <div
-          ref={mockRef}
-          className={`landing-mock${mockVisible ? ' is-visible' : ''}`}
-        >
-          <div className="landing-mock-glow" aria-hidden />
-          <div className="landing-mock-card">
-            <div className="landing-mock-bar">
-              <span className="landing-mock-dot landing-mock-dot--r" />
-              <span className="landing-mock-dot landing-mock-dot--y" />
-              <span className="landing-mock-dot landing-mock-dot--g" />
-              <span className="landing-mock-title">Round 4 · Under-18 Open</span>
-              <span className="landing-mock-live">
-                <span className="landing-mock-live-dot" /> Live
-              </span>
-            </div>
-            <div className="landing-mock-body">
-              <div className="landing-mock-pairings">
-                <h4>Pairings</h4>
-                {[
-                  ['1', 'A. Meyer', 'S. Okafor', '1–0'],
-                  ['2', 'R. Castillo', 'T. Nyugen', '½–½'],
-                  ['3', 'J. Park', 'L. Novak', '⏳'],
-                  ['4', 'D. Haile', 'M. Bianchi', '⏳'],
-                ].map(([board, w, b, r]) => (
-                  <div className="landing-mock-row" key={board}>
-                    <span className="landing-mock-board">{board}</span>
-                    <span className="landing-mock-players">
-                      {w} <em>vs</em> {b}
-                    </span>
-                    <span
-                      className={`landing-mock-result${r === '⏳' ? ' is-pending' : ''}`}
-                    >
-                      {r}
-                    </span>
-                  </div>
-                ))}
+      <main id="lp-main">
+        <section className="lp-hero" aria-labelledby="lp-h1">
+          <div className="lp-wrap">
+            <h1 id="lp-h1">Run the whole hall from a folding table.</h1>
+            <div className="lp-hero-grid">
+              <div className="lp-hero-copy">
+                <p className="lp-hero-sub">
+                  Chess Alokas is tournament software for organizers, arbiters and parents. Pair
+                  rounds, take results from the floor on phones, put the sheet on the venue TV, and
+                  keep working at the desk when the Wi-Fi gives up.
+                </p>
+                <div className="lp-cta">
+                  <Link className="lp-btn lp-btn-primary" to={primaryTo}>
+                    {primaryLabel}
+                  </Link>
+                  <a className="lp-btn" href="#round">
+                    See how a round runs
+                  </a>
+                </div>
+                <p className="lp-small">
+                  Free trial: one tournament, up to 24 players. Sign-up asks for no card.
+                </p>
+                <p className="lp-small lp-hero-parent">
+                  Here for your child&apos;s tournament?{' '}
+                  <Link to="/discover">Find the event</Link>, or open the link your organizer sent.
+                </p>
               </div>
-              <div className="landing-mock-standings">
-                <h4>Standings</h4>
-                {[
-                  ['1', 'S. Okafor', '3.5'],
-                  ['2', 'A. Meyer', '3.0'],
-                  ['3', 'L. Novak', '3.0'],
-                  ['4', 'T. Nyugen', '2.5'],
-                ].map(([rank, name, score]) => (
-                  <div className="landing-mock-row landing-mock-row--standing" key={rank}>
-                    <span className="landing-mock-rank">{rank}</span>
-                    <span className="landing-mock-players">{name}</span>
-                    <span className="landing-mock-score">{score}</span>
-                  </div>
-                ))}
-              </div>
+              <PairingSheet />
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section
-        className={`landing-engine${engineVisible ? ' is-visible' : ''}`}
-        id="engine"
-        ref={engineRef as React.RefObject<HTMLElement>}
-      >
-        <div className="landing-engine-copy">
-          <p className="landing-eyebrow">Pairing engine</p>
-          <h2>Two engines. One click.</h2>
-          <p className="landing-section-lede">
-            Everyday club nights run on our own Swiss implementation. When a tournament needs to
-            be FIDE-rated, switch categories to Dutch and every board comes straight from
-            bbpPairings — the same program national federations use.
-          </p>
-          <ul className="landing-engine-list">
-            <li>Score-group pairing with rematch and colour-balance avoidance</li>
-            <li>Automatic byes, floaters, and absence handling</li>
-            <li>Buchholz, Sonneborn-Berger, and configurable tiebreak order</li>
-          </ul>
-        </div>
-        <div className="landing-bracket" aria-hidden>
-          <BracketDiagram animate={engineVisible} />
-        </div>
-      </section>
+        <section className="lp-band" id="who" aria-labelledby="lp-h-who">
+          <div className="lp-wrap">
+            <h2 id="lp-h-who">Three jobs on tournament day. One system.</h2>
+            <div className="lp-roles">
+              {ROLES.map((r) => (
+                <article key={r.who} className="lp-role">
+                  <h3>{r.who}</h3>
+                  <p>{r.body}</p>
+                  <ul>
+                    {r.items.map((i) => (
+                      <li key={i}>{i}</li>
+                    ))}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
 
-      <section
-        className={`landing-features${featuresVisible ? ' is-visible' : ''}`}
-        id="features"
-        ref={featuresRef as React.RefObject<HTMLElement>}
-      >
-        <p className="landing-eyebrow landing-eyebrow--center">Built for tournament day</p>
-        <h2 className="landing-center-heading">Everything the boards need</h2>
-        <p className="landing-section-lede landing-section-lede--center">
-          No fighting spreadsheets between rounds — just the tools a director actually reaches
-          for.
-        </p>
-        <div className="landing-feature-grid">
-          {FEATURES.map((f, i) => (
-            <article
-              key={f.title}
-              className="landing-feature-card"
-              style={{ transitionDelay: `${i * 70}ms` }}
-            >
-              <span className="landing-feature-glyph" aria-hidden>
-                {f.glyph}
-              </span>
-              <h3>{f.title}</h3>
-              <p>{f.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section
-        className={`landing-howto${stepsVisible ? ' is-visible' : ''}`}
-        ref={stepsRef as React.RefObject<HTMLElement>}
-      >
-        <p className="landing-eyebrow landing-eyebrow--center">Getting started</p>
-        <h2 className="landing-center-heading">From sign-up to standings</h2>
-        <ol className="landing-steps">
-          {STEPS.map((s, i) => (
-            <li key={s.title} style={{ transitionDelay: `${i * 110}ms` }}>
-              <span className="landing-step-num">{i + 1}</span>
-              <div>
-                <strong>{s.title}</strong>
-                <p>{s.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section
-        className={`landing-downloads${downloadVisible ? ' is-visible' : ''}`}
-        id="download"
-        ref={downloadRef as React.RefObject<HTMLElement>}
-      >
-        <p className="landing-eyebrow landing-eyebrow--center">Take it to the hall</p>
-        <h2 className="landing-center-heading">Download for your computer</h2>
-        <p className="landing-section-lede landing-section-lede--center">
-          Same sign-in as the website. Pick your system and the build that fits.
-        </p>
-        <div className="landing-download-grid">
-          {platforms.map((p) => {
-            const Icon = p.Icon;
-            return (
-              <div
-                key={p.key}
-                className={`landing-download-card${p.isClientOs ? ' is-current-os' : ''}`}
-              >
-                <div className="landing-download-card-head">
-                  <span className="landing-download-icon-wrap">
-                    <Icon />
+        <section className="lp-band" id="round" aria-labelledby="lp-h-round">
+          <div className="lp-wrap lp-split lp-split-5-7">
+            <div className="lp-stick">
+              <h2 id="lp-h-round">One round, start to finish.</h2>
+              <p className="lp-lede">
+                The same steps carry the whole event. Late entries and corrections fit in between, and
+                every phase stays within reach.
+              </p>
+            </div>
+            <ol className="lp-steps">
+              {STEPS.map((s, i) => (
+                <li key={s.title}>
+                  <span className="lp-step-n" aria-hidden="true">
+                    {i + 1}
                   </span>
                   <div>
-                    <span className="landing-download-os">{p.label}</span>
-                    {p.isClientOs ? (
-                      <span className="landing-download-detected">Your system</span>
-                    ) : null}
+                    <h3>{s.title}</h3>
+                    <p>{s.body}</p>
                   </div>
+                  <span className="lp-step-who">{s.who}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        <section className="lp-band lp-invert" id="pairing" aria-labelledby="lp-h-pairing">
+          <div className="lp-wrap lp-split lp-split-6-6">
+            <div>
+              <h2 id="lp-h-pairing">Pairings you can defend.</h2>
+              <p className="lp-lede">
+                Choose the system when you create the tournament. FIDE Dutch Swiss rounds come from
+                bbpPairings v6, the Dutch-system pairing program, written to the 2025 Dutch rules in
+                the FIDE handbook that took effect in 2026.
+              </p>
+              <dl className="lp-facts">
+                <div>
+                  <dt>FIDE Dutch Swiss</dt>
+                  <dd>
+                    bbpPairings. In the browser it runs on our server, so it needs a connection. The
+                    Windows and Linux desktop apps carry it locally.
+                  </dd>
                 </div>
-                <ul className="landing-download-options">
-                  {p.options.map((opt) => {
-                    const recommended = isRecommended(opt, clientHints);
-                    const disabled = !opt.available || !opt.url;
-                    const rowClass = [
-                      'landing-download-option',
-                      recommended ? 'is-recommended' : '',
-                      disabled ? 'is-disabled' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ');
-                    const inner = (
-                      <>
-                        <span className="landing-download-option-text">
-                          <span className="landing-download-option-label">
-                            {opt.label}
-                            {recommended ? (
-                              <span className="landing-download-badge">Recommended</span>
-                            ) : null}
-                          </span>
-                          <span className="landing-download-option-detail">
-                            {loadingDownloads ? 'Checking latest…' : opt.detail}
-                          </span>
-                        </span>
-                        <span className="landing-download-option-cta">
-                          {disabled ? (loadingDownloads ? '…' : 'Soon') : 'Download'}
-                        </span>
-                      </>
-                    );
-                    return (
-                      <li key={opt.id}>
-                        {disabled ? (
-                          <div className={rowClass} aria-disabled="true">
-                            {inner}
-                          </div>
-                        ) : (
-                          <a
-                            className={rowClass}
-                            href={opt.url!}
-                            download
-                            onClick={() =>
-                              trackProductEvent({
-                                name: 'download_click',
-                                assetId: opt.id,
-                                os: opt.platform,
-                              })
-                            }
-                          >
-                            {inner}
-                          </a>
-                        )}
-                      </li>
-                    );
-                  })}
+                <div>
+                  <dt>Swiss</dt>
+                  <dd>
+                    Our built-in engine with score groups, rematch avoidance, colour balance and
+                    byes. It runs on your device, online or off.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Absences</dt>
+                  <dd>Mark a player absent for a round, or withdrawn from a round onward, and pairing leaves them out.</dd>
+                </div>
+                <div>
+                  <dt>Round robin</dt>
+                  <dd>Planned, not available yet.</dd>
+                </div>
+              </dl>
+            </div>
+            <div>
+              <StandingsSheet />
+              <h3 className="lp-tb-h">Tiebreaks, in the order you set</h3>
+              <p className="lp-tb-p">
+                Score always comes first. After that, reorder these for each tournament:
+              </p>
+              <ol className="lp-tb">
+                {TIEBREAKS.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        </section>
+
+        <section className="lp-band" id="floor" aria-labelledby="lp-h-floor">
+          <div className="lp-wrap">
+            <h2 id="lp-h-floor">A sticker on every table. A PIN for every round.</h2>
+            <div className="lp-split lp-split-6-6 lp-split-gap">
+              <FloorVisual />
+              <dl className="lp-facts">
+                {FLOOR_FACTS.map(([t, d]) => (
+                  <div key={t}>
+                    <dt>{t}</dt>
+                    <dd>{d}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </div>
+        </section>
+
+        <section className="lp-band" id="offline" aria-labelledby="lp-h-offline">
+          <div className="lp-wrap">
+            <h2 id="lp-h-offline">When the Wi-Fi drops, the desk keeps going.</h2>
+            <p className="lp-lede">
+              Offline-first means the tournament lives on your device and the cloud holds a copy.
+              Sign in online once on each device, then the app reopens without internet. Here is
+              exactly what works and what waits.
+            </p>
+            <table className="lp-off">
+              <caption className="lp-vh">What keeps working without a connection, by role.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">If you are</th>
+                  <th scope="col">
+                    <i className="lp-dot lp-dot-go" aria-hidden="true" />
+                    Still works
+                  </th>
+                  <th scope="col">
+                    <i className="lp-dot lp-dot-hollow lp-dot-wait" aria-hidden="true" />
+                    Waits for a connection
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {OFFLINE_ROWS.map((r) => (
+                  <tr key={r.who}>
+                    <th scope="row">{r.who}</th>
+                    <td data-label="Still works">{r.works}</td>
+                    <td data-label="Waits for a connection">{r.waits}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="lp-note">
+              <strong>Worth knowing:</strong> floor phones, the desk and the public pages reach each
+              other through the cloud. With no internet at the venue, each keeps its own work and
+              they catch up when the connection returns. Have one person ready to enter results at
+              the desk.
+            </p>
+          </div>
+        </section>
+
+        <section className="lp-band" id="registration" aria-labelledby="lp-h-reg">
+          <div className="lp-wrap">
+            <h2 id="lp-h-reg">Entries by link. Payment by DuitNow receipt.</h2>
+            <div className="lp-split lp-split-7-5 lp-split-gap">
+              <div>
+                <RegistrationQueue />
+              </div>
+              <div>
+                <p className="lp-lede lp-lede-top">
+                  Share your registration link. Parents fill in the form, pay your academy using your
+                  DuitNow QR or bank details, and attach the receipt. You check it and approve, and
+                  the player joins the roster in the right category.
+                </p>
+                <ul className="lp-list">
+                  <li>Money goes straight to you. Chess Alokas has no payment gateway and holds no funds.</li>
+                  <li>Approve, waitlist or reject, one at a time, or approve all pending.</li>
+                  <li>Likely duplicate entries are flagged for you to check.</li>
+                  <li>Parents with an account fill the form from a saved profile and can register siblings quickly.</li>
+                  <li>Set a deadline and a roster cap.</li>
+                  <li>Paid entries and listing on Find a tournament need a verified academy.</li>
                 </ul>
               </div>
-            );
-          })}
-        </div>
-        <p className="landing-footnote">
-          Prefer the browser? <Link to="/signup">Create a free account</Link> and run everything at
-          chess-manager.alokas.com — no install required.
-        </p>
-        <p className="landing-footnote">
-          On Mac, if the app is blocked the first time: Finder → right-click the app → Open. On
-          Windows, SmartScreen may warn until the app builds reputation — choose More info → Run
-          anyway.
-        </p>
-      </section>
+            </div>
+          </div>
+        </section>
 
-      <section
-        className={`landing-final-cta${ctaVisible ? ' is-visible' : ''}`}
-        ref={ctaRef as React.RefObject<HTMLElement>}
-      >
-        <div className="landing-final-cta-glow" aria-hidden />
-        <span className="landing-queen-lg" aria-hidden>
-          ♕
-        </span>
-        <h2>Your next event doesn’t need a spreadsheet.</h2>
-        <p>Set up your first tournament in the time it takes to brew a coffee.</p>
-        <div className="landing-cta landing-cta--center">{appCta}</div>
-      </section>
+        <section className="lp-band" id="live" aria-labelledby="lp-h-live">
+          <div className="lp-wrap">
+            <h2 id="lp-h-live">The sheet, on every phone and on the wall.</h2>
+            <div className="lp-live">
+              <div className="lp-live-tv">
+                <TvVisual />
+                <h3>Venue TV and projector</h3>
+                <p>
+                  Open TV mode on any screen with a browser. It shows 12 boards a page and rotates
+                  pairings and category standings every 10 seconds, or holds on either one. A round
+                  clock runs from 15, 25, 30 or 60 minute presets.
+                </p>
+              </div>
+              <div className="lp-live-ph">
+                <ParentVisual />
+                <h3>Live page for parents</h3>
+                <p>
+                  One link, no app and no account. Search a name, star your child to keep them handy,
+                  and see the board, colour, opponent and standings. If the connection drops, the
+                  page says so.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <footer className="landing-footer">
-        <span>© Chess Alokas</span>
-        <div className="landing-footer-links">
-          <Link to="/login">Sign in</Link>
-          <a href="#download">Downloads</a>
+        <section className="lp-band" id="certificates" aria-labelledby="lp-h-cert">
+          <div className="lp-wrap lp-split lp-split-6-6">
+            <CertificateVisual />
+            <div>
+              <h2 id="lp-h-cert">Certificates, straight from the standings.</h2>
+              <p className="lp-lede">
+                Upload your own PDF template, place the fields once and save the layout. Names and
+                ranks come from the tournament, so nobody retypes them.
+              </p>
+              <ul className="lp-list">
+                <li>Download a print pack for the people you select.</li>
+                <li>Issue digital copies with serial numbers.</li>
+                <li>Email them to players. Bulk email needs a verified academy.</li>
+                <li>Players with an account find theirs in the portal when their confirmed email matches.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="lp-band" id="team" aria-labelledby="lp-h-team">
+          <div className="lp-wrap lp-split lp-split-5-7">
+            <div>
+              <h2 id="lp-h-team">Bring your team.</h2>
+              <p className="lp-lede">
+                Owners and admins invite staff by email and give each person a role. Invitations
+                expire and can be revoked, and nobody can hand out a role above their own.
+              </p>
+            </div>
+            <dl className="lp-roles-t">
+              <div>
+                <dt>Owner</dt>
+                <dd>Holds the academy and manages the team.</dd>
+              </div>
+              <div>
+                <dt>Admin</dt>
+                <dd>Manages the team and academy details.</dd>
+              </div>
+              <div>
+                <dt>Director</dt>
+                <dd>Runs the academy&apos;s tournaments.</dd>
+              </div>
+              <div>
+                <dt>Arbiter</dt>
+                <dd>Works the floor as part of your staff.</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <section className="lp-band" id="pricing" aria-labelledby="lp-h-pricing">
+          <div className="lp-wrap lp-split lp-split-5-7">
+            <div>
+              <h2 id="lp-h-pricing">Start on a trial.</h2>
+              <p className="lp-lede">
+                Every new academy starts on a trial while our team reviews it. Verification unlocks
+                the rest.
+              </p>
+            </div>
+            <table className="lp-plan">
+              <caption className="lp-vh">What the trial and a verified academy allow.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">
+                    <span className="lp-vh">Feature</span>
+                  </th>
+                  <th scope="col">Trial</th>
+                  <th scope="col">Verified academy</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Players per tournament</th>
+                  <td>Up to 24</td>
+                  <td>More, by plan</td>
+                </tr>
+                <tr>
+                  <th scope="row">Tournaments</th>
+                  <td>1 active, started within 14 days</td>
+                  <td>More, by plan</td>
+                </tr>
+                <tr>
+                  <th scope="row">Listing on Find a tournament</th>
+                  <td>No</td>
+                  <td>Yes, by plan</td>
+                </tr>
+                <tr>
+                  <th scope="row">Paid entries</th>
+                  <td>No</td>
+                  <td>Yes</td>
+                </tr>
+                <tr>
+                  <th scope="row">Bulk certificate email</th>
+                  <td>No</td>
+                  <td>Yes</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <Downloads />
+
+        <section className="lp-band" id="faq" aria-labelledby="lp-h-faq">
+          <div className="lp-wrap lp-split lp-split-5-7">
+            <h2 id="lp-h-faq">Straight answers.</h2>
+            <div className="lp-faq">
+              {FAQ.map((f) => (
+                <details key={f.q}>
+                  <summary>{f.q}</summary>
+                  <div className="lp-faq-a">{f.a}</div>
+                </details>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="lp-band lp-invert lp-final" aria-labelledby="lp-h-final">
+          <div className="lp-wrap">
+            <h2 id="lp-h-final">Run your next event from the sheet, not a spreadsheet.</h2>
+            <div className="lp-cta">
+              <Link className="lp-btn lp-btn-primary" to={primaryTo}>
+                {primaryLabel}
+              </Link>
+              <Link className="lp-btn" to="/discover">
+                Find a tournament
+              </Link>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="lp-foot">
+        <div className="lp-wrap lp-foot-in">
+          <span className="lp-mark">
+            <Mark />
+            Chess Alokas
+          </span>
+          <span>Built in Malaysia.</span>
+          <nav aria-label="Footer">
+            <Link to="/discover">Find a tournament</Link>
+            <a href="#download">Downloads</a>
+            <Link to="/login">Sign in</Link>
+            <Link to="/signup">Create account</Link>
+          </nav>
         </div>
       </footer>
     </div>
-  );
-}
-
-/** Two pieces gliding together and connecting — a small visual pun on "pairing". */
-function PairingGlyph() {
-  return (
-    <div className="landing-pairing-glyph">
-      <span className="landing-pairing-piece landing-pairing-piece--a">♞</span>
-      <span className="landing-pairing-piece landing-pairing-piece--b">♝</span>
-      <svg className="landing-pairing-link" viewBox="0 0 200 60" aria-hidden>
-        <path d="M20 30 H180" />
-      </svg>
-      <span className="landing-pairing-ring" />
-    </div>
-  );
-}
-
-/** Animated bracket: player nodes on the left pair off toward score-group lines on the right. */
-function BracketDiagram({ animate }: { animate: boolean }) {
-  const pairs: Array<[number, number]> = [
-    [20, 40],
-    [70, 90],
-    [130, 150],
-    [180, 200],
-  ];
-  return (
-    <svg viewBox="0 0 260 220" className={`landing-bracket-svg${animate ? ' is-animating' : ''}`}>
-      {pairs.map(([y1, y2], i) => (
-        <g key={i}>
-          <circle cx="18" cy={y1} r="5" className="landing-bracket-node" />
-          <circle cx="18" cy={y2} r="5" className="landing-bracket-node" />
-          <path
-            d={`M23 ${y1} C 90 ${y1}, 90 ${(y1 + y2) / 2}, 130 ${(y1 + y2) / 2}`}
-            className="landing-bracket-line"
-            style={{ animationDelay: `${i * 0.18}s` }}
-          />
-          <path
-            d={`M23 ${y2} C 90 ${y2}, 90 ${(y1 + y2) / 2}, 130 ${(y1 + y2) / 2}`}
-            className="landing-bracket-line"
-            style={{ animationDelay: `${i * 0.18 + 0.06}s` }}
-          />
-          <circle
-            cx="140"
-            cy={(y1 + y2) / 2}
-            r="6"
-            className="landing-bracket-board"
-            style={{ animationDelay: `${i * 0.18 + 0.3}s` }}
-          />
-        </g>
-      ))}
-    </svg>
   );
 }
