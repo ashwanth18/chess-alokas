@@ -10,13 +10,12 @@ import {
 import {
   isAuthApiError,
   isAuthSessionMissingError,
-  type Provider,
   type Session,
   type User,
 } from '@supabase/supabase-js';
 import * as Sentry from '@sentry/react';
 import { authRedirectTo, supabase, supabaseConfigured } from '../lib/supabase';
-import { db } from '../db/local';
+import { persistOwnerId } from '../lib/ownerIdSink';
 import { sentryEnabled } from '../instrument';
 import { clearBootIssue, reportBootIssue } from '../lib/bootDiagnostics';
 
@@ -41,27 +40,15 @@ interface AuthContextValue {
   ) => Promise<{ error?: string }>;
   signInWithOtp: (email: string) => Promise<{ error?: string }>;
   verifyOtp: (email: string, token: string) => Promise<{ error?: string }>;
-  signInWithOAuth: (provider: 'google' | 'github') => Promise<{ error?: string }>;
   resetPassword: (email: string) => Promise<{ error?: string }>;
   updatePassword: (password: string) => Promise<{ error?: string }>;
   updateDisplayName: (name: string) => Promise<{ error?: string }>;
-  linkIdentity: (provider: 'google' | 'github') => Promise<{ error?: string }>;
-  unlinkIdentity: (identityId: string) => Promise<{ error?: string }>;
   signOut: (scope?: 'local' | 'global') => Promise<void>;
   refreshProfile: () => Promise<void>;
   getAccessToken: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-async function persistOwnerId(userId: string | null) {
-  try {
-    if (userId) await db.meta.put({ key: 'ownerId', value: userId });
-    else await db.meta.delete('ownerId');
-  } catch (err) {
-    console.warn('[auth] persistOwnerId failed', err);
-  }
-}
 
 function isDesktopApp(): boolean {
   return (
@@ -70,8 +57,6 @@ function isDesktopApp(): boolean {
   );
 }
 
-const DESKTOP_OAUTH_MESSAGE =
-  'Google and GitHub sign-in are not available in the desktop app. Sign in with your email and password or an email code. If your account only uses Google or GitHub, set a password at chess-manager.alokas.com first.';
 const DESKTOP_RESET_MESSAGE =
   'Reset your password at chess-manager.alokas.com in your browser, then sign in here.';
 
@@ -378,20 +363,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         return { error: error?.message };
       },
-      async signInWithOAuth(provider) {
-        if (!supabase) return { error: 'Auth is not configured' };
-        if (isDesktopApp()) {
-          // The browser would finish the PKCE flow without the verifier held here.
-          // The sign-up page ignores this return value, so say it out loud too.
-          window.alert(DESKTOP_OAUTH_MESSAGE);
-          return { error: DESKTOP_OAUTH_MESSAGE };
-        }
-        const { error } = await supabase.auth.signInWithOAuth({
-          provider: provider as Provider,
-          options: { redirectTo: authRedirectTo(), skipBrowserRedirect: false },
-        });
-        return { error: error?.message };
-      },
       async resetPassword(email) {
         if (!supabase) return { error: 'Auth is not configured' };
         if (isDesktopApp()) return { error: DESKTOP_RESET_MESSAGE };
@@ -413,22 +384,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updated_at: new Date().toISOString(),
         });
         if (!error) setDisplayName(name.trim() || null);
-        return { error: error?.message };
-      },
-      async linkIdentity(provider) {
-        if (!supabase) return { error: 'Auth is not configured' };
-        if (isDesktopApp()) return { error: DESKTOP_OAUTH_MESSAGE };
-        const { error } = await supabase.auth.linkIdentity({
-          provider: provider as Provider,
-          options: { redirectTo: authRedirectTo() },
-        });
-        return { error: error?.message };
-      },
-      async unlinkIdentity(identityId) {
-        if (!supabase || !session?.user) return { error: 'Not signed in' };
-        const identity = session.user.identities?.find((i) => i.identity_id === identityId);
-        if (!identity) return { error: 'Identity not found' };
-        const { error } = await supabase.auth.unlinkIdentity(identity);
         return { error: error?.message };
       },
       async signOut(scope = 'local') {

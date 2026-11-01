@@ -1,6 +1,4 @@
 /* Landing page only. Pairing Sheet system: hairlines not cards, no gradients, no glyphs. */
-@import "../../design/tokens.css";
-@import "../../design/fonts.css";
 
 html:has(.lp),
 body:has(.lp) { background: var(--paper); }

@@ -74,9 +74,7 @@ export default defineConfig(({ mode }) => {
         transformIndexHtml: {
           order: 'post' as const,
           handler(html: string) {
-            // Only the locally-built ./assets/* tags Vite emits — leave the
-            // hand-written Google Fonts preconnect/stylesheet tags alone,
-            // those are genuinely cross-origin.
+            // Only the locally-built ./assets/* tags Vite emits.
             return html.replace(/<(?:script|link)\b[^>]*>/g, (tag) => {
               if (!tag.includes('./assets/')) return tag;
               return tag.replace(/\s+crossorigin(="[^"]*")?/, '');
@@ -104,8 +102,8 @@ export default defineConfig(({ mode }) => {
             name: 'Chess Alokas',
             short_name: 'Chess Alokas',
             description: 'Chess tournament management that keeps working when the Wi-Fi drops',
-            theme_color: '#0f3d2e',
-            background_color: '#0f3d2e',
+            theme_color: '#F7F5EF',
+            background_color: '#F7F5EF',
             display: 'standalone',
             start_url: '/app',
             icons: [

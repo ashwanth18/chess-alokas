@@ -1,18 +1,15 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react';
 import { NavLink, Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  checkOnline,
   apiListOrganizations,
   apiCreateOrganization,
   apiUpdateOrganization,
   apiCreatePlayerProfile,
   type UserOrganization,
 } from '../api/client';
-import { SYNC_REJECTIONS_EVENT, syncOnline, type ShownRejection } from '../sync/sync';
-import { getLastSyncAt } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
 import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
-import { reportSyncFailure, syncErrorMessage } from '../lib/syncError';
+import { useDeskSync } from '../shells/deskSync';
 import { PENDING_SIGNUP_STORAGE_KEY } from '../lib/pendingSignup';
 
 function formatSyncTime(iso: string | null): string {
@@ -25,13 +22,15 @@ export default function Layout() {
   const auth = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [online, setOnline] = useState(navigator.onLine);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<string | null>(null);
-  const [syncFailed, setSyncFailed] = useState(false);
-  const [lastSync, setLastSync] = useState<string | null>(null);
+  // Null outside OrganizerShell: /player has no local database, so nothing here may mention sync.
+  const desk = useDeskSync();
+  const online = desk?.online ?? true;
+  const syncing = desk?.syncing ?? false;
+  const syncResult = desk?.message ?? null;
+  const syncFailed = desk?.failed ?? false;
+  const lastSync = desk?.lastSync ?? null;
+  const rejections = desk?.rejections ?? [];
   const [menuOpen, setMenuOpen] = useState(false);
-  const [rejections, setRejections] = useState<ShownRejection[]>([]);
 
   const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
   const [orgsLoaded, setOrgsLoaded] = useState(false);
@@ -133,10 +132,6 @@ export default function Layout() {
   }, [auth.user, loadOrganizations, location.pathname, navigate]);
 
   useEffect(() => {
-    getLastSyncAt().then(setLastSync);
-  }, []);
-
-  useEffect(() => {
     const routeKey = routeKeyFromAppPath(location.pathname);
     if (!routeKey) return;
     const tournamentMatch = location.pathname.match(/^\/tournaments\/([^/]+)/);
@@ -152,32 +147,6 @@ export default function Layout() {
   }, [location.pathname]);
 
   useEffect(() => {
-    const onOnline = () => setOnline(true);
-    const onOffline = () => setOnline(false);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
-
-    const interval = setInterval(async () => {
-      const reachable = await checkOnline();
-      setOnline(reachable);
-    }, 30_000);
-
-    return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
-      clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
-    const onRejections = (e: Event) => {
-      setRejections((e as CustomEvent<ShownRejection[]>).detail);
-    };
-    window.addEventListener(SYNC_REJECTIONS_EVENT, onRejections);
-    return () => window.removeEventListener(SYNC_REJECTIONS_EVENT, onRejections);
-  }, []);
-
-  useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMenuOpen(false);
@@ -185,66 +154,6 @@ export default function Layout() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
-
-  const handleSync = useCallback(async (afterReconnect = false) => {
-    if ((!online && !afterReconnect) || syncing || !auth.user) return;
-    setSyncing(true);
-    setSyncResult(null);
-    setSyncFailed(false);
-    try {
-      const { pushed, pulled, rejected } = await syncOnline();
-      const now = new Date().toISOString();
-      setLastSync(now);
-      // Refused rows are listed in the banner below the top bar and stay there until they sync.
-      if (rejected.length === 0) {
-        setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
-        setTimeout(() => setSyncResult(null), 4000);
-      }
-    } catch (err) {
-      reportSyncFailure(err);
-      setSyncFailed(true);
-      setSyncResult(syncErrorMessage(err));
-    } finally {
-      setSyncing(false);
-    }
-  }, [online, syncing, auth.user]);
-
-  // Work done offline goes up as soon as the connection returns.
-  useEffect(() => {
-    const onReconnect = () => {
-      setOnline(true);
-      void handleSync(true);
-    };
-    window.addEventListener('online', onReconnect);
-    return () => window.removeEventListener('online', onReconnect);
-  }, [handleSync]);
-
-  useEffect(() => {
-    if (!window.desktop?.isDesktop || !auth.user) return;
-    let cancelled = false;
-    void (async () => {
-      const reachable = await checkOnline();
-      if (cancelled || !reachable) return;
-      setOnline(true);
-      try {
-        const { pushed, pulled, rejected } = await syncOnline();
-        if (cancelled) return;
-        setLastSync(new Date().toISOString());
-        setSyncFailed(false);
-        if (rejected.length === 0) {
-          setSyncResult(`↑ ${pushed} pushed · ↓ ${pulled} pulled`);
-          setTimeout(() => setSyncResult(null), 4000);
-        }
-      } catch (err) {
-        reportSyncFailure(err);
-        setSyncFailed(true);
-        setSyncResult(syncErrorMessage(err));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [auth.user]);
 
   async function handleSaveOrganization(e: FormEvent) {
     e.preventDefault();
@@ -375,17 +284,19 @@ export default function Layout() {
             </NavLink>
           )}
           <div className="topnav-mobile-actions">
-            <button
-              type="button"
-              className="btn btn-sm btn-sync"
-              onClick={() => {
-                void handleSync();
-                closeMenu();
-              }}
-              disabled={!online || syncing || !auth.user}
-            >
-              {syncing ? 'Syncing…' : 'Sync now'}
-            </button>
+            {desk && (
+              <button
+                type="button"
+                className="btn btn-sm btn-sync"
+                onClick={() => {
+                  desk.sync();
+                  closeMenu();
+                }}
+                disabled={!online || syncing || !auth.user}
+              >
+                {syncing ? 'Syncing…' : 'Sync now'}
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -408,25 +319,30 @@ export default function Layout() {
           <Link to="/account" className="user-chip" title={auth.user?.email ?? 'Account'}>
             {label}
           </Link>
-          <span
-            className={`status-dot ${online ? 'online' : 'offline'}`}
-            title={online ? 'API reachable' : 'Offline'}
-          />
-          <span className="status-label">{online ? 'Online' : 'Offline'}</span>
-          {lastSync && (
-            <span className="sync-time" title={lastSync}>
-              Synced {formatSyncTime(lastSync)}
-            </span>
+          {desk && (
+            <>
+              <span
+                className={`status-dot ${online ? 'online' : 'offline'}`}
+                title={online ? 'API reachable' : 'Offline'}
+              />
+              <span className="status-label">{online ? 'Online' : 'Offline'}</span>
+              {/* Never "Synced" while the banner below says something was refused. */}
+              {lastSync && rejections.length === 0 && (
+                <span className="sync-time" title={lastSync}>
+                  Synced {formatSyncTime(lastSync)}
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn btn-sm btn-sync"
+                onClick={desk.sync}
+                disabled={!online || syncing || !auth.user}
+                title={!auth.user ? 'Sign in to sync' : !online ? 'Offline' : 'Sync with cloud'}
+              >
+                {syncing ? 'Syncing…' : 'Sync'}
+              </button>
+            </>
           )}
-          <button
-            type="button"
-            className="btn btn-sm btn-sync"
-            onClick={() => void handleSync()}
-            disabled={!online || syncing || !auth.user}
-            title={!auth.user ? 'Sign in to sync' : !online ? 'Offline' : 'Sync with cloud'}
-          >
-            {syncing ? 'Syncing…' : 'Sync'}
-          </button>
           <button
             type="button"
             className="btn btn-sm btn-ghost"

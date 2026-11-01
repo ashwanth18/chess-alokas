@@ -96,8 +96,8 @@ export function buildCsp(args: {
   return [
     "default-src 'self' file:",
     `script-src ${scriptSrc.join(' ')}`,
-    "style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' file: data: https://fonts.gstatic.com",
+    "style-src 'self' file: 'unsafe-inline'",
+    "font-src 'self' file: data:",
     "img-src 'self' file: data: blob: https:",
     `connect-src ${connect.join(' ')}`,
     "worker-src 'self' file: blob:",

@@ -1,11 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Chess Alokas">
-  <rect width="512" height="512" rx="96" fill="#0f3d2e"/>
-  <text
-    x="256"
-    y="360"
-    text-anchor="middle"
-    font-size="320"
-    font-family="Georgia, 'Times New Roman', serif"
-    fill="#d4b98a"
-  >U</text>
+  <rect width="512" height="512" rx="48" fill="#F7F5EF"/>
+  <rect x="110.5" y="110.5" width="291" height="291" fill="none" stroke="#161513" stroke-width="29"/>
+  <rect x="256" y="96" width="160" height="160" fill="#161513"/>
+  <rect x="96" y="256" width="160" height="160" fill="#161513"/>
 </svg>
