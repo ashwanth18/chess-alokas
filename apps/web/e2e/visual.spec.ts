@@ -28,6 +28,8 @@ for (const shot of GUEST) {
   test(`guest ${shot.name}`, async ({ page }) => {
     await page.goto(shot.path);
     await page.locator(shot.ready).first().waitFor();
+    // The hall rotates its slides on a timer. Hold it on one, or the shot depends on timing.
+    if (shot.name === 'hall') await page.locator('select').first().selectOption('pairings');
     await settle(page);
     await expect(page).toHaveScreenshot(`${shot.name}.png`, { fullPage: FULL_PAGE });
   });
