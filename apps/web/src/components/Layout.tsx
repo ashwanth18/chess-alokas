@@ -300,6 +300,9 @@ export default function Layout() {
               <NavLink to="/player" end onClick={closeMenu}>
                 Dashboard &amp; Family
               </NavLink>
+              <NavLink to="/discover" onClick={closeMenu}>
+                Explore Events
+              </NavLink>
               <NavLink to="/account" onClick={closeMenu}>
                 Account
               </NavLink>
@@ -314,6 +317,9 @@ export default function Layout() {
               </NavLink>
               <NavLink to="/tournaments/new" onClick={closeMenu}>
                 New
+              </NavLink>
+              <NavLink to="/discover" onClick={closeMenu}>
+                Explore Events
               </NavLink>
               <NavLink to="/certificates" onClick={closeMenu}>
                 Certificates
@@ -570,6 +576,9 @@ export default function Layout() {
               Home
             </Link>
           )}
+          <Link to="/discover" className="app-footer-link">
+            Explore Events
+          </Link>
           <Link to="/player" className="app-footer-link">
             Player Portal
           </Link>

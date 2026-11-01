@@ -25,6 +25,15 @@ import {
   PlayerCertificateItem,
   CertificateIssue,
   CertificateIssueType,
+  TournamentRegistration,
+  RegistrationFormConfig,
+  RegistrationPaymentStatus,
+  RegistrationPlayerSnapshot,
+  RegistrationStatus,
+  PublicEventSummary,
+  DEFAULT_REGISTRATION_FORM_CONFIG,
+  assignCategories,
+  haversineDistanceKm,
   certificateYear,
   DEFAULT_CERT_SERIAL_PAD,
   DEFAULT_CERT_SERIAL_PREFIX,
@@ -193,6 +202,27 @@ export interface Store {
     accountUserId: string,
     profileId?: string | null,
   ): Promise<PlayerCareerDashboard>;
+
+  // Tournament Discovery & Registrations (Phase 2)
+  getTournamentBySlugOrId(slugOrId: string): Promise<Tournament | null>;
+  listPublishedEvents(filters?: {
+    lat?: number;
+    lng?: number;
+    radiusKm?: number;
+    search?: string;
+  }): Promise<PublicEventSummary[]>;
+  listTournamentRegistrations(tournamentId: string): Promise<TournamentRegistration[]>;
+  listUserRegistrations(userId: string): Promise<TournamentRegistration[]>;
+  createTournamentRegistration(reg: TournamentRegistration): Promise<TournamentRegistration>;
+  reviewTournamentRegistration(
+    tournamentId: string,
+    regId: string,
+    input: {
+      action: 'approve' | 'reject' | 'waitlist';
+      reviewerNote?: string | null;
+      categoryIds?: string[];
+    },
+  ): Promise<{ registration: TournamentRegistration; participant: Participant | null }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +244,7 @@ export class MemoryStore implements Store {
   >();
   private playerProfiles = new Map<string, PlayerProfile>();
   private certificateIssues = new Map<string, CertificateIssue>();
+  private registrations = new Map<string, TournamentRegistration>();
   private resultEvents: Array<{
     id: string;
     gameId: string;
@@ -354,6 +385,18 @@ export class MemoryStore implements Store {
   ): Promise<Tournament | null> {
     const existing = this.tournaments.get(id);
     if (!existing) return null;
+    if (patch.publicSlug) {
+      const norm = patch.publicSlug.trim().toLowerCase();
+      const clash = [...this.tournaments.values()].find(
+        (t) => !t.deletedAt && t.id !== id && t.publicSlug?.toLowerCase() === norm,
+      );
+      if (clash) {
+        throw Object.assign(
+          new Error(`Registration slug "${patch.publicSlug}" is already taken.`),
+          { statusCode: 409 },
+        );
+      }
+    }
     const updated: Tournament = { ...existing, ...patch, id };
     this.tournaments.set(id, updated);
     return updated;
@@ -824,6 +867,26 @@ export class MemoryStore implements Store {
         t.publicToken = prev.publicToken ?? null;
         t.publicEnabled = prev.publicEnabled ?? false;
         t.certSerialNext = Math.max(prev.certSerialNext ?? 1, t.certSerialNext ?? 1);
+        t.publicSlug = t.publicSlug ?? prev.publicSlug ?? null;
+        t.isPublishedGlobal = t.isPublishedGlobal ?? prev.isPublishedGlobal ?? false;
+        t.registrationOpen = t.registrationOpen ?? prev.registrationOpen ?? false;
+        t.registrationDeadline = t.registrationDeadline ?? prev.registrationDeadline ?? null;
+        t.maxParticipants = t.maxParticipants ?? prev.maxParticipants ?? null;
+        t.venueName = t.venueName ?? prev.venueName ?? null;
+        t.venueAddress = t.venueAddress ?? prev.venueAddress ?? null;
+        t.city = t.city ?? prev.city ?? null;
+        t.state = t.state ?? prev.state ?? null;
+        t.country = t.country ?? prev.country ?? null;
+        t.latitude = t.latitude ?? prev.latitude ?? null;
+        t.longitude = t.longitude ?? prev.longitude ?? null;
+        t.descriptionMd = t.descriptionMd ?? prev.descriptionMd ?? null;
+        t.rulesMd = t.rulesMd ?? prev.rulesMd ?? null;
+        t.timeControl = t.timeControl ?? prev.timeControl ?? null;
+        t.entryFeeCents = t.entryFeeCents ?? prev.entryFeeCents ?? 0;
+        t.currency = t.currency ?? prev.currency ?? 'MYR';
+        t.paymentInstructions = t.paymentInstructions ?? prev.paymentInstructions ?? null;
+        t.paymentQrUrl = t.paymentQrUrl ?? prev.paymentQrUrl ?? null;
+        t.registrationFormSchema = t.registrationFormSchema ?? prev.registrationFormSchema ?? null;
       }
       applyIfNewer(this.tournaments, t);
     } else if (entity === 'category') {
@@ -1282,6 +1345,294 @@ export class MemoryStore implements Store {
       certificates: certItems,
     });
   }
+
+  // ---- Tournament Discovery & Registrations (Phase 2) ----
+
+  async getTournamentBySlugOrId(slugOrId: string): Promise<Tournament | null> {
+    const norm = slugOrId.trim().toLowerCase();
+    const byId = this.tournaments.get(slugOrId);
+    if (byId && !byId.deletedAt) return byId;
+    const bySlug = [...this.tournaments.values()].find(
+      (t) => !t.deletedAt && t.publicSlug && t.publicSlug.toLowerCase() === norm,
+    );
+    return bySlug ?? null;
+  }
+
+  async listPublishedEvents(filters?: {
+    lat?: number;
+    lng?: number;
+    radiusKm?: number;
+    search?: string;
+  }): Promise<PublicEventSummary[]> {
+    const q = filters?.search?.trim().toLowerCase() || '';
+    const hasCoords =
+      filters?.lat != null &&
+      filters?.lng != null &&
+      Number.isFinite(filters.lat) &&
+      Number.isFinite(filters.lng);
+    const radiusKm =
+      filters?.radiusKm != null && Number.isFinite(filters.radiusKm) && filters.radiusKm > 0
+        ? filters.radiusKm
+        : null;
+
+    const events: PublicEventSummary[] = [];
+    for (const t of this.tournaments.values()) {
+      if (t.deletedAt || !t.isPublishedGlobal) continue;
+      const org = t.organizationId ? (this.organizations.get(t.organizationId) ?? null) : null;
+      const orgName = org?.name ?? null;
+      if (q) {
+        const hay = [
+          t.name,
+          t.venueName,
+          t.venueAddress,
+          t.city,
+          t.state,
+          t.country,
+          orgName,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
+
+      let distanceKm: number | null = null;
+      if (hasCoords && t.latitude != null && t.longitude != null) {
+        distanceKm = haversineDistanceKm(filters!.lat!, filters!.lng!, t.latitude, t.longitude);
+      }
+      if (hasCoords && radiusKm != null) {
+        if (distanceKm == null || distanceKm > radiusKm) continue;
+      }
+
+      const registeredCount = [...this.participants.values()].filter(
+        (p) => p.tournamentId === t.id && !p.deletedAt,
+      ).length;
+      const categories = [...this.categories.values()]
+        .filter((c) => c.tournamentId === t.id && !c.deletedAt)
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((c) => ({ id: c.id, name: c.name }));
+
+      events.push({
+        id: t.id,
+        publicSlug: t.publicSlug ?? null,
+        name: t.name,
+        date: t.date ?? null,
+        style: t.style,
+        rounds: t.rounds,
+        status: t.status,
+        registrationOpen: Boolean(t.registrationOpen),
+        registrationDeadline: t.registrationDeadline ?? null,
+        maxParticipants: t.maxParticipants ?? null,
+        registeredCount,
+        venueName: t.venueName ?? null,
+        venueAddress: t.venueAddress ?? null,
+        city: t.city ?? null,
+        state: t.state ?? null,
+        country: t.country ?? 'Malaysia',
+        latitude: t.latitude ?? null,
+        longitude: t.longitude ?? null,
+        distanceKm,
+        timeControl: t.timeControl ?? null,
+        entryFeeCents: t.entryFeeCents ?? 0,
+        currency: t.currency ?? 'MYR',
+        descriptionMd: t.descriptionMd ?? null,
+        organizationName: orgName,
+        categories,
+      });
+    }
+
+    if (hasCoords) {
+      events.sort((a, b) => {
+        if (a.distanceKm != null && b.distanceKm != null) {
+          if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm;
+        } else if (a.distanceKm != null) {
+          return -1;
+        } else if (b.distanceKm != null) {
+          return 1;
+        }
+        return (a.date ?? '9999-12-31').localeCompare(b.date ?? '9999-12-31');
+      });
+    } else {
+      events.sort((a, b) => (a.date ?? '9999-12-31').localeCompare(b.date ?? '9999-12-31'));
+    }
+
+    return events;
+  }
+
+  async listTournamentRegistrations(tournamentId: string): Promise<TournamentRegistration[]> {
+    return [...this.registrations.values()]
+      .filter((r) => r.tournamentId === tournamentId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async listUserRegistrations(userId: string): Promise<TournamentRegistration[]> {
+    const myProfileIds = new Set(
+      [...this.playerProfiles.values()]
+        .filter((p) => p.accountUserId === userId)
+        .map((p) => p.id),
+    );
+    return [...this.registrations.values()]
+      .filter(
+        (r) =>
+          r.submittedByUserId === userId ||
+          (r.playerProfileId != null && myProfileIds.has(r.playerProfileId)),
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async createTournamentRegistration(
+    reg: TournamentRegistration,
+  ): Promise<TournamentRegistration> {
+    const existingForTournament = [...this.registrations.values()].filter(
+      (r) =>
+        r.tournamentId === reg.tournamentId &&
+        r.status !== 'cancelled' &&
+        r.status !== 'rejected',
+    );
+    if (reg.playerProfileId) {
+      const clash = existingForTournament.find(
+        (r) => r.playerProfileId === reg.playerProfileId && r.id !== reg.id,
+      );
+      if (clash) {
+        throw Object.assign(
+          new Error('This player profile already has an active registration for this tournament.'),
+          { statusCode: 409 },
+        );
+      }
+    }
+    const normName = reg.playerSnapshot.name.trim().toLowerCase();
+    const normEmail = reg.playerSnapshot.email?.trim().toLowerCase() || '';
+    if (normName && normEmail) {
+      const clash = existingForTournament.find(
+        (r) =>
+          r.id !== reg.id &&
+          r.playerSnapshot.name.trim().toLowerCase() === normName &&
+          (r.playerSnapshot.email?.trim().toLowerCase() || '') === normEmail,
+      );
+      if (clash) {
+        throw Object.assign(
+          new Error('This player is already registered for this tournament.'),
+          { statusCode: 409 },
+        );
+      }
+    }
+
+    this.registrations.set(reg.id, reg);
+    return reg;
+  }
+
+  async reviewTournamentRegistration(
+    tournamentId: string,
+    regId: string,
+    input: {
+      action: 'approve' | 'reject' | 'waitlist';
+      reviewerNote?: string | null;
+      categoryIds?: string[];
+    },
+  ): Promise<{ registration: TournamentRegistration; participant: Participant | null }> {
+    const reg = this.registrations.get(regId);
+    if (!reg || reg.tournamentId !== tournamentId) {
+      throw Object.assign(new Error('Registration not found'), { statusCode: 404 });
+    }
+    const tournament = this.tournaments.get(tournamentId);
+    if (!tournament || tournament.deletedAt) {
+      throw Object.assign(new Error('Tournament not found'), { statusCode: 404 });
+    }
+
+    const now = new Date().toISOString();
+
+    if (input.action === 'approve') {
+      const snap = reg.playerSnapshot;
+      const currentYear = new Date().getFullYear();
+      const computedAge =
+        snap.age != null
+          ? snap.age
+          : snap.yearOfBirth != null
+            ? Math.max(0, currentYear - snap.yearOfBirth)
+            : 0;
+
+      const categories = await this.listCategories(tournamentId);
+      const validCatIds = new Set(categories.map((c) => c.id));
+      let assignedCatIds: string[];
+      if (input.categoryIds && input.categoryIds.length > 0) {
+        assignedCatIds = input.categoryIds.filter((cid) => validCatIds.has(cid));
+      } else {
+        const autoMap = assignCategories(
+          [
+            {
+              name: snap.name,
+              age: computedAge,
+              gender: snap.gender ?? null,
+              rating: snap.rating ?? null,
+              club: snap.club ?? snap.school ?? null,
+              customFields: reg.customAnswers ?? {},
+            },
+          ],
+          categories,
+        );
+        const autoIds = autoMap.get(0) ?? [];
+        const merged = new Set<string>(autoIds);
+        if (reg.selectedCategoryId && validCatIds.has(reg.selectedCategoryId)) {
+          merged.add(reg.selectedCategoryId);
+        }
+        assignedCatIds = [...merged];
+      }
+
+      const participantId = reg.participantId ?? crypto.randomUUID();
+      const participant: Participant = {
+        id: participantId,
+        tournamentId,
+        name: snap.name,
+        age: computedAge,
+        gender: snap.gender ?? null,
+        rating: snap.rating ?? null,
+        fideId: snap.fideId ?? null,
+        school: snap.school ?? null,
+        club: snap.club ?? null,
+        city: snap.city ?? null,
+        state: snap.state ?? null,
+        country: snap.country ?? 'Malaysia',
+        yearOfBirth: snap.yearOfBirth ?? null,
+        email: snap.email || null,
+        customFields: {
+          ...(reg.customAnswers ?? {}),
+          ...(snap.phone ? { phone: snap.phone } : {}),
+        },
+        categoryIds: assignedCatIds,
+        playerProfileId: reg.playerProfileId ?? null,
+        updatedAt: now,
+      };
+
+      await this.upsertParticipants([participant]);
+
+      const updatedReg: TournamentRegistration = {
+        ...reg,
+        status: 'approved',
+        paymentStatus:
+          reg.amountCents > 0 || reg.paymentStatus !== 'not_required'
+            ? 'verified'
+            : 'not_required',
+        participantId: participant.id,
+        reviewerNote: input.reviewerNote !== undefined ? input.reviewerNote : (reg.reviewerNote ?? null),
+        reviewedAt: now,
+        updatedAt: now,
+      };
+      this.registrations.set(regId, updatedReg);
+      return { registration: updatedReg, participant };
+    }
+
+    const nextStatus: RegistrationStatus =
+      input.action === 'waitlist' ? 'waitlisted' : 'rejected';
+    const updatedReg: TournamentRegistration = {
+      ...reg,
+      status: nextStatus,
+      reviewerNote: input.reviewerNote !== undefined ? input.reviewerNote : (reg.reviewerNote ?? null),
+      reviewedAt: now,
+      updatedAt: now,
+    };
+    this.registrations.set(regId, updatedReg);
+    return { registration: updatedReg, participant: null };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1496,9 +1847,48 @@ interface TournamentRow {
   cert_serial_prefix: string | null;
   cert_serial_pad: number | null;
   cert_serial_next: number | null;
+  public_slug?: string | null;
+  is_published_global?: boolean | null;
+  registration_open?: boolean | null;
+  registration_deadline?: Date | string | null;
+  max_participants?: number | null;
+  venue_name?: string | null;
+  venue_address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  description_md?: string | null;
+  rules_md?: string | null;
+  time_control?: string | null;
+  entry_fee_cents?: number | null;
+  currency?: string | null;
+  payment_instructions?: string | null;
+  payment_qr_url?: string | null;
+  registration_form_schema?: RegistrationFormConfig | null;
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
+}
+
+interface TournamentRegistrationRow {
+  id: string;
+  tournament_id: string;
+  player_profile_id: string | null;
+  submitted_by_user_id: string | null;
+  selected_category_id: string | null;
+  player_snapshot: RegistrationPlayerSnapshot;
+  custom_answers: Record<string, unknown>;
+  payment_status: string;
+  receipt_data_url: string | null;
+  amount_cents: number;
+  status: string;
+  reviewer_note: string | null;
+  reviewed_at: Date | string | null;
+  participant_id: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
 }
 
 interface OrganizationRow {
@@ -1670,9 +2060,50 @@ function rowToTournament(row: TournamentRow): Tournament {
     certSerialPrefix: row.cert_serial_prefix ?? DEFAULT_CERT_SERIAL_PREFIX,
     certSerialPad: row.cert_serial_pad ?? DEFAULT_CERT_SERIAL_PAD,
     certSerialNext: row.cert_serial_next ?? 1,
+    publicSlug: row.public_slug ?? null,
+    isPublishedGlobal: Boolean(row.is_published_global),
+    registrationOpen: Boolean(row.registration_open),
+    registrationDeadline: toIso(row.registration_deadline) ?? null,
+    maxParticipants: row.max_participants != null ? Number(row.max_participants) : null,
+    venueName: row.venue_name ?? null,
+    venueAddress: row.venue_address ?? null,
+    city: row.city ?? null,
+    state: row.state ?? null,
+    country: row.country ?? null,
+    latitude: row.latitude != null ? Number(row.latitude) : null,
+    longitude: row.longitude != null ? Number(row.longitude) : null,
+    descriptionMd: row.description_md ?? null,
+    rulesMd: row.rules_md ?? null,
+    timeControl: row.time_control ?? null,
+    entryFeeCents: row.entry_fee_cents != null ? Number(row.entry_fee_cents) : 0,
+    currency: row.currency ?? 'MYR',
+    paymentInstructions: row.payment_instructions ?? null,
+    paymentQrUrl: row.payment_qr_url ?? null,
+    registrationFormSchema: row.registration_form_schema ?? DEFAULT_REGISTRATION_FORM_CONFIG,
     clientId: row.client_id ?? undefined,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
+  };
+}
+
+function rowToTournamentRegistration(row: TournamentRegistrationRow): TournamentRegistration {
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    playerProfileId: row.player_profile_id ?? null,
+    submittedByUserId: row.submitted_by_user_id ?? null,
+    selectedCategoryId: row.selected_category_id ?? null,
+    playerSnapshot: row.player_snapshot ?? { name: 'Player' },
+    customAnswers: row.custom_answers ?? {},
+    paymentStatus: (row.payment_status as RegistrationPaymentStatus) ?? 'not_required',
+    receiptDataUrl: row.receipt_data_url ?? null,
+    amountCents: Number(row.amount_cents ?? 0),
+    status: (row.status as RegistrationStatus) ?? 'pending',
+    reviewerNote: row.reviewer_note ?? null,
+    reviewedAt: toIso(row.reviewed_at) ?? null,
+    participantId: row.participant_id ?? null,
+    createdAt: toIso(row.created_at)!,
+    updatedAt: toIso(row.updated_at)!,
   };
 }
 
@@ -2017,18 +2448,39 @@ export class PostgresStore implements Store {
     const org = await this.assertTournamentCreationQuota(t);
     const organizationId = t.organizationId ?? org?.id ?? null;
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, organization_id, arbiter_pin_round, table_count, public_token, public_enabled, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
-      VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
-              ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
-              ${t.tiebreakOrder ? this.j(t.tiebreakOrder) : null}, ${t.sharedPlaces ?? true},
-              ${t.ownerId ?? null}, ${organizationId}, ${t.arbiterPinRound ?? null}, ${Math.max(0, t.tableCount ?? 0)},
-              ${t.publicToken ?? null}, ${t.publicEnabled ?? false},
-              ${t.certEmailSubject ?? null}, ${t.certEmailBody ?? null},
-              ${t.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX},
-              ${t.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD},
-              ${t.certSerialNext ?? 1},
-              ${t.clientId ?? null},
-              ${t.updatedAt}, ${t.deletedAt ?? null})
+      INSERT INTO tournaments (
+        id, name, date, style, rounds, status, current_round, confirmed_rounds,
+        mix_categories, prize_places, award_scope, tiebreak_order, shared_places,
+        owner_id, organization_id, arbiter_pin_round, table_count, public_token, public_enabled,
+        cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next,
+        public_slug, is_published_global, registration_open, registration_deadline, max_participants,
+        venue_name, venue_address, city, state, country, latitude, longitude,
+        description_md, rules_md, time_control, entry_fee_cents, currency,
+        payment_instructions, payment_qr_url, registration_form_schema,
+        client_id, updated_at, deleted_at
+      )
+      VALUES (
+        ${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
+        ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false},
+        ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
+        ${t.tiebreakOrder ? this.j(t.tiebreakOrder) : null}, ${t.sharedPlaces ?? true},
+        ${t.ownerId ?? null}, ${organizationId}, ${t.arbiterPinRound ?? null}, ${Math.max(0, t.tableCount ?? 0)},
+        ${t.publicToken ?? null}, ${t.publicEnabled ?? false},
+        ${t.certEmailSubject ?? null}, ${t.certEmailBody ?? null},
+        ${t.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX},
+        ${t.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD},
+        ${t.certSerialNext ?? 1},
+        ${t.publicSlug ?? null}, ${t.isPublishedGlobal ?? false}, ${t.registrationOpen ?? false},
+        ${t.registrationDeadline ?? null}, ${t.maxParticipants ?? null},
+        ${t.venueName ?? null}, ${t.venueAddress ?? null}, ${t.city ?? null}, ${t.state ?? null},
+        ${t.country ?? 'Malaysia'}, ${t.latitude ?? null}, ${t.longitude ?? null},
+        ${t.descriptionMd ?? null}, ${t.rulesMd ?? null}, ${t.timeControl ?? null},
+        ${t.entryFeeCents ?? 0}, ${t.currency ?? 'MYR'},
+        ${t.paymentInstructions ?? null}, ${t.paymentQrUrl ?? null},
+        ${this.j(t.registrationFormSchema ?? DEFAULT_REGISTRATION_FORM_CONFIG)},
+        ${t.clientId ?? null},
+        ${t.updatedAt}, ${t.deletedAt ?? null}
+      )
       RETURNING *
     `;
     return rowToTournament(rows[0]!);
@@ -2040,6 +2492,23 @@ export class PostgresStore implements Store {
   ): Promise<Tournament | null> {
     const existing = await this.getTournament(id);
     if (!existing) return null;
+    if (patch.publicSlug) {
+      const norm = patch.publicSlug.trim().toLowerCase();
+      const clash = await this.sql<{ id: string }[]>`
+        SELECT id::text AS id FROM tournaments
+        WHERE deleted_at IS NULL
+          AND id <> ${id}
+          AND public_slug IS NOT NULL
+          AND lower(public_slug) = ${norm}
+        LIMIT 1
+      `;
+      if (clash[0]) {
+        throw Object.assign(
+          new Error(`Registration slug "${patch.publicSlug}" is already taken.`),
+          { statusCode: 409 },
+        );
+      }
+    }
     const m = { ...existing, ...patch };
     const rows = await this.sql<TournamentRow[]>`
       UPDATE tournaments SET
@@ -2062,6 +2531,26 @@ export class PostgresStore implements Store {
         cert_serial_prefix = ${m.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX},
         cert_serial_pad = ${m.certSerialPad ?? DEFAULT_CERT_SERIAL_PAD},
         cert_serial_next = GREATEST(cert_serial_next, ${m.certSerialNext ?? 1}),
+        public_slug = ${m.publicSlug ?? null},
+        is_published_global = ${m.isPublishedGlobal ?? false},
+        registration_open = ${m.registrationOpen ?? false},
+        registration_deadline = ${m.registrationDeadline ?? null},
+        max_participants = ${m.maxParticipants ?? null},
+        venue_name = ${m.venueName ?? null},
+        venue_address = ${m.venueAddress ?? null},
+        city = ${m.city ?? null},
+        state = ${m.state ?? null},
+        country = ${m.country ?? 'Malaysia'},
+        latitude = ${m.latitude ?? null},
+        longitude = ${m.longitude ?? null},
+        description_md = ${m.descriptionMd ?? null},
+        rules_md = ${m.rulesMd ?? null},
+        time_control = ${m.timeControl ?? null},
+        entry_fee_cents = ${m.entryFeeCents ?? 0},
+        currency = ${m.currency ?? 'MYR'},
+        payment_instructions = ${m.paymentInstructions ?? null},
+        payment_qr_url = ${m.paymentQrUrl ?? null},
+        registration_form_schema = ${this.j(m.registrationFormSchema ?? DEFAULT_REGISTRATION_FORM_CONFIG)},
         client_id = ${m.clientId ?? null}, updated_at = ${m.updatedAt},
         deleted_at = ${m.deletedAt ?? null},
         completed_at = CASE
@@ -3348,6 +3837,374 @@ export class PostgresStore implements Store {
       participantsById,
       certificates: certItems,
     });
+  }
+
+  // ---- Tournament Discovery & Registrations (Phase 2) ----
+
+  async getTournamentBySlugOrId(slugOrId: string): Promise<Tournament | null> {
+    const trimmed = slugOrId.trim();
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
+    const norm = trimmed.toLowerCase();
+    const rows = isUuid
+      ? await this.sql<TournamentRow[]>`
+          SELECT * FROM tournaments
+          WHERE deleted_at IS NULL
+            AND (id = ${trimmed}::uuid OR lower(public_slug) = ${norm})
+          LIMIT 1
+        `
+      : await this.sql<TournamentRow[]>`
+          SELECT * FROM tournaments
+          WHERE deleted_at IS NULL
+            AND public_slug IS NOT NULL
+            AND lower(public_slug) = ${norm}
+          LIMIT 1
+        `;
+    const row = rows[0];
+    return row ? rowToTournament(row) : null;
+  }
+
+  async listPublishedEvents(filters?: {
+    lat?: number;
+    lng?: number;
+    radiusKm?: number;
+    search?: string;
+  }): Promise<PublicEventSummary[]> {
+    const q = filters?.search?.trim().toLowerCase() || '';
+    const hasCoords =
+      filters?.lat != null &&
+      filters?.lng != null &&
+      Number.isFinite(filters.lat) &&
+      Number.isFinite(filters.lng);
+    const radiusKm =
+      filters?.radiusKm != null && Number.isFinite(filters.radiusKm) && filters.radiusKm > 0
+        ? filters.radiusKm
+        : null;
+
+    const rows = await this.sql<
+      (TournamentRow & {
+        organization_name: string | null;
+        registered_count: string;
+      })[]
+    >`
+      SELECT
+        t.*,
+        o.name AS organization_name,
+        (
+          SELECT COUNT(*)::text
+          FROM participants p
+          WHERE p.tournament_id = t.id AND p.deleted_at IS NULL
+        ) AS registered_count
+      FROM tournaments t
+      LEFT JOIN organizations o ON o.id = t.organization_id
+      WHERE t.deleted_at IS NULL
+        AND t.is_published_global = true
+      ORDER BY t.date ASC NULLS LAST, t.updated_at DESC
+    `;
+
+    const tournamentIds = rows.map((r) => r.id);
+    const categoriesByTournament = new Map<string, Array<{ id: string; name: string }>>();
+    if (tournamentIds.length > 0) {
+      const catRows = await this.sql<{ id: string; tournament_id: string; name: string }[]>`
+        SELECT id::text AS id, tournament_id::text AS tournament_id, name
+        FROM categories
+        WHERE tournament_id IN ${this.sql(tournamentIds)}
+          AND deleted_at IS NULL
+        ORDER BY sort_order ASC
+      `;
+      for (const c of catRows) {
+        const list = categoriesByTournament.get(c.tournament_id) ?? [];
+        list.push({ id: c.id, name: c.name });
+        categoriesByTournament.set(c.tournament_id, list);
+      }
+    }
+
+    const events: PublicEventSummary[] = [];
+    for (const r of rows) {
+      const t = rowToTournament(r);
+      const orgName = r.organization_name ?? null;
+      if (q) {
+        const hay = [
+          t.name,
+          t.venueName,
+          t.venueAddress,
+          t.city,
+          t.state,
+          t.country,
+          orgName,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
+
+      let distanceKm: number | null = null;
+      if (hasCoords && t.latitude != null && t.longitude != null) {
+        distanceKm = haversineDistanceKm(filters!.lat!, filters!.lng!, t.latitude, t.longitude);
+      }
+      if (hasCoords && radiusKm != null) {
+        if (distanceKm == null || distanceKm > radiusKm) continue;
+      }
+
+      events.push({
+        id: t.id,
+        publicSlug: t.publicSlug ?? null,
+        name: t.name,
+        date: t.date ?? null,
+        style: t.style,
+        rounds: t.rounds,
+        status: t.status,
+        registrationOpen: Boolean(t.registrationOpen),
+        registrationDeadline: t.registrationDeadline ?? null,
+        maxParticipants: t.maxParticipants ?? null,
+        registeredCount: Number(r.registered_count ?? 0),
+        venueName: t.venueName ?? null,
+        venueAddress: t.venueAddress ?? null,
+        city: t.city ?? null,
+        state: t.state ?? null,
+        country: t.country ?? 'Malaysia',
+        latitude: t.latitude ?? null,
+        longitude: t.longitude ?? null,
+        distanceKm,
+        timeControl: t.timeControl ?? null,
+        entryFeeCents: t.entryFeeCents ?? 0,
+        currency: t.currency ?? 'MYR',
+        descriptionMd: t.descriptionMd ?? null,
+        organizationName: orgName,
+        categories: categoriesByTournament.get(t.id) ?? [],
+      });
+    }
+
+    if (hasCoords) {
+      events.sort((a, b) => {
+        if (a.distanceKm != null && b.distanceKm != null) {
+          if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm;
+        } else if (a.distanceKm != null) {
+          return -1;
+        } else if (b.distanceKm != null) {
+          return 1;
+        }
+        return (a.date ?? '9999-12-31').localeCompare(b.date ?? '9999-12-31');
+      });
+    }
+
+    return events;
+  }
+
+  async listTournamentRegistrations(tournamentId: string): Promise<TournamentRegistration[]> {
+    const rows = await this.sql<TournamentRegistrationRow[]>`
+      SELECT * FROM tournament_registrations
+      WHERE tournament_id = ${tournamentId}
+      ORDER BY created_at DESC
+    `;
+    return rows.map(rowToTournamentRegistration);
+  }
+
+  async listUserRegistrations(userId: string): Promise<TournamentRegistration[]> {
+    const rows = await this.sql<TournamentRegistrationRow[]>`
+      SELECT r.*
+      FROM tournament_registrations r
+      LEFT JOIN player_profiles pp ON pp.id = r.player_profile_id
+      WHERE r.submitted_by_user_id = ${userId}
+        OR pp.account_user_id = ${userId}
+      ORDER BY r.created_at DESC
+    `;
+    return rows.map(rowToTournamentRegistration);
+  }
+
+  async createTournamentRegistration(
+    reg: TournamentRegistration,
+  ): Promise<TournamentRegistration> {
+    if (reg.playerProfileId) {
+      const clash = await this.sql<{ id: string }[]>`
+        SELECT id::text AS id
+        FROM tournament_registrations
+        WHERE tournament_id = ${reg.tournamentId}
+          AND player_profile_id = ${reg.playerProfileId}
+          AND status NOT IN ('cancelled', 'rejected')
+          AND id <> ${reg.id}
+        LIMIT 1
+      `;
+      if (clash[0]) {
+        throw Object.assign(
+          new Error('This player profile already has an active registration for this tournament.'),
+          { statusCode: 409 },
+        );
+      }
+    }
+    const normName = reg.playerSnapshot.name.trim().toLowerCase();
+    const normEmail = reg.playerSnapshot.email?.trim().toLowerCase() || '';
+    if (normName && normEmail) {
+      const clash = await this.sql<{ id: string }[]>`
+        SELECT id::text AS id
+        FROM tournament_registrations
+        WHERE tournament_id = ${reg.tournamentId}
+          AND status NOT IN ('cancelled', 'rejected')
+          AND id <> ${reg.id}
+          AND lower(trim(coalesce(player_snapshot->>'name', ''))) = ${normName}
+          AND lower(trim(coalesce(player_snapshot->>'email', ''))) = ${normEmail}
+        LIMIT 1
+      `;
+      if (clash[0]) {
+        throw Object.assign(
+          new Error('This player is already registered for this tournament.'),
+          { statusCode: 409 },
+        );
+      }
+    }
+
+    const rows = await this.sql<TournamentRegistrationRow[]>`
+      INSERT INTO tournament_registrations (
+        id, tournament_id, player_profile_id, submitted_by_user_id, selected_category_id,
+        player_snapshot, custom_answers, payment_status, receipt_data_url, amount_cents,
+        status, reviewer_note, reviewed_at, participant_id, created_at, updated_at
+      )
+      VALUES (
+        ${reg.id}, ${reg.tournamentId}, ${reg.playerProfileId ?? null},
+        ${reg.submittedByUserId ?? null}, ${reg.selectedCategoryId ?? null},
+        ${this.j(reg.playerSnapshot)}, ${this.j(reg.customAnswers ?? {})},
+        ${reg.paymentStatus}, ${reg.receiptDataUrl ?? null}, ${reg.amountCents ?? 0},
+        ${reg.status}, ${reg.reviewerNote ?? null}, ${reg.reviewedAt ?? null},
+        ${reg.participantId ?? null}, ${reg.createdAt}, ${reg.updatedAt}
+      )
+      RETURNING *
+    `;
+    return rowToTournamentRegistration(rows[0]!);
+  }
+
+  async reviewTournamentRegistration(
+    tournamentId: string,
+    regId: string,
+    input: {
+      action: 'approve' | 'reject' | 'waitlist';
+      reviewerNote?: string | null;
+      categoryIds?: string[];
+    },
+  ): Promise<{ registration: TournamentRegistration; participant: Participant | null }> {
+    const regRows = await this.sql<TournamentRegistrationRow[]>`
+      SELECT * FROM tournament_registrations
+      WHERE id = ${regId} AND tournament_id = ${tournamentId}
+      LIMIT 1
+    `;
+    const regRow = regRows[0];
+    if (!regRow) {
+      throw Object.assign(new Error('Registration not found'), { statusCode: 404 });
+    }
+    const reg = rowToTournamentRegistration(regRow);
+    const tournament = await this.getTournament(tournamentId);
+    if (!tournament || tournament.deletedAt) {
+      throw Object.assign(new Error('Tournament not found'), { statusCode: 404 });
+    }
+
+    const now = new Date().toISOString();
+
+    if (input.action === 'approve') {
+      const snap = reg.playerSnapshot;
+      const currentYear = new Date().getFullYear();
+      const computedAge =
+        snap.age != null
+          ? snap.age
+          : snap.yearOfBirth != null
+            ? Math.max(0, currentYear - snap.yearOfBirth)
+            : 0;
+
+      const categories = await this.listCategories(tournamentId);
+      const validCatIds = new Set(categories.map((c) => c.id));
+      let assignedCatIds: string[];
+      if (input.categoryIds && input.categoryIds.length > 0) {
+        assignedCatIds = input.categoryIds.filter((cid) => validCatIds.has(cid));
+      } else {
+        const autoMap = assignCategories(
+          [
+            {
+              name: snap.name,
+              age: computedAge,
+              gender: snap.gender ?? null,
+              rating: snap.rating ?? null,
+              club: snap.club ?? snap.school ?? null,
+              customFields: reg.customAnswers ?? {},
+            },
+          ],
+          categories,
+        );
+        const autoIds = autoMap.get(0) ?? [];
+        const merged = new Set<string>(autoIds);
+        if (reg.selectedCategoryId && validCatIds.has(reg.selectedCategoryId)) {
+          merged.add(reg.selectedCategoryId);
+        }
+        assignedCatIds = [...merged];
+      }
+
+      const participantId = reg.participantId ?? crypto.randomUUID();
+      const participant: Participant = {
+        id: participantId,
+        tournamentId,
+        name: snap.name,
+        age: computedAge,
+        gender: snap.gender ?? null,
+        rating: snap.rating ?? null,
+        fideId: snap.fideId ?? null,
+        school: snap.school ?? null,
+        club: snap.club ?? null,
+        city: snap.city ?? null,
+        state: snap.state ?? null,
+        country: snap.country ?? 'Malaysia',
+        yearOfBirth: snap.yearOfBirth ?? null,
+        email: snap.email || null,
+        customFields: {
+          ...(reg.customAnswers ?? {}),
+          ...(snap.phone ? { phone: snap.phone } : {}),
+        },
+        categoryIds: assignedCatIds,
+        playerProfileId: reg.playerProfileId ?? null,
+        updatedAt: now,
+      };
+
+      const [upserted] = await this.upsertParticipants([participant]);
+      const finalParticipant = upserted ?? participant;
+
+      const paymentStatus: RegistrationPaymentStatus =
+        reg.amountCents > 0 || reg.paymentStatus !== 'not_required'
+          ? 'verified'
+          : 'not_required';
+      const note =
+        input.reviewerNote !== undefined ? input.reviewerNote : (reg.reviewerNote ?? null);
+
+      const updatedRows = await this.sql<TournamentRegistrationRow[]>`
+        UPDATE tournament_registrations SET
+          status = 'approved',
+          payment_status = ${paymentStatus},
+          participant_id = ${finalParticipant.id},
+          reviewer_note = ${note},
+          reviewed_at = ${now},
+          updated_at = ${now}
+        WHERE id = ${regId} AND tournament_id = ${tournamentId}
+        RETURNING *
+      `;
+      return {
+        registration: rowToTournamentRegistration(updatedRows[0]!),
+        participant: finalParticipant,
+      };
+    }
+
+    const nextStatus: RegistrationStatus =
+      input.action === 'waitlist' ? 'waitlisted' : 'rejected';
+    const note =
+      input.reviewerNote !== undefined ? input.reviewerNote : (reg.reviewerNote ?? null);
+    const updatedRows = await this.sql<TournamentRegistrationRow[]>`
+      UPDATE tournament_registrations SET
+        status = ${nextStatus},
+        reviewer_note = ${note},
+        reviewed_at = ${now},
+        updated_at = ${now}
+      WHERE id = ${regId} AND tournament_id = ${tournamentId}
+      RETURNING *
+    `;
+    return {
+      registration: rowToTournamentRegistration(updatedRows[0]!),
+      participant: null,
+    };
   }
 }
 

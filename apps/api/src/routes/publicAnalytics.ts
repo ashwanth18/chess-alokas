@@ -18,6 +18,8 @@ const ALLOWED_ROUTE_KEYS = new Set([
   'login',
   'signup',
   'player_portal',
+  'discover',
+  'event_register',
 ]);
 
 const BodySchema = z.object({

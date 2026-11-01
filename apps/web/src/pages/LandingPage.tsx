@@ -366,6 +366,9 @@ export default function LandingPage() {
           Chess Alokas
         </span>
         <nav className="landing-nav">
+          <Link to="/discover" className="btn btn-sm btn-ghost landing-nav-link">
+            Explore events
+          </Link>
           <a href="#engine" className="btn btn-sm btn-ghost landing-nav-link">
             Pairing engine
           </a>

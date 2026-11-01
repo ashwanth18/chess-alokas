@@ -12,7 +12,15 @@ import {
 } from '@chess-alokas/pairing-engine';
 import { pairRoundForUi } from '../lib/officialPairing';
 import { displaySchool, displayYearOfBirth } from '../lib/importParse';
-import type { FilterGroup, FilterOp, GameCardType, GameResult, TiebreakKey, TournamentStyle } from '@chess-alokas/shared';
+import type {
+  FilterGroup,
+  FilterOp,
+  GameCardType,
+  GameResult,
+  TiebreakKey,
+  TournamentRegistration,
+  TournamentStyle,
+} from '@chess-alokas/shared';
 import {
   ILLEGAL_MOVE_LIMIT,
   WARNING_LIMIT,
@@ -62,6 +70,9 @@ import {
   apiPublicLiveEnable,
   apiPublicLiveRotate,
   apiPublicLiveDisable,
+  apiListTournamentRegistrations,
+  apiReviewTournamentRegistration,
+  apiUpdateTournamentPublishing,
 } from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { subscribeTournamentGames } from '../lib/gamesRealtime';
@@ -75,7 +86,7 @@ import { useAuth } from '../auth/AuthContext';
 import FideLookupModal from '../components/FideLookupModal';
 import DatePicker from '../components/DatePicker';
 
-type Tab = 'players' | 'pairings' | 'standings';
+type Tab = 'players' | 'registrations' | 'pairings' | 'standings';
 
 const FILTER_OP_LABELS: Record<FilterOp, string> = {
   eq: '=',
@@ -257,6 +268,31 @@ export default function TournamentPage() {
   const [cardBusyId, setCardBusyId] = useState<string | null>(null);
   const [cardMsg, setCardMsg] = useState<string | null>(null);
   const [fideLookupOpen, setFideLookupOpen] = useState(false);
+
+  // Phase 2: Registrations & Discovery state
+  const [registrations, setRegistrations] = useState<TournamentRegistration[]>([]);
+  const [regFilter, setRegFilter] = useState<'all' | 'pending' | 'approved' | 'waitlisted' | 'rejected'>('all');
+  const [regBusyId, setRegBusyId] = useState<string | null>(null);
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regNotice, setRegNotice] = useState<string | null>(null);
+  const [receiptModalUrl, setReceiptModalUrl] = useState<string | null>(null);
+
+  const [pubSlug, setPubSlug] = useState('');
+  const [pubRegOpen, setPubRegOpen] = useState(false);
+  const [pubGlobal, setPubGlobal] = useState(false);
+  const [pubVenueName, setPubVenueName] = useState('');
+  const [pubVenueAddress, setPubVenueAddress] = useState('');
+  const [pubCity, setPubCity] = useState('');
+  const [pubState, setPubState] = useState('');
+  const [pubLat, setPubLat] = useState('');
+  const [pubLng, setPubLng] = useState('');
+  const [pubTimeControl, setPubTimeControl] = useState('');
+  const [pubEntryFeeMyr, setPubEntryFeeMyr] = useState('0');
+  const [pubPaymentInstructions, setPubPaymentInstructions] = useState('');
+  const [pubPaymentQrUrl, setPubPaymentQrUrl] = useState<string | null>(null);
+  const [pubDescription, setPubDescription] = useState('');
+  const [pubSaving, setPubSaving] = useState(false);
+  const [pubLoadedForId, setPubLoadedForId] = useState<string | null>(null);
 
   const tournament = useLiveQuery(() => (id ? db.tournaments.get(id) : undefined), [id]);
   const categories = useLiveQuery(
@@ -471,6 +507,173 @@ export default function TournamentPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [settingsOpen]);
+
+  // Populate publishing form fields when tournament loads
+  useEffect(() => {
+    if (!tournament || pubLoadedForId === tournament.id) return;
+    setPubLoadedForId(tournament.id);
+    setPubSlug(tournament.publicSlug ?? '');
+    setPubRegOpen(Boolean(tournament.registrationOpen));
+    setPubGlobal(Boolean(tournament.isPublishedGlobal));
+    setPubVenueName(tournament.venueName ?? '');
+    setPubVenueAddress(tournament.venueAddress ?? '');
+    setPubCity(tournament.city ?? '');
+    setPubState(tournament.state ?? '');
+    setPubLat(tournament.latitude != null ? String(tournament.latitude) : '');
+    setPubLng(tournament.longitude != null ? String(tournament.longitude) : '');
+    setPubTimeControl(tournament.timeControl ?? '');
+    setPubEntryFeeMyr(
+      tournament.entryFeeCents != null ? String(tournament.entryFeeCents / 100) : '0',
+    );
+    setPubPaymentInstructions(tournament.paymentInstructions ?? '');
+    setPubPaymentQrUrl(tournament.paymentQrUrl ?? null);
+    setPubDescription(tournament.descriptionMd ?? '');
+  }, [tournament, pubLoadedForId]);
+
+  const loadRegistrations = useCallback(async () => {
+    if (!id) return;
+    const res = await apiListTournamentRegistrations(id);
+    if (res.ok) {
+      setRegistrations(res.data.registrations);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    void loadRegistrations();
+  }, [id, tab, loadRegistrations]);
+
+  async function handleSavePublishing() {
+    if (!id || !tournament) return;
+    setPubSaving(true);
+    setRegError(null);
+    setRegNotice(null);
+    try {
+      try {
+        await syncOnline();
+      } catch {
+        /* continue if already synced */
+      }
+      const feeNum = Math.max(0, Math.round((Number(pubEntryFeeMyr) || 0) * 100));
+      const latNum = pubLat.trim() !== '' ? Number(pubLat.trim()) : null;
+      const lngNum = pubLng.trim() !== '' ? Number(pubLng.trim()) : null;
+      const res = await apiUpdateTournamentPublishing(id, {
+        publicSlug: pubSlug.trim() || null,
+        registrationOpen: pubRegOpen,
+        isPublishedGlobal: pubGlobal,
+        venueName: pubVenueName.trim() || null,
+        venueAddress: pubVenueAddress.trim() || null,
+        city: pubCity.trim() || null,
+        state: pubState.trim() || null,
+        latitude: latNum != null && Number.isFinite(latNum) ? latNum : null,
+        longitude: lngNum != null && Number.isFinite(lngNum) ? lngNum : null,
+        timeControl: pubTimeControl.trim() || null,
+        entryFeeCents: feeNum,
+        currency: 'MYR',
+        paymentInstructions: pubPaymentInstructions.trim() || null,
+        paymentQrUrl: pubPaymentQrUrl,
+        descriptionMd: pubDescription.trim() || null,
+      });
+      if (!res.ok) {
+        setRegError(res.error);
+        return;
+      }
+      const u = res.data.tournament;
+      setPubSlug(u.publicSlug ?? '');
+      await db.tournaments.update(id, {
+        publicSlug: u.publicSlug ?? null,
+        registrationOpen: u.registrationOpen ?? false,
+        isPublishedGlobal: u.isPublishedGlobal ?? false,
+        venueName: u.venueName ?? null,
+        venueAddress: u.venueAddress ?? null,
+        city: u.city ?? null,
+        state: u.state ?? null,
+        latitude: u.latitude ?? null,
+        longitude: u.longitude ?? null,
+        timeControl: u.timeControl ?? null,
+        entryFeeCents: u.entryFeeCents ?? 0,
+        currency: u.currency ?? 'MYR',
+        paymentInstructions: u.paymentInstructions ?? null,
+        paymentQrUrl: u.paymentQrUrl ?? null,
+        descriptionMd: u.descriptionMd ?? null,
+        updatedAt: u.updatedAt,
+      });
+      setRegNotice('Registration link & discovery settings saved.');
+    } finally {
+      setPubSaving(false);
+    }
+  }
+
+  async function handleReviewRegistration(
+    regId: string,
+    action: 'approve' | 'reject' | 'waitlist',
+  ) {
+    if (!id) return;
+    setRegBusyId(regId);
+    setRegError(null);
+    setRegNotice(null);
+    try {
+      const res = await apiReviewTournamentRegistration(id, regId, { action });
+      if (!res.ok) {
+        setRegError(res.error);
+        return;
+      }
+      if (res.data.participant) {
+        const p = res.data.participant;
+        await db.participants.put({
+          ...p,
+          customFields: (p.customFields ?? {}) as Record<string, unknown>,
+          categoryIds: p.categoryIds ?? [],
+          dirty: 0,
+        });
+      }
+      await loadRegistrations();
+      setRegNotice(
+        action === 'approve'
+          ? `Approved ${res.data.registration.playerSnapshot.name} into the tournament roster!`
+          : `Updated registration status to ${res.data.registration.status}.`,
+      );
+    } finally {
+      setRegBusyId(null);
+    }
+  }
+
+  async function handleApproveAllPending() {
+    if (!id) return;
+    const pendingList = registrations.filter((r) => r.status === 'pending');
+    if (pendingList.length === 0) return;
+    setRegBusyId('__batch__');
+    setRegError(null);
+    setRegNotice(null);
+    let approvedCount = 0;
+    try {
+      for (const reg of pendingList) {
+        const res = await apiReviewTournamentRegistration(id, reg.id, {
+          action: 'approve',
+        });
+        if (!res.ok) {
+          setRegError(res.error);
+          break;
+        }
+        if (res.data.participant) {
+          const p = res.data.participant;
+          await db.participants.put({
+            ...p,
+            customFields: (p.customFields ?? {}) as Record<string, unknown>,
+            categoryIds: p.categoryIds ?? [],
+            dirty: 0,
+          });
+        }
+        approvedCount += 1;
+      }
+      await loadRegistrations();
+      if (approvedCount > 0) {
+        setRegNotice(`Approved ${approvedCount} player(s) into the tournament roster.`);
+      }
+    } finally {
+      setRegBusyId(null);
+    }
+  }
 
   // Live floor/director cards: Realtime → refetch; poll backup when Realtime fails.
   useEffect(() => {
@@ -1752,15 +1955,26 @@ export default function TournamentPage() {
       )}
 
       <div className="tabs">
-        {(['players', 'pairings', 'standings'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            className={`tab ${tab === t ? 'active' : ''}`}
-            onClick={() => setTab(t)}
-          >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        ))}
+        {(['players', 'registrations', 'pairings', 'standings'] as Tab[]).map((t) => {
+          const pendingRegCount =
+            t === 'registrations'
+              ? registrations.filter((r) => r.status === 'pending').length
+              : 0;
+          return (
+            <button
+              key={t}
+              className={`tab ${tab === t ? 'active' : ''}`}
+              onClick={() => setTab(t)}
+            >
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+              {pendingRegCount > 0 && (
+                <span className="cat-tab-badge" style={{ marginLeft: '0.4rem' }}>
+                  {pendingRegCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {tab === 'players' && (
@@ -1910,6 +2124,465 @@ export default function TournamentPage() {
                 })}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {tab === 'registrations' && (
+        <div className="tab-panel">
+          {regError && (
+            <div className="form-error" role="alert" style={{ marginBottom: '1rem' }}>
+              {regError}
+            </div>
+          )}
+          {regNotice && (
+            <p className="form-hint stage-banner-ok" role="status" style={{ marginBottom: '1rem' }}>
+              {regNotice}
+            </p>
+          )}
+
+          {/* 1. Registration Link & Discovery Settings Card */}
+          <section className="admin-panel" style={{ marginBottom: '1.25rem' }}>
+            <div className="player-section-head">
+              <div>
+                <h3>Shareable Registration Link &amp; GPS Discovery</h3>
+                <p className="admin-metric-detail">
+                  Configure your public `/register/:slug` form, GPS venue coordinates for nearby
+                  search, and optional DuitNow / QR entry fee instructions.
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => {
+                    const slugOrId = pubSlug.trim() || tournament.publicSlug || tournament.id;
+                    const url = `${window.location.origin}/register/${slugOrId}`;
+                    void navigator.clipboard?.writeText(url);
+                    setRegNotice(`Copied registration link: ${url}`);
+                  }}
+                >
+                  Copy Registration Link
+                </button>
+                <Link
+                  to={`/register/${encodeURIComponent(pubSlug.trim() || tournament.publicSlug || tournament.id)}`}
+                  className="btn btn-sm btn-outline"
+                >
+                  Preview Registration Page ↗
+                </Link>
+              </div>
+            </div>
+
+            <div className="auth-form" style={{ marginTop: '0.75rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.75rem' }}>
+                <label>
+                  Public Registration Slug
+                  <input
+                    className="input"
+                    value={pubSlug}
+                    onChange={(e) => setPubSlug(e.target.value)}
+                    placeholder="e.g. kl-junior-rapid-2026"
+                  />
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', paddingTop: '1.4rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={pubRegOpen}
+                    onChange={(e) => setPubRegOpen(e.target.checked)}
+                  />
+                  <span>Accept Online Registrations</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', paddingTop: '1.4rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={pubGlobal}
+                    onChange={(e) => setPubGlobal(e.target.checked)}
+                  />
+                  <span>Publish to Global `/discover` Feed</span>
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.75rem' }}>
+                <label>
+                  Venue Name
+                  <input
+                    className="input"
+                    value={pubVenueName}
+                    onChange={(e) => setPubVenueName(e.target.value)}
+                    placeholder="KL Convention Centre"
+                  />
+                </label>
+                <label>
+                  Venue Address
+                  <input
+                    className="input"
+                    value={pubVenueAddress}
+                    onChange={(e) => setPubVenueAddress(e.target.value)}
+                    placeholder="Jalan Pinang, 50088 KL"
+                  />
+                </label>
+                <label>
+                  City
+                  <input
+                    className="input"
+                    value={pubCity}
+                    onChange={(e) => setPubCity(e.target.value)}
+                    placeholder="Kuala Lumpur"
+                  />
+                </label>
+                <label>
+                  State
+                  <input
+                    className="input"
+                    value={pubState}
+                    onChange={(e) => setPubState(e.target.value)}
+                    placeholder="WP Kuala Lumpur"
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto 1fr 1fr', gap: '0.75rem', alignItems: 'end' }}>
+                <label>
+                  Latitude (GPS)
+                  <input
+                    className="input"
+                    type="number"
+                    step="any"
+                    value={pubLat}
+                    onChange={(e) => setPubLat(e.target.value)}
+                    placeholder="3.1579"
+                  />
+                </label>
+                <label>
+                  Longitude (GPS)
+                  <input
+                    className="input"
+                    type="number"
+                    step="any"
+                    value={pubLng}
+                    onChange={(e) => setPubLng(e.target.value)}
+                    placeholder="101.7116"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => {
+                    if (!navigator.geolocation) return;
+                    navigator.geolocation.getCurrentPosition((pos) => {
+                      setPubLat(String(Number(pos.coords.latitude.toFixed(5))));
+                      setPubLng(String(Number(pos.coords.longitude.toFixed(5))));
+                    });
+                  }}
+                >
+                  📍 Use my current GPS
+                </button>
+                <label>
+                  Time Control
+                  <input
+                    className="input"
+                    value={pubTimeControl}
+                    onChange={(e) => setPubTimeControl(e.target.value)}
+                    placeholder="15m + 10s Rapid"
+                  />
+                </label>
+                <label>
+                  Entry Fee (MYR)
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={pubEntryFeeMyr}
+                    onChange={(e) => setPubEntryFeeMyr(e.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <label>
+                  Event Description / Notes
+                  <textarea
+                    className="input"
+                    rows={2}
+                    value={pubDescription}
+                    onChange={(e) => setPubDescription(e.target.value)}
+                    placeholder="Schedule, check-in time, prizes, and contact info…"
+                  />
+                </label>
+                <label>
+                  Payment Instructions (DuitNow / Bank Transfer)
+                  <textarea
+                    className="input"
+                    rows={2}
+                    value={pubPaymentInstructions}
+                    onChange={(e) => setPubPaymentInstructions(e.target.value)}
+                    placeholder="Transfer to Maybank 5140-xxxx-xxxx and upload receipt screenshot."
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <span className="admin-metric-label">Payment QR Image (optional):</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        if (typeof reader.result === 'string') {
+                          setPubPaymentQrUrl(reader.result);
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                  {pubPaymentQrUrl && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => setPubPaymentQrUrl(null)}
+                    >
+                      Clear QR
+                    </button>
+                  )}
+                </label>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={pubSaving}
+                  onClick={() => void handleSavePublishing()}
+                >
+                  {pubSaving ? 'Saving…' : 'Save Registration & Discovery Settings'}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* 2. Incoming Registrations & Receipt Approval Queue */}
+          <section className="admin-panel">
+            <div className="player-section-head">
+              <div>
+                <h3>Incoming Registrations &amp; Receipt Approval Queue ({registrations.length})</h3>
+                <p className="admin-metric-detail">
+                  Approving a registration automatically adds the player to your tournament roster,
+                  links their global player profile, and assigns their category.
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => void loadRegistrations()}
+                >
+                  Refresh Queue
+                </button>
+                {registrations.some((r) => r.status === 'pending') && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    disabled={regBusyId !== null}
+                    onClick={() => void handleApproveAllPending()}
+                  >
+                    {regBusyId === '__batch__'
+                      ? 'Approving…'
+                      : `Approve All Pending (${registrations.filter((r) => r.status === 'pending').length})`}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="player-chips" style={{ marginBottom: '0.85rem' }}>
+              {(['all', 'pending', 'approved', 'waitlisted', 'rejected'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  className={`player-profile-chip ${regFilter === st ? 'active' : ''}`}
+                  onClick={() => setRegFilter(st)}
+                >
+                  {st.toUpperCase()} (
+                  {st === 'all'
+                    ? registrations.length
+                    : registrations.filter((r) => r.status === st).length}
+                  )
+                </button>
+              ))}
+            </div>
+
+            {registrations.length === 0 ? (
+              <div className="empty-state" style={{ padding: '2rem 1rem' }}>
+                <p className="form-hint">
+                  No online registrations received yet. Enable{' '}
+                  <strong>Accept Online Registrations</strong> above and share your registration
+                  link with players &amp; parents.
+                </p>
+              </div>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Player</th>
+                      <th>FIDE / Rating</th>
+                      <th>School / Club</th>
+                      <th>Category</th>
+                      <th>Payment / Receipt</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {registrations
+                      .filter((r) => regFilter === 'all' || r.status === regFilter)
+                      .map((r) => {
+                        const snap = r.playerSnapshot;
+                        const catName =
+                          r.selectedCategoryId && categoryNames[r.selectedCategoryId]
+                            ? categoryNames[r.selectedCategoryId]
+                            : 'Auto';
+                        return (
+                          <tr key={r.id}>
+                            <td>
+                              <strong>{snap.name}</strong>
+                              <div className="admin-metric-detail">
+                                {[
+                                  snap.yearOfBirth ? `Born ${snap.yearOfBirth}` : null,
+                                  snap.gender,
+                                  snap.email,
+                                  snap.phone,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </div>
+                            </td>
+                            <td>
+                              {snap.rating ?? 'Unr.'}
+                              {snap.fideId ? (
+                                <div className="admin-metric-detail">ID {snap.fideId}</div>
+                              ) : null}
+                            </td>
+                            <td>{snap.school || snap.club || snap.city || '—'}</td>
+                            <td>{catName}</td>
+                            <td>
+                              <span className="player-chip-badge">
+                                {r.paymentStatus.replace('_', ' ')}
+                              </span>
+                              {r.receiptDataUrl && (
+                                <div style={{ marginTop: '0.25rem' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-ghost"
+                                    onClick={() => setReceiptModalUrl(r.receiptDataUrl ?? null)}
+                                  >
+                                    View Receipt
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <span
+                                className={`org-status-badge ${
+                                  r.status === 'approved'
+                                    ? 'is-verified'
+                                    : r.status === 'rejected'
+                                      ? 'is-rejected'
+                                      : 'is-pending_review'
+                                }`}
+                              >
+                                {r.status}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="player-row-actions">
+                                {r.status !== 'approved' && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-primary"
+                                    disabled={regBusyId !== null}
+                                    onClick={() => void handleReviewRegistration(r.id, 'approve')}
+                                  >
+                                    Approve into Roster
+                                  </button>
+                                )}
+                                {r.status !== 'waitlisted' && r.status !== 'approved' && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline"
+                                    disabled={regBusyId !== null}
+                                    onClick={() => void handleReviewRegistration(r.id, 'waitlist')}
+                                  >
+                                    Waitlist
+                                  </button>
+                                )}
+                                {r.status !== 'rejected' && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-ghost"
+                                    disabled={regBusyId !== null}
+                                    onClick={() => void handleReviewRegistration(r.id, 'reject')}
+                                  >
+                                    Reject
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {receiptModalUrl && (
+            <div className="modal-backdrop" onClick={() => setReceiptModalUrl(null)}>
+              <div
+                className="modal-card"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Payment receipt"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="modal-header">
+                  <h2>Payment Receipt</h2>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => setReceiptModalUrl(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div style={{ textAlign: 'center', marginTop: '0.75rem' }}>
+                  {receiptModalUrl.startsWith('data:application/pdf') ? (
+                    <a
+                      href={receiptModalUrl}
+                      download="payment-receipt.pdf"
+                      className="btn btn-primary"
+                    >
+                      Download PDF Receipt
+                    </a>
+                  ) : (
+                    <img
+                      src={receiptModalUrl}
+                      alt="Uploaded payment receipt"
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '70vh',
+                        borderRadius: '8px',
+                        border: '1px solid var(--color-border)',
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}

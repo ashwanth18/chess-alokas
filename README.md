@@ -13,6 +13,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - **Offline-first** — Dexie (IndexedDB) local store; **Sync online** push/pull (last-write-wins)
 - **Auth & Multi-Tenant B2B Organizations** — email/password, OTP/magic link, Google & GitHub; role-based signup (`Player / Parent` vs `Organizer / Academy`), Sandbox Trial quotas (1 tournament / 24 players), and Platform Admin B2B verification
 - **Global Player & Family Portal (`/player`)** — manage `Self` + `Child / Student` sub-profiles under one parent account, claim past tournaments, Live Matchday Companion card (board, color, opponent, score), career W/D/L stats, and Digital Certificate Vault
+- **GPS Tournament Discovery & 1-Click Registration (`/discover`, `/register/:slug`)** — Haversine GPS nearby event search, shareable registration forms with 1-click family profile autofill, DuitNow/QR payment receipt upload, and organizer approval queue that auto-populates the tournament roster
 - **Certificates** — PDF designer, print pack, Issue digital → Supabase Storage (or local disk)
 - **Desktop app** — Electron shell; production builds use cloud API (no user secrets)
 - **Simulator** — generate players, auto-play rounds, visualize boards/standings/diagnostics
@@ -25,6 +26,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - Self-hosted Supabase migration guide: [`deploy/SUPABASE_MIGRATION.md`](deploy/SUPABASE_MIGRATION.md)
 - Engineering & agent rules handbook: [`docs/ENGINEERING_AND_AGENT_RULES.md`](docs/ENGINEERING_AND_AGENT_RULES.md)
 - Organizations & Player Portal feature guide: [`docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md`](docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md)
+- Registration & GPS Discovery feature guide: [`docs/FEATURES_REGISTRATION_AND_DISCOVERY.md`](docs/FEATURES_REGISTRATION_AND_DISCOVERY.md)
 - Agent handoff: [`docs/AGENT_HANDOFF.md`](docs/AGENT_HANDOFF.md)
 
 ## Monorepo
@@ -155,6 +157,10 @@ pnpm --filter @chess-alokas/pairing-engine test
 | GET/POST/PATCH/DELETE | `/player/profiles` | Manage global `Self` + `Child / Student` player profiles |
 | POST | `/player/profiles/:id/claim` | Claim past/live tournament participations |
 | GET | `/player/dashboard` | Player career stats, live matchday card, and certificate vault |
+| GET | `/public/events` | Public tournament discovery feed with GPS Haversine distance & search |
+| GET/POST | `/public/events/:slugOrId`, `/public/events/:slugOrId/register` | Public event details & 1-click player/family registration with receipt upload |
+| PATCH | `/tournaments/:id/publishing` | Configure registration slug, GPS venue, entry fee, payment QR & global discovery |
+| GET/POST | `/tournaments/:id/registrations`, `/tournaments/:id/registrations/:regId/review` | Organizer registration queue & 1-click roster approval |
 
 ## Typical flow
 

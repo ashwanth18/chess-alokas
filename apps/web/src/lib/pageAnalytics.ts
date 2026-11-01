@@ -14,7 +14,9 @@ export type AnalyticsRouteKey =
   | 'landing'
   | 'login'
   | 'signup'
-  | 'player_portal';
+  | 'player_portal'
+  | 'discover'
+  | 'event_register';
 
 type TrackArgs = {
   routeKey: AnalyticsRouteKey;

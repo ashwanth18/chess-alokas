@@ -28,6 +28,8 @@ import AccountPage from './pages/AccountPage';
 import SettingsPage from './pages/SettingsPage';
 import AdminPage from './pages/AdminPage';
 import PlayerPortalPage from './pages/PlayerPortalPage';
+import DiscoverEventsPage from './pages/DiscoverEventsPage';
+import EventRegistrationPage from './pages/EventRegistrationPage';
 import LandingPage from './pages/LandingPage';
 import TableScoringPage from './pages/TableScoringPage';
 import LivePage from './pages/LivePage';
@@ -169,6 +171,8 @@ function AppRoot() {
           <Route path="/t/:slug" element={<TableScoringPage />} />
           <Route path="/live/:token" element={<LivePage />} />
           <Route path="/live/:token/p/:playerId" element={<LivePage />} />
+          <Route path="/discover" element={<DiscoverEventsPage />} />
+          <Route path="/register/:slug" element={<EventRegistrationPage />} />
           <Route
             element={
               <RequireAuth>

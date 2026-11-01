@@ -245,6 +245,9 @@ export default function PlayerPortalPage() {
           </p>
         </div>
         <div className="page-header-actions">
+          <Link to="/discover" className="btn btn-outline">
+            📍 Explore Events Near Me
+          </Link>
           {selectedProfile && (
             <button
               type="button"

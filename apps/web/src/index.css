@@ -6073,3 +6073,121 @@ button.live-duel-side:not(:disabled):hover {
     font-size: 0.74rem;
   }
 }
+
+/* ─── Phase 2: Tournament Discovery (/discover) & Registration (/register/:slug) ─ */
+.discover-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.discover-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.discover-search-input {
+  flex: 1 1 260px;
+}
+.discover-radius-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.discover-events-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.15rem;
+}
+.discover-event-card {
+  padding: 1.25rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-warm);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.discover-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.discover-org-label {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wood-300);
+  margin-bottom: 0.2rem;
+}
+.discover-event-title {
+  font-size: 1.2rem;
+  color: var(--wood-100);
+  margin: 0;
+}
+.discover-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.discover-distance-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  background: rgba(76, 175, 130, 0.2);
+  color: var(--green-100);
+}
+.discover-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.22);
+}
+.discover-meta-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.discover-venue-line {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink-500);
+}
+.discover-category-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.discover-card-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+.event-hero-card {
+  margin-bottom: 1.25rem;
+}
+.payment-box {
+  padding: 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border-warm);
+  background: rgba(196, 165, 116, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.payment-box h4 {
+  margin: 0;
+  color: var(--wood-100);
+}
+

@@ -224,6 +224,45 @@ export const TournamentSchema = z.object({
   certSerialPad: z.number().int().min(1).max(8).nullable().optional(),
   /** Next sequence number to allocate (server-authoritative). */
   certSerialNext: z.number().int().positive().optional(),
+  /** Public discovery & registration fields (Phase 2). */
+  publicSlug: z.string().nullable().optional(),
+  isPublishedGlobal: z.boolean().optional(),
+  registrationOpen: z.boolean().optional(),
+  registrationDeadline: z.string().datetime().nullable().optional(),
+  maxParticipants: z.number().int().positive().nullable().optional(),
+  venueName: z.string().nullable().optional(),
+  venueAddress: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  descriptionMd: z.string().nullable().optional(),
+  rulesMd: z.string().nullable().optional(),
+  timeControl: z.string().nullable().optional(),
+  entryFeeCents: z.number().int().nonnegative().optional(),
+  currency: z.string().optional(),
+  paymentInstructions: z.string().nullable().optional(),
+  paymentQrUrl: z.string().nullable().optional(),
+  registrationFormSchema: z
+    .object({
+      collectSchool: z.boolean().default(true),
+      collectFideId: z.boolean().default(true),
+      collectPhone: z.boolean().default(true),
+      customQuestions: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            label: z.string().min(1),
+            type: z.enum(['text', 'select']).default('text'),
+            required: z.boolean().default(false),
+            options: z.array(z.string()).optional(),
+          }),
+        )
+        .default([]),
+    })
+    .nullable()
+    .optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
   clientId: z.string().optional(),
@@ -668,3 +707,144 @@ export interface PlayerCareerDashboard {
   tournaments: PlayerTournamentHistoryItem[];
   certificates: PlayerCertificateItem[];
 }
+
+// ---------------------------------------------------------------------------
+// Tournament Discovery, GPS Nearby Search & Shareable Registrations (Phase 2)
+// ---------------------------------------------------------------------------
+
+export const RegistrationCustomQuestionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  type: z.enum(['text', 'select']).default('text'),
+  required: z.boolean().default(false),
+  options: z.array(z.string()).optional(),
+});
+export type RegistrationCustomQuestion = z.infer<typeof RegistrationCustomQuestionSchema>;
+
+export const RegistrationFormConfigSchema = z.object({
+  collectSchool: z.boolean().default(true),
+  collectFideId: z.boolean().default(true),
+  collectPhone: z.boolean().default(true),
+  customQuestions: z.array(RegistrationCustomQuestionSchema).default([]),
+});
+export type RegistrationFormConfig = z.infer<typeof RegistrationFormConfigSchema>;
+
+export const DEFAULT_REGISTRATION_FORM_CONFIG: RegistrationFormConfig = {
+  collectSchool: true,
+  collectFideId: true,
+  collectPhone: true,
+  customQuestions: [],
+};
+
+export const RegistrationPaymentStatusSchema = z.enum([
+  'not_required',
+  'pending_receipt',
+  'submitted',
+  'verified',
+  'refunded',
+]);
+export type RegistrationPaymentStatus = z.infer<typeof RegistrationPaymentStatusSchema>;
+
+export const RegistrationStatusSchema = z.enum([
+  'pending',
+  'approved',
+  'waitlisted',
+  'rejected',
+  'cancelled',
+]);
+export type RegistrationStatus = z.infer<typeof RegistrationStatusSchema>;
+
+export const RegistrationPlayerSnapshotSchema = z.object({
+  name: z.string().min(1),
+  age: z.number().int().nonnegative().optional(),
+  yearOfBirth: z.number().int().nullable().optional(),
+  gender: z.string().nullable().optional(),
+  fideId: z.number().int().positive().nullable().optional(),
+  rating: z.number().int().nullable().optional(),
+  school: z.string().nullable().optional(),
+  club: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+});
+export type RegistrationPlayerSnapshot = z.infer<typeof RegistrationPlayerSnapshotSchema>;
+
+export const TournamentRegistrationSchema = z.object({
+  id: z.string().uuid(),
+  tournamentId: z.string().uuid(),
+  playerProfileId: z.string().uuid().nullable().optional(),
+  submittedByUserId: z.string().uuid().nullable().optional(),
+  selectedCategoryId: z.string().uuid().nullable().optional(),
+  playerSnapshot: RegistrationPlayerSnapshotSchema,
+  customAnswers: z.record(z.unknown()).default({}),
+  paymentStatus: RegistrationPaymentStatusSchema.default('not_required'),
+  receiptDataUrl: z.string().nullable().optional(),
+  amountCents: z.number().int().nonnegative().default(0),
+  status: RegistrationStatusSchema.default('pending'),
+  reviewerNote: z.string().nullable().optional(),
+  reviewedAt: z.string().datetime().nullable().optional(),
+  participantId: z.string().uuid().nullable().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type TournamentRegistration = z.infer<typeof TournamentRegistrationSchema>;
+
+export const PublicEventSummarySchema = z.object({
+  id: z.string().uuid(),
+  publicSlug: z.string().nullable().optional(),
+  name: z.string().min(1),
+  date: z.string().nullable().optional(),
+  style: TournamentStyleSchema,
+  rounds: z.number().int().positive(),
+  status: TournamentStatusSchema,
+  registrationOpen: z.boolean().default(false),
+  registrationDeadline: z.string().datetime().nullable().optional(),
+  maxParticipants: z.number().int().positive().nullable().optional(),
+  registeredCount: z.number().int().nonnegative().default(0),
+  venueName: z.string().nullable().optional(),
+  venueAddress: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  distanceKm: z.number().nullable().optional(),
+  timeControl: z.string().nullable().optional(),
+  entryFeeCents: z.number().int().nonnegative().default(0),
+  currency: z.string().default('MYR'),
+  descriptionMd: z.string().nullable().optional(),
+  organizationName: z.string().nullable().optional(),
+  categories: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+      }),
+    )
+    .default([]),
+});
+export type PublicEventSummary = z.infer<typeof PublicEventSummarySchema>;
+
+/** Great-circle Haversine distance between two WGS84 coordinates in kilometers. */
+export function haversineDistanceKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const R = 6371; // Earth mean radius in km
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+  return Math.round(R * c * 10) / 10;
+}
+

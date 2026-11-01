@@ -36,6 +36,25 @@ export interface LocalTournament {
   certSerialPrefix?: string | null;
   certSerialPad?: number | null;
   certSerialNext?: number;
+  publicSlug?: string | null;
+  isPublishedGlobal?: boolean;
+  registrationOpen?: boolean;
+  registrationDeadline?: string | null;
+  maxParticipants?: number | null;
+  venueName?: string | null;
+  venueAddress?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  descriptionMd?: string | null;
+  rulesMd?: string | null;
+  timeControl?: string | null;
+  entryFeeCents?: number;
+  currency?: string;
+  paymentInstructions?: string | null;
+  paymentQrUrl?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   clientId?: string;
@@ -88,6 +107,7 @@ export interface LocalParticipant {
   excludedRounds?: number[];
   /** If set, excluded from this round onward. */
   withdrawnFromRound?: number | null;
+  playerProfileId?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   dirty: 1 | 0;

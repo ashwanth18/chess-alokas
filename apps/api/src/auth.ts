@@ -138,6 +138,32 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   request.userId = data.user.id;
 }
 
+export async function optionalAuth(request: FastifyRequest): Promise<void> {
+  if (!authEnabled()) {
+    const testUserId = request.headers['x-test-user-id'];
+    if (typeof testUserId === 'string' && testUserId.trim()) {
+      request.userId = testUserId.trim();
+    }
+    return;
+  }
+
+  const header = request.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return;
+  const token = header.slice('Bearer '.length).trim();
+  if (!token) return;
+  const client = getAuthClient();
+  if (!client) return;
+  try {
+    const { data, error } = await client.auth.getUser(token);
+    if (!error && data.user) {
+      request.user = data.user;
+      request.userId = data.user.id;
+    }
+  } catch {
+    /* ignore invalid optional token */
+  }
+}
+
 export interface AuthSessionRow {
   id: string;
   createdAt: string;

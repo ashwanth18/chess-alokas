@@ -12,6 +12,10 @@ import type {
   PlayerProfile,
   PlayerRelationship,
   PlayerCareerDashboard,
+  PublicEventSummary,
+  RegistrationFormConfig,
+  TournamentRegistration,
+  FilterGroup,
 } from '@chess-alokas/shared';
 import { supabase } from '../lib/supabase';
 
@@ -894,3 +898,177 @@ export async function apiDownloadCertificatePdf(
     };
   }
 }
+
+// ── Public Event Discovery & Registrations (Phase 2) ─────────────────────────
+
+export type PublicEventDetailResponse = {
+  event: {
+    id: string;
+    publicSlug: string | null;
+    name: string;
+    date: string | null;
+    style: string;
+    rounds: number;
+    status: string;
+    registrationOpen: boolean;
+    registrationDeadline: string | null;
+    maxParticipants: number | null;
+    registeredCount: number;
+    venueName: string | null;
+    venueAddress: string | null;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    descriptionMd: string | null;
+    rulesMd: string | null;
+    timeControl: string | null;
+    entryFeeCents: number;
+    currency: string;
+    paymentInstructions: string | null;
+    paymentQrUrl: string | null;
+    registrationFormSchema: RegistrationFormConfig;
+    organizationName: string | null;
+    publicToken: string | null;
+  };
+  categories: Array<{
+    id: string;
+    name: string;
+    filter: FilterGroup;
+    sortOrder: number;
+    prizePlaces: number | null;
+  }>;
+  participants: Array<{
+    id: string;
+    name: string;
+    rating: number | null;
+    fideId: number | null;
+    school: string | null;
+    club: string | null;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    yearOfBirth: number | null;
+    categoryIds: string[];
+  }>;
+};
+
+export async function apiListPublicEvents(params?: {
+  lat?: number | null;
+  lng?: number | null;
+  radiusKm?: number | null;
+  search?: string | null;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.lat != null && Number.isFinite(params.lat)) qs.set('lat', String(params.lat));
+  if (params?.lng != null && Number.isFinite(params.lng)) qs.set('lng', String(params.lng));
+  if (params?.radiusKm != null && Number.isFinite(params.radiusKm) && params.radiusKm > 0) {
+    qs.set('radiusKm', String(params.radiusKm));
+  }
+  if (params?.search?.trim()) qs.set('search', params.search.trim());
+  const query = qs.toString();
+  return req<{ events: PublicEventSummary[] }>(`/public/events${query ? `?${query}` : ''}`);
+}
+
+export async function apiGetPublicEvent(slugOrId: string) {
+  return req<PublicEventDetailResponse>(`/public/events/${encodeURIComponent(slugOrId)}`);
+}
+
+export async function apiSubmitEventRegistration(
+  slugOrId: string,
+  body: {
+    playerProfileId?: string | null;
+    selectedCategoryId?: string | null;
+    name?: string;
+    age?: number | null;
+    yearOfBirth?: number | null;
+    gender?: string | null;
+    fideId?: number | null;
+    rating?: number | null;
+    school?: string | null;
+    club?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    customAnswers?: Record<string, unknown>;
+    receiptDataUrl?: string | null;
+  },
+) {
+  return req<{ registration: TournamentRegistration }>(
+    `/public/events/${encodeURIComponent(slugOrId)}/register`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: 20_000,
+    },
+  );
+}
+
+export async function apiUpdateTournamentPublishing(
+  tournamentId: string,
+  body: {
+    publicSlug?: string | null;
+    isPublishedGlobal?: boolean;
+    registrationOpen?: boolean;
+    registrationDeadline?: string | null;
+    maxParticipants?: number | null;
+    venueName?: string | null;
+    venueAddress?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    descriptionMd?: string | null;
+    rulesMd?: string | null;
+    timeControl?: string | null;
+    entryFeeCents?: number;
+    currency?: string;
+    paymentInstructions?: string | null;
+    paymentQrUrl?: string | null;
+    registrationFormSchema?: RegistrationFormConfig | null;
+  },
+) {
+  return req<{ tournament: Tournament }>(
+    `/tournaments/${encodeURIComponent(tournamentId)}/publishing`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function apiListTournamentRegistrations(tournamentId: string) {
+  return req<{ registrations: TournamentRegistration[] }>(
+    `/tournaments/${encodeURIComponent(tournamentId)}/registrations`,
+  );
+}
+
+export async function apiReviewTournamentRegistration(
+  tournamentId: string,
+  regId: string,
+  body: {
+    action: 'approve' | 'reject' | 'waitlist';
+    reviewerNote?: string | null;
+    categoryIds?: string[];
+  },
+) {
+  return req<{
+    registration: TournamentRegistration;
+    participant: Participant | null;
+  }>(
+    `/tournaments/${encodeURIComponent(tournamentId)}/registrations/${encodeURIComponent(regId)}/review`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function apiListPlayerRegistrations() {
+  return req<{ registrations: TournamentRegistration[] }>('/player/registrations');
+}
+
