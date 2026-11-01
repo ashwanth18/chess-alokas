@@ -174,7 +174,8 @@ const SECTIONS: LegalSection[] = [
         <p>
           Near me on the Find a tournament page asks your browser for your location, and only if you
           press it. The coordinates go to our server to sort events by distance. We don&apos;t save
-          them in the database, but they can appear in server logs. Organizers can publish a venue&apos;s
+          them in the database, but they can appear in server logs. The mobile app can do the same with
+          your approximate location, if you allow it. Organizers can publish a venue&apos;s
           address and coordinates.
         </p>
         <h3>What you must give us</h3>
@@ -427,7 +428,8 @@ const SECTIONS: LegalSection[] = [
         </p>
         <p>
           <strong>Mobile app.</strong> It keeps your session in the phone&apos;s secure storage, and can
-          keep registration drafts and a chosen receipt on the phone until they are sent or deleted.
+          keep registration drafts, a chosen receipt and an offline copy of match information on the
+          phone. It has no setting to delete your account yet.
         </p>
         <p>
           <strong>Cookies.</strong> We don&apos;t use advertising cookies. Sign-in and the features above
