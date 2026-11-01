@@ -11,7 +11,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - **Tournament styles** — Swiss implemented; Round Robin selectable as “coming soon”
 - **CSV / Excel import** — map columns, auto-assign categories
 - **Offline-first** — Dexie (IndexedDB) local store; **Sync online** push/pull (last-write-wins)
-- **Auth & Multi-Tenant B2B Organizations** — email/password, OTP/magic link, Google & GitHub; role-based signup (`Player / Parent` vs `Organizer / Academy`), Sandbox Trial quotas (1 tournament / 24 players), and Platform Admin B2B verification
+- **Auth & Multi-Tenant B2B Organizations** — email/password and OTP/magic link; role-based signup (`Player / Parent` vs `Organizer / Academy`), Sandbox Trial quotas (1 tournament / 24 players), and Platform Admin B2B verification
 - **Global Player & Family Portal (`/player`)** — manage `Self` + `Child / Student` sub-profiles under one parent account, claim past tournaments, Live Matchday Companion card (board, color, opponent, score), career W/D/L stats, and Digital Certificate Vault
 - **GPS Tournament Discovery & 1-Click Registration (`/discover`, `/register/:slug`)** — Haversine GPS nearby event search, shareable registration forms with 1-click family profile autofill, DuitNow/QR payment receipt upload, and organizer approval queue that auto-populates the tournament roster
 - **Floor Arbiter Zone Grid, Chief Arbiter Alerts & Offline Queue (`/t/:slug`)** — score an entire zone of tables (`1–15`, `16–30`, `31+`, `Pending Only`) from one round PIN unlock, raise one-tap `"Call Chief Arbiter"` alerts to the Director Desk, and queue floor results offline when venue Wi-Fi drops
@@ -158,6 +158,9 @@ pnpm --filter @chess-alokas/pairing-engine test
 | GET | `/certificates/:issueId/download` | Download issued PDF (organizer or linked player) |
 | GET/POST | `/organizations` | List / create B2B organization (Sandbox Trial) |
 | PATCH | `/organizations/:id` | Update organization contact & payment info |
+| GET/PATCH/DELETE | `/organizations/:id/members` | Team members and roles |
+| GET/POST/DELETE | `/organizations/:id/invites` | Staff invites (owner/admin) |
+| POST | `/public/invites/lookup`, `/invites/accept` | Open and accept an invite link |
 | GET/PATCH | `/admin/organizations` | Platform admin B2B organization review & tier upgrades |
 | GET/POST/PATCH/DELETE | `/player/profiles` | Manage global `Self` + `Child / Student` player profiles |
 | POST | `/player/profiles/:id/claim` | Link participations entered under the account's confirmed email |

@@ -30,6 +30,7 @@ import { MemoryStore, PostgresStore, type Store } from './db.js';
 import { certificatesPlugin } from './routes/certificates.js';
 import { floorPlugin } from './routes/floor.js';
 import { organizationsPlugin } from './routes/organizations.js';
+import { hashInviteToken, teamPlugin } from './routes/team.js';
 import { pairingPlugin } from './routes/pairing.js';
 import { publicLivePlugin } from './routes/publicLive.js';
 import { playerProfilesPlugin } from './routes/playerProfiles.js';
@@ -69,6 +70,8 @@ interface Backend {
   addUser(id: string): Promise<void>;
   addMember(orgId: string, userId: string, role: string): Promise<void>;
   auditEvents(gameId: string): Promise<Array<{ result: string; note: string | null }>>;
+  /** Makes a tournament look last written a day ago, so it sits behind a recent sync cursor. */
+  ageTournament(id: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -76,6 +79,7 @@ async function memoryBackend(): Promise<Backend> {
   const store = new MemoryStore();
   const internals = store as unknown as {
     organizationMembers: Map<string, unknown>;
+    tournaments: { stamps: Map<string, string> };
     resultEvents: Array<{ gameId: string; result: string; note: string | null }>;
   };
   return {
@@ -91,6 +95,9 @@ async function memoryBackend(): Promise<Backend> {
       });
     },
     auditEvents: async (gameId) => internals.resultEvents.filter((e) => e.gameId === gameId),
+    ageTournament: async (id) => {
+      internals.tournaments.stamps.set(id, new Date(Date.now() - 86_400_000).toISOString());
+    },
     close: async () => undefined,
   };
 }
@@ -144,6 +151,12 @@ async function postgresBackend(): Promise<Backend> {
       sql<{ result: string; note: string | null }[]>`
         SELECT result, note FROM game_result_events WHERE game_id = ${gameId}
       `,
+    ageTournament: async (id) => {
+      // A trigger stamps server_updated_at on every write.
+      await sql`ALTER TABLE tournaments DISABLE TRIGGER USER`;
+      await sql`UPDATE tournaments SET server_updated_at = now() - interval '1 day' WHERE id = ${id}`;
+      await sql`ALTER TABLE tournaments ENABLE TRIGGER USER`;
+    },
     close: async () => {
       await sql.end({ timeout: 1 });
       await server.stop();
@@ -187,6 +200,7 @@ describe.each([
     await app.register(publicLivePlugin, { store });
     await app.register(floorPlugin, { store });
     await app.register(organizationsPlugin, { store });
+    await app.register(teamPlugin, { store });
     await app.register(playerProfilesPlugin, { store });
     await app.register(registrationsPlugin, { store });
   }, 180_000);
@@ -352,6 +366,394 @@ describe.each([
     });
     return updated!;
   }
+
+  describe('team: invites and members', () => {
+    const emailOf = (user: string) => `${user}@example.com`;
+    const as = (user: string) => ({ 'x-test-user-email': emailOf(user) });
+    const freshEmail = () => `${crypto.randomUUID()}@example.com`;
+    const since = (offsetMs: number) => `/sync/pull?since=${encodeURIComponent(iso(offsetMs))}`;
+
+    async function invite(actor: string, orgId: string, email: string, role: string) {
+      return call(actor, 'POST', `/organizations/${orgId}/invites`, { email, role });
+    }
+
+    const tokenOf = (inviteUrl: string) => inviteUrl.slice(inviteUrl.lastIndexOf('/') + 1);
+
+    async function join(actor: string, orgId: string, role: string): Promise<string> {
+      const user = await newUser();
+      const sent = await invite(actor, orgId, emailOf(user), role);
+      expect(sent.status).toBe(201);
+      const accepted = await call(
+        user,
+        'POST',
+        '/invites/accept',
+        { token: tokenOf(sent.body.inviteUrl) },
+        as(user),
+      );
+      expect(accepted.status).toBe(200);
+      return user;
+    }
+
+    async function orgWithOwner() {
+      const owner = await newUser();
+      return { owner, org: await verifiedOrg(owner) };
+    }
+
+    async function orgTournament(user: string, orgId: string): Promise<string> {
+      const created = await call(user, 'POST', '/tournaments', {
+        name: 'Club Open',
+        organizationId: orgId,
+      });
+      expect(created.status).toBe(201);
+      return created.body.id;
+    }
+
+    it('takes someone from invite to member, once, and stores only a hash of the token', async () => {
+      const { owner, org } = await orgWithOwner();
+      const user = await newUser();
+      const sent = await invite(owner, org.id, emailOf(user).toUpperCase(), 'director');
+      expect(sent.status).toBe(201);
+      expect(sent.body.emailStatus).toBe('not_configured');
+      expect(sent.body.invite.email).toBe(emailOf(user));
+      expect(JSON.stringify(sent.body.invite)).not.toMatch(/tokenHash|token_hash/);
+      const token = tokenOf(sent.body.inviteUrl);
+      expect(token.length).toBeGreaterThanOrEqual(40);
+      expect(await store.findOrganizationInviteByTokenHash(token)).toBeNull();
+      expect(
+        (await store.findOrganizationInviteByTokenHash(hashInviteToken(token)))?.invite.id,
+      ).toBe(sent.body.invite.id);
+
+      const listed = await call(owner, 'GET', `/organizations/${org.id}/invites`);
+      expect(listed.body.invites).toHaveLength(1);
+      expect(listed.body.invites[0].status).toBe('pending');
+
+      const accepted = await call(user, 'POST', '/invites/accept', { token }, as(user));
+      expect(accepted.status).toBe(200);
+      expect(accepted.body).toMatchObject({ ok: true, role: 'director', alreadyMember: false });
+
+      const members = await call(owner, 'GET', `/organizations/${org.id}/members`);
+      expect(members.body.yourRole).toBe('owner');
+      expect(members.body.members.find((m: { userId: string }) => m.userId === user).email).toBe(
+        emailOf(user),
+      );
+      expect((await call(owner, 'GET', `/organizations/${org.id}/invites`)).body.invites).toEqual([]);
+
+      const again = await call(user, 'POST', '/invites/accept', { token }, as(user));
+      expect(again.status).toBe(410);
+      expect(again.body.code).toBe('used');
+    });
+
+    it('the public lookup masks the address and says how the viewer stands', async () => {
+      const { owner, org } = await orgWithOwner();
+      const user = await newUser();
+      const sent = await invite(owner, org.id, emailOf(user), 'arbiter');
+      const token = tokenOf(sent.body.inviteUrl);
+      const lookup = (who: string | null, headers: Record<string, string> = {}) =>
+        call(who, 'POST', '/public/invites/lookup', { token }, headers);
+
+      const anon = await lookup(null);
+      expect(anon.status).toBe(200);
+      expect(anon.body).toMatchObject({
+        status: 'pending',
+        organizationName: org.name,
+        role: 'arbiter',
+        viewer: 'signed_out',
+      });
+      expect(JSON.stringify(anon.body)).not.toContain(user);
+      expect(JSON.stringify(anon.body)).not.toMatch(/organizationId|invitedBy/);
+      expect((await lookup(user)).body.viewer).toBe('unconfirmed');
+      expect((await lookup(user, as(user))).body.viewer).toBe('match');
+      const other = await newUser();
+      expect((await lookup(other, as(other))).body.viewer).toBe('wrong_email');
+      const missing = await call(null, 'POST', '/public/invites/lookup', { token: 'x'.repeat(43) });
+      expect(missing.status).toBe(404);
+    });
+
+    it('refuses a different or unconfirmed address, and leaves the invite usable', async () => {
+      const { owner, org } = await orgWithOwner();
+      const user = await newUser();
+      const other = await newUser();
+      const sent = await invite(owner, org.id, emailOf(user), 'admin');
+      const token = tokenOf(sent.body.inviteUrl);
+
+      const wrong = await call(other, 'POST', '/invites/accept', { token }, as(other));
+      expect(wrong.status).toBe(403);
+      expect(wrong.body.code).toBe('wrong_email');
+      const unconfirmed = await call(user, 'POST', '/invites/accept', { token });
+      expect(unconfirmed.status).toBe(403);
+      expect(unconfirmed.body.code).toBe('email_unconfirmed');
+      expect(await store.getOrganizationMemberRole(org.id, other)).toBeNull();
+
+      expect((await call(user, 'POST', '/invites/accept', { token }, as(user))).status).toBe(200);
+    });
+
+    it('refuses expired and revoked invites, and an old link after a resend', async () => {
+      const { owner, org } = await orgWithOwner();
+      const user = await newUser();
+      const sent = await invite(owner, org.id, emailOf(user), 'director');
+      const oldToken = tokenOf(sent.body.inviteUrl);
+
+      const resent = await call(
+        owner,
+        'POST',
+        `/organizations/${org.id}/invites/${sent.body.invite.id}/resend`,
+        { sendEmail: false },
+      );
+      expect(resent.status).toBe(200);
+      expect(resent.body.emailStatus).toBe('skipped');
+      expect(tokenOf(resent.body.inviteUrl)).not.toBe(oldToken);
+      const dead = await call(user, 'POST', '/invites/accept', { token: oldToken }, as(user));
+      expect(dead.status).toBe(404);
+
+      const expiredToken = crypto.randomUUID() + crypto.randomUUID();
+      await store.rotateOrganizationInvite(
+        org.id,
+        sent.body.invite.id,
+        hashInviteToken(expiredToken),
+        iso(-HOUR),
+      );
+      const expired = await call(user, 'POST', '/invites/accept', { token: expiredToken }, as(user));
+      expect(expired.status).toBe(410);
+      expect(expired.body.code).toBe('expired');
+
+      // An expired invite doesn't block a new one for the same address.
+      const replacement = await invite(owner, org.id, emailOf(user), 'director');
+      expect(replacement.status).toBe(201);
+      const removed = await call(
+        owner,
+        'DELETE',
+        `/organizations/${org.id}/invites/${replacement.body.invite.id}`,
+      );
+      expect(removed.status).toBe(204);
+      const revoked = await call(
+        user,
+        'POST',
+        '/invites/accept',
+        { token: tokenOf(replacement.body.inviteUrl) },
+        as(user),
+      );
+      expect(revoked.status).toBe(410);
+      expect(revoked.body.code).toBe('revoked');
+    });
+
+    it('allows one open invite per address, and none for a member', async () => {
+      const { owner, org } = await orgWithOwner();
+      const email = freshEmail();
+      expect((await invite(owner, org.id, email, 'arbiter')).status).toBe(201);
+      expect((await invite(owner, org.id, email, 'admin')).status).toBe(409);
+      const member = await join(owner, org.id, 'arbiter');
+      expect((await invite(owner, org.id, emailOf(member), 'admin')).status).toBe(409);
+    });
+
+    it('an accepted invite does not change the role of an existing member', async () => {
+      const { owner, org } = await orgWithOwner();
+      const user = await newUser();
+      await backend.addMember(org.id, user, 'admin');
+      const sent = await invite(owner, org.id, emailOf(user), 'arbiter');
+      const res = await call(
+        user,
+        'POST',
+        '/invites/accept',
+        { token: tokenOf(sent.body.inviteUrl) },
+        as(user),
+      );
+      expect(res.body).toMatchObject({ role: 'admin', alreadyMember: true });
+      expect(await store.getOrganizationMemberRole(org.id, user)).toBe('admin');
+    });
+
+    it('lets only owners and admins manage the team, and never above their own role', async () => {
+      const { owner, org } = await orgWithOwner();
+      const admin = await join(owner, org.id, 'admin');
+      const director = await join(owner, org.id, 'director');
+      const arbiter = await join(owner, org.id, 'arbiter');
+      const members = `/organizations/${org.id}/members`;
+
+      expect((await invite(admin, org.id, freshEmail(), 'owner')).status).toBe(403);
+      expect((await invite(admin, org.id, freshEmail(), 'admin')).status).toBe(201);
+      expect((await invite(owner, org.id, freshEmail(), 'owner')).status).toBe(201);
+      for (const user of [director, arbiter]) {
+        expect((await invite(user, org.id, freshEmail(), 'arbiter')).status).toBe(403);
+        expect((await call(user, 'GET', `/organizations/${org.id}/invites`)).status).toBe(403);
+        expect((await call(user, 'GET', members)).status).toBe(200);
+        expect((await call(user, 'PATCH', `${members}/${arbiter}`, { role: 'owner' })).status).toBe(403);
+        expect((await call(user, 'DELETE', `${members}/${owner}`)).status).toBe(403);
+      }
+
+      expect((await call(admin, 'PATCH', `${members}/${director}`, { role: 'owner' })).status).toBe(403);
+      expect((await call(admin, 'PATCH', `${members}/${admin}`, { role: 'owner' })).status).toBe(403);
+      expect((await call(admin, 'PATCH', `${members}/${owner}`, { role: 'arbiter' })).status).toBe(403);
+      expect((await call(admin, 'DELETE', `${members}/${owner}`)).status).toBe(403);
+      expect((await call(admin, 'PATCH', `${members}/${director}`, { role: 'arbiter' })).status).toBe(200);
+      expect(await store.getOrganizationMemberRole(org.id, director)).toBe('arbiter');
+      expect((await call(admin, 'DELETE', `${members}/${director}`)).status).toBe(204);
+      expect(await store.getOrganizationMemberRole(org.id, director)).toBeNull();
+    });
+
+    it('an admin cannot resend or revoke an invite for an owner', async () => {
+      const { owner, org } = await orgWithOwner();
+      const admin = await join(owner, org.id, 'admin');
+      const sent = await invite(owner, org.id, freshEmail(), 'owner');
+      const path = `/organizations/${org.id}/invites/${sent.body.invite.id}`;
+      expect((await call(admin, 'POST', `${path}/resend`, {})).status).toBe(403);
+      expect((await call(admin, 'DELETE', path)).status).toBe(403);
+    });
+
+    it('keeps other organizations out', async () => {
+      const a = await orgWithOwner();
+      const b = await orgWithOwner();
+      const sent = await invite(a.owner, a.org.id, freshEmail(), 'director');
+      const inviteId = sent.body.invite.id;
+      const orgA = `/organizations/${a.org.id}`;
+
+      const attempts: Array<['GET' | 'POST' | 'PATCH' | 'DELETE', string, unknown?]> = [
+        ['GET', `${orgA}/members`],
+        ['GET', `${orgA}/invites`],
+        ['POST', `${orgA}/invites`, { email: freshEmail(), role: 'owner' }],
+        ['POST', `${orgA}/invites/${inviteId}/resend`, {}],
+        ['DELETE', `${orgA}/invites/${inviteId}`],
+        ['PATCH', `${orgA}/members/${a.owner}`, { role: 'arbiter' }],
+        ['DELETE', `${orgA}/members/${a.owner}`],
+        ['POST', `${orgA}/leave`],
+      ];
+      for (const [method, url, body] of attempts) {
+        const res = await call(b.owner, method, url, body);
+        expect(res.status, `${method} ${url}`).toBe(403);
+      }
+      // A's records through B's organization, where B's owner does have rights.
+      const orgB = `/organizations/${b.org.id}`;
+      expect((await call(b.owner, 'POST', `${orgB}/invites/${inviteId}/resend`, {})).status).toBe(404);
+      expect((await call(b.owner, 'DELETE', `${orgB}/invites/${inviteId}`)).status).toBe(404);
+      expect((await call(b.owner, 'DELETE', `${orgB}/members/${a.owner}`)).status).toBe(404);
+      expect((await call(a.owner, 'GET', '/organizations/not-a-uuid/members')).status).toBe(404);
+      expect((await store.listOrganizationInvites(a.org.id)).map((i) => i.id)).toContain(inviteId);
+      expect(await store.getOrganizationMemberRole(a.org.id, a.owner)).toBe('owner');
+    });
+
+    it('never leaves an organization without an owner', async () => {
+      const { owner, org } = await orgWithOwner();
+      const members = `/organizations/${org.id}/members`;
+      expect((await call(owner, 'POST', `/organizations/${org.id}/leave`)).status).toBe(409);
+      expect((await call(owner, 'DELETE', `${members}/${owner}`)).status).toBe(409);
+      expect((await call(owner, 'PATCH', `${members}/${owner}`, { role: 'admin' })).status).toBe(409);
+      expect(await store.getOrganizationMemberRole(org.id, owner)).toBe('owner');
+
+      const second = await join(owner, org.id, 'owner');
+      expect((await call(owner, 'POST', `/organizations/${org.id}/leave`)).status).toBe(204);
+      expect(await store.getOrganizationMemberRole(org.id, owner)).toBeNull();
+      expect((await call(second, 'POST', `/organizations/${org.id}/leave`)).status).toBe(409);
+    });
+
+    it('a director runs tournaments the organization already had', async () => {
+      const { owner, org } = await orgWithOwner();
+      const id = await orgTournament(owner, org.id);
+      const director = await join(owner, org.id, 'director');
+
+      expect((await call(director, 'GET', `/tournaments/${id}`)).status).toBe(200);
+      expect((await call(director, 'GET', `/tournaments/${id}/floor/tables`)).status).toBe(200);
+      const pushed = await push(director, [tournamentItem(id, { name: 'Renamed' }, iso())]);
+      expect(pushed.body.accepted).toBe(1);
+      expect((await store.getTournament(id))?.name).toBe('Renamed');
+      await orgTournament(director, org.id);
+    });
+
+    it('sync delivers older tournaments to someone who joined after their last sync', async () => {
+      const { owner, org } = await orgWithOwner();
+      const id = await orgTournament(owner, org.id);
+      await backend.ageTournament(id);
+
+      const director = await join(owner, org.id, 'director');
+      const pulled = await call(director, 'GET', since(-5 * 60_000));
+      expect(pulled.body.tournaments.map((t: { id: string }) => t.id)).toContain(id);
+    });
+
+    it('gives an arbiter floor duty and nothing else', async () => {
+      const { owner, org } = await orgWithOwner();
+      const id = await orgTournament(owner, org.id);
+      const prepared = await call(owner, 'POST', `/tournaments/${id}/floor/prepare`, {
+        tableCount: 2,
+        pinRound: 1,
+        rotatePin: false,
+      });
+      expect(prepared.status).toBe(200);
+      const arbiter = await join(owner, org.id, 'arbiter');
+
+      const tables = await call(arbiter, 'GET', `/tournaments/${id}/floor/tables`);
+      expect(tables.status).toBe(200);
+      expect(tables.body.tables).toHaveLength(2);
+      const pin = await call(arbiter, 'POST', `/tournaments/${id}/floor/rotate-pin`, { pinRound: 1 });
+      expect(pin.status).toBe(200);
+      expect(pin.body.arbiterPin).toBeTruthy();
+      expect((await call(arbiter, 'GET', `/tournaments/${id}/floor/alerts`)).status).toBe(200);
+      const listed = await call(arbiter, 'GET', '/tournaments');
+      expect(listed.body.map((t: { id: string }) => t.id)).toContain(id);
+
+      expect((await call(arbiter, 'GET', `/tournaments/${id}`)).status).toBe(403);
+      expect(
+        (
+          await call(arbiter, 'POST', `/tournaments/${id}/floor/prepare`, {
+            tableCount: 9,
+            pinRound: 1,
+          })
+        ).status,
+      ).toBe(403);
+      expect((await call(arbiter, 'POST', `/tournaments/${id}/rounds/1/pair`, {})).status).toBe(403);
+      expect((await call(arbiter, 'PATCH', `/tournaments/${id}`, { name: 'Nope' })).status).toBe(403);
+      const pushed = await push(arbiter, [tournamentItem(id, { name: 'Nope' }, iso())]);
+      expect(pushed.body.rejected[0].code).toBe('forbidden');
+      expect((await call(arbiter, 'GET', since(-HOUR))).body.tournaments).toEqual([]);
+      const certs = await call(arbiter, 'POST', `/tournaments/${id}/certificates/reserve-serials`, {
+        count: 1,
+      });
+      expect(certs.status).toBe(403);
+
+      const stranger = await newUser();
+      expect((await call(stranger, 'GET', `/tournaments/${id}/floor/tables`)).status).toBe(403);
+      expect(
+        (await call(stranger, 'POST', `/tournaments/${id}/floor/rotate-pin`, { pinRound: 1 })).status,
+      ).toBe(403);
+    });
+
+    it('takes away access through tournaments someone created when they leave or drop to arbiter', async () => {
+      const { owner, org } = await orgWithOwner();
+      const removed = await join(owner, org.id, 'director');
+      const demoted = await join(owner, org.id, 'director');
+      const removedEvent = await orgTournament(removed, org.id);
+      const demotedEvent = await orgTournament(demoted, org.id);
+      const members = `/organizations/${org.id}/members`;
+
+      expect((await call(owner, 'DELETE', `${members}/${removed}`)).status).toBe(204);
+      expect((await call(removed, 'GET', `/tournaments/${removedEvent}`)).status).toBe(403);
+      const late = await push(removed, [tournamentItem(removedEvent, { name: 'Late' }, iso())]);
+      expect(late.body.rejected[0].code).toBe('forbidden');
+      expect((await store.getTournament(removedEvent))?.ownerId).toBe(owner);
+      expect((await call(removed, 'GET', since(-HOUR))).body.tournaments).toEqual([]);
+
+      expect((await call(owner, 'PATCH', `${members}/${demoted}`, { role: 'arbiter' })).status).toBe(200);
+      expect((await call(demoted, 'GET', `/tournaments/${demotedEvent}`)).status).toBe(403);
+      expect((await store.getTournament(demotedEvent))?.ownerId).toBe(owner);
+      expect((await call(owner, 'GET', `/tournaments/${demotedEvent}`)).status).toBe(200);
+    });
+
+    it('a creator who leaves is not an owner any more', async () => {
+      const { owner: creator, org } = await orgWithOwner();
+      const heir = await join(creator, org.id, 'owner');
+      expect((await call(creator, 'POST', `/organizations/${org.id}/leave`)).status).toBe(204);
+      expect((await store.getOrganization(org.id))?.createdBy).toBe(heir);
+      expect(await store.isOrganizationMember(org.id, creator)).toBe(false);
+      expect((await store.listUserOrganizations(creator)).map((o) => o.id)).not.toContain(org.id);
+      expect((await call(creator, 'GET', `/organizations/${org.id}/members`)).status).toBe(403);
+    });
+
+    it('a new tournament goes to your own organization before one you were invited to', async () => {
+      const { org: club } = await orgWithOwner();
+      const person = await newUser();
+      await backend.addMember(club.id, person, 'director');
+      await tick();
+      const own = await verifiedOrg(person);
+      const created = await call(person, 'POST', '/tournaments', { name: 'Default org' });
+      expect(created.body.organizationId).toBe(own.id);
+    });
+  });
 
   describe('#1 organization membership', () => {
     it('refuses a tournament in an organization the caller does not manage', async () => {

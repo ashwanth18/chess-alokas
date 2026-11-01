@@ -86,6 +86,30 @@ Chess Alokas supports two complementary workspaces under a single unified Supaba
 
 ---
 
+## 4b. Team: roles and invites (`030`, `routes/team.ts`, `/team`, `/invite/:token`)
+
+| | Owner | Admin | Director | Arbiter |
+|---|---|---|---|---|
+| Create and run tournaments, sync, pairings, results, certificates, registrations | Yes | Yes | Yes | No |
+| Floor: table links, new scoring PIN, arbiter calls | Yes | Yes | Yes | Yes |
+| Set up floor tables | Yes | Yes | Yes | No |
+| See tournament names in the list | Yes | Yes | Yes | Yes |
+| See player records, or sync tournaments to a device | Yes | Yes | Yes | No |
+| See the member list | Yes | Yes | Yes | Yes |
+| Invite, change roles, remove members | Yes | Up to admin | No | No |
+| Leave | Yes, unless the last owner | Yes | Yes | Yes |
+
+- **Invite links** hold a random token. Only its SHA-256 is stored (`organization_invites.token_hash`), so a link can be shown only when issued. Resend and New link each issue a new link and stop the old one working.
+- **Accepting** needs a signed-in user whose confirmed email equals the invite's address. Links work once and expire after 7 days. An existing member keeps their current role.
+- **Access is API-only.** `organization_invites` has RLS on, no policies and no client grants. The token goes in request bodies, not API paths, so it stays out of access logs.
+- **Leaving or dropping to arbiter** hands the person's `owner_id` tournaments, and `organizations.created_by`, to the longest-serving other owner. Both fields grant access in the API and in older RLS policies. Data already on a removed person's device stays there; their later pushes are refused.
+- **Sync**: `organization_members.access_changed_at` makes a pull redeliver an organization's tournaments to someone who just joined or was promoted, because those rows are older than their cursor.
+- **A tournament that names no organization** goes to the highest-role organization the creator can manage, so your own comes before one you were invited to. The web create form does not offer a choice yet.
+- **No seat limits**: the data model has none, so none are enforced. Sending is limited to 30 invites per person per hour, in memory per process.
+- **Email** uses Resend when `RESEND_API_KEY` is set. The API always returns the link, with `emailStatus` of `sent`, `failed`, `not_configured` or `skipped`. `PUBLIC_APP_URL` sets the link's base.
+
+---
+
 ## 5. API Endpoints Reference
 
 | Method | Path | Auth | Description |
@@ -93,6 +117,14 @@ Chess Alokas supports two complementary workspaces under a single unified Supaba
 | `GET` | `/organizations` | `requireAuth` | List organizations where the signed-in user is owner or member |
 | `POST` | `/organizations` | `requireAuth` | Create a new organization in Sandbox Trial mode (`trial` / `pending_review`) |
 | `PATCH` | `/organizations/:id` | `requireAuth` (owner/admin) | Update organization contact details, location, or payment instructions |
+| `GET` | `/organizations/:id/members` | any member | Members and the caller's role |
+| `PATCH` / `DELETE` | `/organizations/:id/members/:userId` | owner/admin, not above own role | Change a role or remove a member. The last owner is protected |
+| `POST` | `/organizations/:id/leave` | any member | Leave. The last owner is refused |
+| `GET` / `POST` | `/organizations/:id/invites` | owner/admin | List open invites, or create one (rate limited; returns the link) |
+| `POST` | `/organizations/:id/invites/:inviteId/resend` | owner/admin | New link, and email it unless `sendEmail` is false |
+| `DELETE` | `/organizations/:id/invites/:inviteId` | owner/admin | Withdraw an invite |
+| `POST` | `/public/invites/lookup` | public, rate limited | Invite status, organization, role and a masked address |
+| `POST` | `/invites/accept` | `requireAuth` + confirmed email | Accept an invite |
 | `GET` | `/admin/organizations` | `requirePlatformAdmin` | List all organizations with member & active tournament counts |
 | `PATCH` | `/admin/organizations/:id` | `requirePlatformAdmin` | Approve, verify, suspend, or change plan tier & quotas |
 | `GET` | `/player/profiles` | `requireAuth` | List all player/family profiles managed by the signed-in account |

@@ -1,0 +1,269 @@
+@import '../../design/fonts.css';
+@import '../../design/tokens.css';
+
+.tm-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tm-page,
+.tm-invite {
+  font-family: 'Archivo', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  line-height: 1.45;
+}
+
+.tm-page {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.tm-invite {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.tm-card {
+  width: 100%;
+  max-width: 28rem;
+  padding: 1.5rem;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.tm-page h1,
+.tm-card h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.tm-section {
+  margin-top: 2rem;
+}
+
+.tm-section h2 {
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 2px solid var(--ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.tm-muted {
+  margin: 0.25rem 0;
+  color: var(--ink3);
+  font-size: 0.9rem;
+}
+
+.tm-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tm-table th {
+  text-align: left;
+  padding: 0.35rem 0.5rem 0.35rem 0;
+  border-bottom: 1px solid var(--rule-strong);
+  color: var(--ink3);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tm-table td {
+  padding: 0.55rem 0.5rem 0.55rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.tm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.tm-btn {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tm-btn:hover:not(:disabled) {
+  background: var(--paper2);
+}
+
+.tm-btn:focus-visible,
+.tm-input:focus-visible {
+  outline: 2px solid var(--pen);
+  outline-offset: 2px;
+}
+
+.tm-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tm-btn-primary {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.tm-btn-primary:hover:not(:disabled) {
+  background: var(--ink2);
+}
+
+.tm-btn-danger {
+  border-color: var(--flag);
+  color: var(--flag);
+}
+
+.tm-input {
+  min-height: 2.25rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.tm-form {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) 11rem auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.tm-form label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--ink2);
+}
+
+.tm-note {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--rule-strong);
+  background: var(--paper2);
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.tm-note-error {
+  border-left-color: var(--flag);
+  background: var(--flag-wash);
+}
+
+.tm-note-ok {
+  border-left-color: var(--go);
+  background: var(--go-wash);
+}
+
+.tm-note-wait {
+  border-left-color: var(--wait);
+  background: var(--wait-wash);
+}
+
+.tm-link-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.tm-stack {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.tm-facts {
+  margin: 1rem 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+}
+
+.tm-facts dt {
+  color: var(--ink3);
+}
+
+.tm-facts dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tm-floor {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tm-floor h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.tm-tables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+
+.tm-pin {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 40rem) {
+  .tm-form {
+    grid-template-columns: 1fr;
+  }
+
+  .tm-table thead {
+    display: none;
+  }
+
+  .tm-table tr {
+    display: block;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .tm-table td {
+    display: block;
+    padding: 0.15rem 0;
+    border: 0;
+  }
+
+  .tm-actions {
+    justify-content: flex-start;
+  }
+}

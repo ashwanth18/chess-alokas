@@ -136,7 +136,7 @@ export const organizationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         updatedAt: nowIso,
       };
 
-      const created = await store.createOrganization(org, userId);
+      const created = await store.createOrganization(org, userId, request.confirmedEmail ?? null);
       return reply.code(201).send({ organization: created });
     },
   );

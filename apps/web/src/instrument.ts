@@ -14,6 +14,7 @@ function scrubValue(value: unknown): unknown {
   next = next.replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [Filtered]');
   next = next.replace(/\/live\/[A-Za-z0-9_\-]+/gi, '/live/[Filtered]');
   next = next.replace(/\/t\/[A-Za-z0-9_\-]+/gi, '/t/[Filtered]');
+  next = next.replace(/(\/|%2F)invite(\/|%2F)[A-Za-z0-9_\-]+/gi, '/invite/[Filtered]');
   next = next.replace(/arbiter[_-]?pin["']?\s*[:=]\s*["']?[^"'&\s]+/gi, 'arbiter_pin=[Filtered]');
   next = next.replace(/password["']?\s*[:=]\s*["']?[^"'&\s]+/gi, 'password=[Filtered]');
   next = next.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[email]');

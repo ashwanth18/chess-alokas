@@ -24,6 +24,35 @@ async function assertOwner(
   return true;
 }
 
+/**
+ * Floor duty: managers, plus any member of the tournament's organization, which is what the
+ * arbiter role is for. Arbiters get tables, the scoring PIN and alerts here. They don't get
+ * player records, pairing or settings, which all stay behind assertOwner.
+ */
+async function assertFloorAccess(
+  store: Store,
+  tournamentId: string,
+  userId: string | undefined,
+  reply: FastifyReply,
+): Promise<boolean> {
+  if (!userId) {
+    reply.code(401).send({ error: 'Unauthorized' });
+    return false;
+  }
+  if (await store.isTournamentOwnedBy(tournamentId, userId)) return true;
+  const tournament = await store.getTournament(tournamentId);
+  if (
+    tournament &&
+    !tournament.deletedAt &&
+    tournament.organizationId &&
+    (await store.isOrganizationMember(tournament.organizationId, userId))
+  ) {
+    return true;
+  }
+  reply.code(403).send({ error: 'Forbidden' });
+  return false;
+}
+
 export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
   const { store } = opts;
 
@@ -32,7 +61,7 @@ export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
     { preHandler: requireAuth },
     async (request, reply) => {
       const { id } = request.params;
-      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      if (!(await assertFloorAccess(store, id, request.userId, reply))) return;
       const tables = await store.listTables(id);
       const tournament = await store.getTournament(id);
       return {
@@ -95,7 +124,7 @@ export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
     { preHandler: requireAuth },
     async (request, reply) => {
       const { id } = request.params;
-      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      if (!(await assertFloorAccess(store, id, request.userId, reply))) return;
 
       const parsed = z
         .object({ pinRound: z.number().int().positive() })
@@ -120,7 +149,7 @@ export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
     { preHandler: requireAuth },
     async (request, reply) => {
       const { id } = request.params;
-      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      if (!(await assertFloorAccess(store, id, request.userId, reply))) return;
       const activeOnly = request.query.activeOnly !== 'false';
       const alerts = await store.listFloorAlerts(id, activeOnly);
       return { alerts };
@@ -132,7 +161,7 @@ export const floorPlugin: FastifyPluginAsync<Opts> = async (app, opts) => {
     { preHandler: requireAuth },
     async (request, reply) => {
       const { id, alertId } = request.params;
-      if (!(await assertOwner(store, id, request.userId, reply))) return;
+      if (!(await assertFloorAccess(store, id, request.userId, reply))) return;
       const allForTournament = await store.listFloorAlerts(id, false);
       if (!allForTournament.some((a) => a.id === alertId)) {
         return reply.code(404).send({ error: 'Alert not found' });

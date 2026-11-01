@@ -187,6 +187,70 @@ describe('database migrations', () => {
     expect(rows[0]?.recent).toBe(true);
   });
 
+  describe('organization_invites', () => {
+    const insert = (id: string, email: string, hash: string) => `
+      insert into public.organization_invites (id, organization_id, email, role, token_hash, expires_at)
+      values ('${id}', '${USER_A}', '${email}', 'director', '${hash}', now() + interval '7 days')
+    `;
+
+    it('clients can neither read nor write invites', async () => {
+      await db.exec(insert('55555555-5555-4555-8555-555555555551', 'one@example.com', 'hash-1'));
+      for (const sql of [
+        'select * from public.organization_invites',
+        `update public.organization_invites set role = 'owner'`,
+        'delete from public.organization_invites',
+        insert('55555555-5555-4555-8555-555555555552', 'two@example.com', 'hash-2'),
+      ]) {
+        await expect(asUser(USER_A, sql)).rejects.toThrow(/permission denied/);
+      }
+    });
+
+    it('has no client policies', async () => {
+      const { rows } = await db.query(
+        `select policyname from pg_policies where tablename = 'organization_invites'`,
+      );
+      expect(rows).toEqual([]);
+    });
+
+    it('allows one open invite per address, and a new one once the old is closed', async () => {
+      await db.exec(insert('55555555-5555-4555-8555-555555555553', 'three@example.com', 'hash-3'));
+      await expect(
+        db.exec(insert('55555555-5555-4555-8555-555555555554', 'three@example.com', 'hash-4')),
+      ).rejects.toThrow(/uq_organization_invites_open/);
+      await db.exec(`
+        update public.organization_invites set revoked_at = now()
+        where id = '55555555-5555-4555-8555-555555555553'
+      `);
+      await db.exec(insert('55555555-5555-4555-8555-555555555554', 'three@example.com', 'hash-4'));
+    });
+
+    it('stores addresses in lower case only', async () => {
+      await expect(
+        db.exec(insert('55555555-5555-4555-8555-555555555555', 'Mixed@Example.com', 'hash-5')),
+      ).rejects.toThrow(/check/);
+    });
+
+    it('a member cannot add themselves to the team through the members table', async () => {
+      await expect(
+        asUser(USER_B, `update public.organization_members set role = 'owner'`),
+      ).rejects.toThrow(/permission denied/);
+    });
+
+    it('the backfill gives a creator with no row a real owner row and their email', async () => {
+      const file = readFileSync(
+        path.join(MIGRATIONS_DIR, '030_organization_invites.sql'),
+        'utf8',
+      );
+      // Org A was inserted directly after the migrations ran, so it has no member row.
+      await db.exec(file.slice(file.indexOf('-- The API treated a creator')));
+      const { rows } = await db.query<{ role: string; email: string }>(
+        `select role, email from public.organization_members
+         where organization_id = '${USER_A}' and user_id = '${USER_A}'`,
+      );
+      expect(rows[0]).toEqual({ role: 'owner', email: 'a@example.com' });
+    });
+  });
+
   it('keeps email_sends away from clients', async () => {
     await expect(asUser(USER_A, 'select * from public.email_sends;')).rejects.toThrow(/denied/);
   });

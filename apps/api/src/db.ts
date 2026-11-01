@@ -40,6 +40,11 @@ import {
   DEFAULT_CERT_SERIAL_PREFIX,
   formatCertificateSerial,
   normalizeExcludedRounds,
+  inviteStatus,
+  roleRank,
+  type AcceptInviteResult,
+  type OrganizationInvite,
+  type OrganizationTeamMember,
 } from '@chess-alokas/shared';
 import { generateTableSlug } from './floor/pin.js';
 import {
@@ -181,7 +186,48 @@ export interface Store {
     userId: string,
     roles?: OrganizationMemberRole[],
   ): Promise<boolean>;
-  createOrganization(org: Organization, ownerUserId: string): Promise<Organization>;
+  createOrganization(
+    org: Organization,
+    ownerUserId: string,
+    ownerEmail?: string | null,
+  ): Promise<Organization>;
+
+  // Team: members and invites. Roles are checked in routes/team.ts; these keep the
+  // invariants that need a transaction, such as never losing the last owner.
+  listOrganizationMembers(organizationId: string): Promise<OrganizationTeamMember[]>;
+  getOrganizationMemberRole(
+    organizationId: string,
+    userId: string,
+  ): Promise<OrganizationMemberRole | null>;
+  /** Throws 409 if the address already has an open invite or belongs to a member. */
+  createOrganizationInvite(input: CreateOrganizationInviteInput): Promise<OrganizationInvite>;
+  /** Invites not yet accepted or revoked, including expired ones, newest first. */
+  listOrganizationInvites(organizationId: string): Promise<OrganizationInvite[]>;
+  getOrganizationInvite(organizationId: string, inviteId: string): Promise<OrganizationInvite | null>;
+  findOrganizationInviteByTokenHash(
+    tokenHash: string,
+  ): Promise<{ invite: OrganizationInvite; organizationName: string } | null>;
+  /** Replaces the token and expiry, which kills the old link. Null if accepted or revoked. */
+  rotateOrganizationInvite(
+    organizationId: string,
+    inviteId: string,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<OrganizationInvite | null>;
+  revokeOrganizationInvite(organizationId: string, inviteId: string): Promise<OrganizationInvite | null>;
+  acceptOrganizationInvite(input: {
+    tokenHash: string;
+    userId: string;
+    confirmedEmail: string;
+  }): Promise<AcceptInviteResult>;
+  /** Throws 409 rather than leave no owner. Null if they are not a member. */
+  updateOrganizationMemberRole(
+    organizationId: string,
+    userId: string,
+    role: OrganizationMemberRole,
+  ): Promise<OrganizationMemberRole | null>;
+  /** Throws 409 rather than leave no owner. False if they are not a member. */
+  removeOrganizationMember(organizationId: string, userId: string): Promise<boolean>;
   updateOrganization(
     id: string,
     patch: Partial<
@@ -293,6 +339,44 @@ const EVENT_PASS_MAX_PLAYERS = 150;
 const MAX_TRIAL_ORGS_PER_USER = 1;
 const MAX_ORGS_PER_USER = 5;
 const MANAGER_ROLES: OrganizationMemberRole[] = ['owner', 'admin', 'director'];
+
+const LAST_OWNER_MESSAGE =
+  'An organization needs at least one owner. Make someone else an owner first.';
+
+function lastOwnerError(): Error {
+  return Object.assign(new Error(LAST_OWNER_MESSAGE), { statusCode: 409 });
+}
+
+function inviteConflict(message: string): Error {
+  return Object.assign(new Error(message), { statusCode: 409 });
+}
+
+/** Organization for a tournament that names none: your own before one you were invited to. */
+function pickDefaultOrganization<T extends { memberRole: OrganizationMemberRole }>(
+  orgs: T[],
+): T | null {
+  const manageable = orgs.filter((o) => MANAGER_ROLES.includes(o.memberRole));
+  // sort is stable, so the oldest organization wins within a role.
+  return [...manageable].sort((a, b) => roleRank(b.memberRole) - roleRank(a.memberRole))[0] ?? null;
+}
+
+export interface CreateOrganizationInviteInput {
+  id: string;
+  organizationId: string;
+  /** Lowercased by the route. */
+  email: string;
+  role: OrganizationMemberRole;
+  tokenHash: string;
+  invitedBy: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
+function publicInvite(row: OrganizationInvite & { tokenHash: string }): OrganizationInvite {
+  const { tokenHash: _tokenHash, ...invite } = row;
+  return invite;
+}
+
 /** Sync pull re-reads a short window, so a transaction that commits late isn't missed. */
 const SYNC_PULL_OVERLAP_MS = 60_000;
 
@@ -469,8 +553,16 @@ export class MemoryStore implements Store {
   private organizations = new Map<string, Organization>();
   private organizationMembers = new Map<
     string,
-    { organizationId: string; userId: string; role: OrganizationMemberRole; createdAt: string }
+    {
+      organizationId: string;
+      userId: string;
+      role: OrganizationMemberRole;
+      createdAt: string;
+      email?: string | null;
+      accessChangedAt?: string;
+    }
   >();
+  private organizationInvites = new Map<string, OrganizationInvite & { tokenHash: string }>();
   private playerProfiles = new Map<string, PlayerProfile>();
   private certificateIssues = new Map<string, CertificateIssue>();
   private registrations = new Map<string, TournamentRegistration>();
@@ -501,8 +593,7 @@ export class MemoryStore implements Store {
       return this.organizations.get(t.organizationId) ?? null;
     }
     if (t.ownerId) {
-      const userOrgs = await this.listUserOrganizations(t.ownerId);
-      return userOrgs.find((o) => MANAGER_ROLES.includes(o.memberRole)) ?? null;
+      return pickDefaultOrganization(await this.listUserOrganizations(t.ownerId));
     }
     return null;
   }
@@ -979,8 +1070,14 @@ export class MemoryStore implements Store {
       Boolean(t.organizationId && manageable?.has(t.organizationId));
     const visibleTournaments = [...this.tournaments.values()].filter(visible);
     const visibleIds = new Set(visibleTournaments.map((t) => t.id));
-    const tournaments = visibleTournaments.filter((t) =>
-      this.tournaments.changedSince(t.id, cursor),
+    // Someone who just joined has a cursor newer than these rows, but has never seen them.
+    const accessChanged = (t: Tournament) => {
+      if (!ownerId || !t.organizationId) return false;
+      const mem = this.organizationMembers.get(`${t.organizationId}:${ownerId}`);
+      return (mem?.accessChangedAt ?? '') > cursor;
+    };
+    const tournaments = visibleTournaments.filter(
+      (t) => this.tournaments.changedSince(t.id, cursor) || accessChanged(t),
     );
     const tournamentUpdated = new Set(tournaments.map((t) => t.id));
     const childOk = (tournamentId: string, changed: boolean) =>
@@ -1272,7 +1369,11 @@ export class MemoryStore implements Store {
     return roles.includes(effectiveRole);
   }
 
-  async createOrganization(org: Organization, ownerUserId: string): Promise<Organization> {
+  async createOrganization(
+    org: Organization,
+    ownerUserId: string,
+    ownerEmail?: string | null,
+  ): Promise<Organization> {
     assertOrganizationCap(
       [...this.organizations.values()].filter((o) => o.createdBy === ownerUserId),
     );
@@ -1292,6 +1393,8 @@ export class MemoryStore implements Store {
       userId: ownerUserId,
       role: 'owner',
       createdAt: created.createdAt,
+      email: ownerEmail?.toLowerCase() ?? null,
+      accessChangedAt: created.createdAt,
     });
     return created;
   }
@@ -1334,6 +1437,192 @@ export class MemoryStore implements Store {
     };
     this.organizations.set(id, updated);
     return updated;
+  }
+
+  // ---- Team: members and invites ----
+
+  async listOrganizationMembers(organizationId: string): Promise<OrganizationTeamMember[]> {
+    return [...this.organizationMembers.values()]
+      .filter((m) => m.organizationId === organizationId)
+      .sort(
+        (a, b) => roleRank(b.role) - roleRank(a.role) || a.createdAt.localeCompare(b.createdAt),
+      )
+      .map((m) => ({
+        userId: m.userId,
+        role: m.role,
+        email: m.email ?? null,
+        displayName: null,
+        joinedAt: m.createdAt,
+      }));
+  }
+
+  async getOrganizationMemberRole(
+    organizationId: string,
+    userId: string,
+  ): Promise<OrganizationMemberRole | null> {
+    return this.organizationMembers.get(`${organizationId}:${userId}`)?.role ?? null;
+  }
+
+  async createOrganizationInvite(input: CreateOrganizationInviteInput): Promise<OrganizationInvite> {
+    const now = new Date();
+    const taken = [...this.organizationMembers.values()].some(
+      (m) => m.organizationId === input.organizationId && m.email === input.email,
+    );
+    if (taken) throw inviteConflict('That person is already a member of this organization.');
+    const open = [...this.organizationInvites.values()].filter(
+      (row) =>
+        row.organizationId === input.organizationId &&
+        row.email === input.email &&
+        !row.acceptedAt &&
+        !row.revokedAt,
+    );
+    if (open.some((row) => inviteStatus(row, now) === 'pending')) {
+      throw inviteConflict('That address already has a pending invite. Resend it instead.');
+    }
+    for (const row of open) row.revokedAt = now.toISOString();
+    const { tokenHash, ...fields } = input;
+    const invite: OrganizationInvite = {
+      ...fields,
+      acceptedAt: null,
+      acceptedBy: null,
+      revokedAt: null,
+    };
+    this.organizationInvites.set(invite.id, { ...invite, tokenHash });
+    return invite;
+  }
+
+  async listOrganizationInvites(organizationId: string): Promise<OrganizationInvite[]> {
+    return [...this.organizationInvites.values()]
+      .filter((i) => i.organizationId === organizationId && !i.acceptedAt && !i.revokedAt)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(publicInvite);
+  }
+
+  async getOrganizationInvite(
+    organizationId: string,
+    inviteId: string,
+  ): Promise<OrganizationInvite | null> {
+    const row = this.organizationInvites.get(inviteId);
+    return row && row.organizationId === organizationId ? publicInvite(row) : null;
+  }
+
+  async findOrganizationInviteByTokenHash(
+    tokenHash: string,
+  ): Promise<{ invite: OrganizationInvite; organizationName: string } | null> {
+    const row = [...this.organizationInvites.values()].find((i) => i.tokenHash === tokenHash);
+    const org = row && this.organizations.get(row.organizationId);
+    return row && org ? { invite: publicInvite(row), organizationName: org.name } : null;
+  }
+
+  async rotateOrganizationInvite(
+    organizationId: string,
+    inviteId: string,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<OrganizationInvite | null> {
+    const row = this.organizationInvites.get(inviteId);
+    if (!row || row.organizationId !== organizationId || row.acceptedAt || row.revokedAt) {
+      return null;
+    }
+    row.tokenHash = tokenHash;
+    row.expiresAt = expiresAt;
+    return publicInvite(row);
+  }
+
+  async revokeOrganizationInvite(
+    organizationId: string,
+    inviteId: string,
+  ): Promise<OrganizationInvite | null> {
+    const row = this.organizationInvites.get(inviteId);
+    if (!row || row.organizationId !== organizationId || row.acceptedAt || row.revokedAt) {
+      return null;
+    }
+    row.revokedAt = new Date().toISOString();
+    return publicInvite(row);
+  }
+
+  async acceptOrganizationInvite(input: {
+    tokenHash: string;
+    userId: string;
+    confirmedEmail: string;
+  }): Promise<AcceptInviteResult> {
+    const row = [...this.organizationInvites.values()].find(
+      (i) => i.tokenHash === input.tokenHash,
+    );
+    if (!row) return { ok: false, code: 'not_found' };
+    const status = inviteStatus(row);
+    if (status === 'accepted') return { ok: false, code: 'used' };
+    if (status !== 'pending') return { ok: false, code: status };
+    const email = input.confirmedEmail.toLowerCase();
+    if (row.email !== email) return { ok: false, code: 'wrong_email' };
+
+    const nowIso = new Date().toISOString();
+    const key = `${row.organizationId}:${input.userId}`;
+    const existing = this.organizationMembers.get(key);
+    if (!existing) {
+      this.organizationMembers.set(key, {
+        organizationId: row.organizationId,
+        userId: input.userId,
+        role: row.role,
+        createdAt: nowIso,
+        email,
+        accessChangedAt: nowIso,
+      });
+    }
+    row.acceptedAt = nowIso;
+    row.acceptedBy = input.userId;
+    return {
+      ok: true,
+      organizationId: row.organizationId,
+      role: existing?.role ?? row.role,
+      alreadyMember: Boolean(existing),
+    };
+  }
+
+  private otherOwner(organizationId: string, userId: string): string | null {
+    const owners = [...this.organizationMembers.values()]
+      .filter((m) => m.organizationId === organizationId && m.role === 'owner' && m.userId !== userId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return owners[0]?.userId ?? null;
+  }
+
+  /** See PostgresStore.handOverOrganizationAccess. */
+  private handOverOrganizationAccess(organizationId: string, userId: string): void {
+    const heir = this.otherOwner(organizationId, userId);
+    for (const t of this.tournaments.values()) {
+      if (t.organizationId === organizationId && t.ownerId === userId) {
+        this.tournaments.set(t.id, { ...t, ownerId: heir });
+      }
+    }
+    const org = this.organizations.get(organizationId);
+    if (org?.createdBy === userId) {
+      this.organizations.set(organizationId, { ...org, createdBy: heir });
+    }
+  }
+
+  async updateOrganizationMemberRole(
+    organizationId: string,
+    userId: string,
+    role: OrganizationMemberRole,
+  ): Promise<OrganizationMemberRole | null> {
+    const mem = this.organizationMembers.get(`${organizationId}:${userId}`);
+    if (!mem) return null;
+    if (mem.role === role) return role;
+    if (mem.role === 'owner' && !this.otherOwner(organizationId, userId)) throw lastOwnerError();
+    if (!MANAGER_ROLES.includes(role)) this.handOverOrganizationAccess(organizationId, userId);
+    mem.role = role;
+    mem.accessChangedAt = new Date().toISOString();
+    return role;
+  }
+
+  async removeOrganizationMember(organizationId: string, userId: string): Promise<boolean> {
+    const key = `${organizationId}:${userId}`;
+    const mem = this.organizationMembers.get(key);
+    if (!mem) return false;
+    if (mem.role === 'owner' && !this.otherOwner(organizationId, userId)) throw lastOwnerError();
+    this.handOverOrganizationAccess(organizationId, userId);
+    this.organizationMembers.delete(key);
+    return true;
   }
 
   async listAllOrganizationsForAdmin(): Promise<AdminOrganizationRow[]> {
@@ -2657,6 +2946,39 @@ function rowToGameCard(row: GameCardRow): GameCard {
 // PostgresStore
 // ---------------------------------------------------------------------------
 
+interface OrganizationInviteRow {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: string;
+  invited_by: string | null;
+  expires_at: Date | string;
+  accepted_at: Date | string | null;
+  accepted_by: string | null;
+  revoked_at: Date | string | null;
+  created_at: Date | string;
+}
+
+function inviteTime(value: Date | string | null): string | null {
+  if (value == null) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function rowToOrganizationInvite(row: OrganizationInviteRow): OrganizationInvite {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    email: row.email,
+    role: row.role as OrganizationMemberRole,
+    invitedBy: row.invited_by ?? null,
+    expiresAt: inviteTime(row.expires_at) ?? '',
+    acceptedAt: inviteTime(row.accepted_at),
+    acceptedBy: row.accepted_by ?? null,
+    revokedAt: inviteTime(row.revoked_at),
+    createdAt: inviteTime(row.created_at) ?? '',
+  };
+}
+
 export class PostgresStore implements Store {
   private readonly sql: Sql;
 
@@ -2696,8 +3018,7 @@ export class PostgresStore implements Store {
       return this.getOrganization(t.organizationId, s);
     }
     if (t.ownerId) {
-      const orgs = await this.listUserOrganizations(t.ownerId, s);
-      return orgs.find((o) => MANAGER_ROLES.includes(o.memberRole)) ?? null;
+      return pickDefaultOrganization(await this.listUserOrganizations(t.ownerId, s));
     }
     return null;
   }
@@ -3482,28 +3803,36 @@ export class PostgresStore implements Store {
           SELECT id FROM organizations WHERE created_by = ${ownerId}
         )
       `;
+      // Someone who just joined has a cursor newer than these rows, but has never seen them.
+      const tournamentChanged = this.sql`
+        t.server_updated_at > ${cursor}::timestamptz
+        OR t.organization_id IN (
+          SELECT organization_id FROM organization_members
+          WHERE user_id = ${ownerId} AND access_changed_at > ${cursor}::timestamptz
+        )
+      `;
       const [tournaments, categories, participants, games] = await Promise.all([
         this.sql<TournamentRow[]>`
           SELECT t.* FROM tournaments t
-          WHERE t.server_updated_at > ${cursor}::timestamptz AND (${manageable})
+          WHERE (${tournamentChanged}) AND (${manageable})
         `,
         this.sql<CategoryRow[]>`
           SELECT c.* FROM categories c
           INNER JOIN tournaments t ON t.id = c.tournament_id
           WHERE (${manageable})
-            AND (c.server_updated_at > ${cursor}::timestamptz OR t.server_updated_at > ${cursor}::timestamptz)
+            AND (c.server_updated_at > ${cursor}::timestamptz OR ${tournamentChanged})
         `,
         this.sql<ParticipantRow[]>`
           SELECT p.* FROM participants p
           INNER JOIN tournaments t ON t.id = p.tournament_id
           WHERE (${manageable})
-            AND (p.server_updated_at > ${cursor}::timestamptz OR t.server_updated_at > ${cursor}::timestamptz)
+            AND (p.server_updated_at > ${cursor}::timestamptz OR ${tournamentChanged})
         `,
         this.sql<GameRow[]>`
           SELECT g.* FROM games g
           INNER JOIN tournaments t ON t.id = g.tournament_id
           WHERE (${manageable})
-            AND (g.server_updated_at > ${cursor}::timestamptz OR t.server_updated_at > ${cursor}::timestamptz)
+            AND (g.server_updated_at > ${cursor}::timestamptz OR ${tournamentChanged})
         `,
       ]);
       return {
@@ -3844,7 +4173,11 @@ export class PostgresStore implements Store {
     return roles.includes(effectiveRole);
   }
 
-  async createOrganization(org: Organization, ownerUserId: string): Promise<Organization> {
+  async createOrganization(
+    org: Organization,
+    ownerUserId: string,
+    ownerEmail?: string | null,
+  ): Promise<Organization> {
     return this.tx(async (s) => {
       await this.lockQuotaScope(s, `orgs:${ownerUserId}`);
       const mine = await s<{ plan_tier: string }[]>`
@@ -3880,8 +4213,8 @@ export class PostgresStore implements Store {
         RETURNING *
       `;
       await s`
-        INSERT INTO organization_members (organization_id, user_id, role, created_at)
-        VALUES (${org.id}, ${ownerUserId}, 'owner', ${org.createdAt})
+        INSERT INTO organization_members (organization_id, user_id, role, created_at, email)
+        VALUES (${org.id}, ${ownerUserId}, 'owner', ${org.createdAt}, ${ownerEmail?.toLowerCase() ?? null})
         ON CONFLICT (organization_id, user_id) DO NOTHING
       `;
       await s`
@@ -3946,6 +4279,274 @@ export class PostgresStore implements Store {
     `;
     const row = rows[0];
     return row ? rowToOrganization(row) : null;
+  }
+
+  // ---- Team: members and invites ----
+
+  async listOrganizationMembers(organizationId: string): Promise<OrganizationTeamMember[]> {
+    const rows = await this.sql<
+      {
+        user_id: string;
+        role: string;
+        email: string | null;
+        display_name: string | null;
+        created_at: Date | string;
+      }[]
+    >`
+      SELECT m.user_id::text AS user_id, m.role, m.email, p.display_name, m.created_at
+      FROM organization_members m
+      LEFT JOIN profiles p ON p.id = m.user_id
+      WHERE m.organization_id = ${organizationId}
+      ORDER BY m.created_at ASC
+    `;
+    return rows
+      .map((r) => ({
+        userId: r.user_id,
+        role: r.role as OrganizationMemberRole,
+        email: r.email,
+        displayName: r.display_name,
+        joinedAt: inviteTime(r.created_at) ?? '',
+      }))
+      .sort((a, b) => roleRank(b.role) - roleRank(a.role));
+  }
+
+  async getOrganizationMemberRole(
+    organizationId: string,
+    userId: string,
+    s: Sql = this.sql,
+  ): Promise<OrganizationMemberRole | null> {
+    const rows = await s<{ role: string }[]>`
+      SELECT role FROM organization_members
+      WHERE organization_id = ${organizationId} AND user_id = ${userId}
+    `;
+    return (rows[0]?.role as OrganizationMemberRole | undefined) ?? null;
+  }
+
+  async createOrganizationInvite(input: CreateOrganizationInviteInput): Promise<OrganizationInvite> {
+    return this.tx(async (s) => {
+      await this.lockOrganization(s, input.organizationId);
+      const members = await s`
+        SELECT 1 FROM organization_members
+        WHERE organization_id = ${input.organizationId} AND email = ${input.email}
+      `;
+      if (members.length > 0) {
+        throw inviteConflict('That person is already a member of this organization.');
+      }
+      const open = await s<OrganizationInviteRow[]>`
+        SELECT * FROM organization_invites
+        WHERE organization_id = ${input.organizationId} AND email = ${input.email}
+          AND accepted_at IS NULL AND revoked_at IS NULL
+      `;
+      if (open.some((row) => inviteStatus(rowToOrganizationInvite(row)) === 'pending')) {
+        throw inviteConflict('That address already has a pending invite. Resend it instead.');
+      }
+      for (const row of open) {
+        await s`UPDATE organization_invites SET revoked_at = now() WHERE id = ${row.id}`;
+      }
+      const rows = await s<OrganizationInviteRow[]>`
+        INSERT INTO organization_invites (
+          id, organization_id, email, role, token_hash, invited_by, expires_at, created_at
+        )
+        VALUES (
+          ${input.id}, ${input.organizationId}, ${input.email}, ${input.role}, ${input.tokenHash},
+          ${input.invitedBy}, ${input.expiresAt}, ${input.createdAt}
+        )
+        RETURNING *
+      `;
+      return rowToOrganizationInvite(rows[0]!);
+    });
+  }
+
+  async listOrganizationInvites(organizationId: string): Promise<OrganizationInvite[]> {
+    const rows = await this.sql<OrganizationInviteRow[]>`
+      SELECT * FROM organization_invites
+      WHERE organization_id = ${organizationId} AND accepted_at IS NULL AND revoked_at IS NULL
+      ORDER BY created_at DESC
+    `;
+    return rows.map(rowToOrganizationInvite);
+  }
+
+  async getOrganizationInvite(
+    organizationId: string,
+    inviteId: string,
+  ): Promise<OrganizationInvite | null> {
+    const rows = await this.sql<OrganizationInviteRow[]>`
+      SELECT * FROM organization_invites
+      WHERE id = ${inviteId} AND organization_id = ${organizationId}
+    `;
+    return rows[0] ? rowToOrganizationInvite(rows[0]) : null;
+  }
+
+  async findOrganizationInviteByTokenHash(
+    tokenHash: string,
+  ): Promise<{ invite: OrganizationInvite; organizationName: string } | null> {
+    const rows = await this.sql<(OrganizationInviteRow & { organization_name: string })[]>`
+      SELECT i.*, o.name AS organization_name
+      FROM organization_invites i
+      JOIN organizations o ON o.id = i.organization_id
+      WHERE i.token_hash = ${tokenHash}
+    `;
+    const row = rows[0];
+    return row
+      ? { invite: rowToOrganizationInvite(row), organizationName: row.organization_name }
+      : null;
+  }
+
+  async rotateOrganizationInvite(
+    organizationId: string,
+    inviteId: string,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<OrganizationInvite | null> {
+    const rows = await this.sql<OrganizationInviteRow[]>`
+      UPDATE organization_invites
+      SET token_hash = ${tokenHash}, expires_at = ${expiresAt}
+      WHERE id = ${inviteId} AND organization_id = ${organizationId}
+        AND accepted_at IS NULL AND revoked_at IS NULL
+      RETURNING *
+    `;
+    return rows[0] ? rowToOrganizationInvite(rows[0]) : null;
+  }
+
+  async revokeOrganizationInvite(
+    organizationId: string,
+    inviteId: string,
+  ): Promise<OrganizationInvite | null> {
+    const rows = await this.sql<OrganizationInviteRow[]>`
+      UPDATE organization_invites SET revoked_at = now()
+      WHERE id = ${inviteId} AND organization_id = ${organizationId}
+        AND accepted_at IS NULL AND revoked_at IS NULL
+      RETURNING *
+    `;
+    return rows[0] ? rowToOrganizationInvite(rows[0]) : null;
+  }
+
+  async acceptOrganizationInvite(input: {
+    tokenHash: string;
+    userId: string;
+    confirmedEmail: string;
+  }): Promise<AcceptInviteResult> {
+    return this.tx(async (s): Promise<AcceptInviteResult> => {
+      // The row lock is what makes a link single use under concurrent requests.
+      const rows = await s<OrganizationInviteRow[]>`
+        SELECT * FROM organization_invites WHERE token_hash = ${input.tokenHash} FOR UPDATE
+      `;
+      const row = rows[0];
+      if (!row) return { ok: false, code: 'not_found' };
+      const invite = rowToOrganizationInvite(row);
+      const status = inviteStatus(invite);
+      if (status === 'accepted') return { ok: false, code: 'used' };
+      if (status !== 'pending') return { ok: false, code: status };
+      const email = input.confirmedEmail.toLowerCase();
+      if (invite.email !== email) return { ok: false, code: 'wrong_email' };
+
+      const existing = await this.getOrganizationMemberRole(invite.organizationId, input.userId, s);
+      if (!existing) {
+        await s`
+          INSERT INTO organization_members (organization_id, user_id, role, email)
+          VALUES (${invite.organizationId}, ${input.userId}, ${invite.role}, ${email})
+        `;
+      }
+      await s`
+        UPDATE organization_invites
+        SET accepted_at = now(), accepted_by = ${input.userId}
+        WHERE id = ${invite.id}
+      `;
+      await s`
+        UPDATE profiles
+        SET account_role = CASE WHEN account_role = 'participant' THEN 'both' ELSE account_role END,
+            default_organization_id = COALESCE(default_organization_id, ${invite.organizationId}),
+            updated_at = now()
+        WHERE id = ${input.userId}
+      `;
+      return {
+        ok: true,
+        organizationId: invite.organizationId,
+        role: existing ?? invite.role,
+        alreadyMember: Boolean(existing),
+      };
+    });
+  }
+
+  /** Serializes membership changes, so two requests can't each remove "the other" owner. */
+  private async lockOrganization(s: Sql, organizationId: string): Promise<void> {
+    await s`SELECT id FROM organizations WHERE id = ${organizationId} FOR UPDATE`;
+  }
+
+  private async otherOwner(s: Sql, organizationId: string, userId: string): Promise<string | null> {
+    const rows = await s<{ user_id: string }[]>`
+      SELECT user_id::text AS user_id FROM organization_members
+      WHERE organization_id = ${organizationId} AND role = 'owner' AND user_id <> ${userId}
+      ORDER BY created_at ASC
+      LIMIT 1
+    `;
+    return rows[0]?.user_id ?? null;
+  }
+
+  /**
+   * owner_id and created_by each grant access, in the API and in older RLS policies. Someone
+   * who leaves, or drops to arbiter, must not keep access through a tournament they created,
+   * so these move to the longest-serving other owner.
+   */
+  private async handOverOrganizationAccess(
+    s: Sql,
+    organizationId: string,
+    userId: string,
+  ): Promise<void> {
+    const heir = await this.otherOwner(s, organizationId, userId);
+    await s`
+      UPDATE tournaments SET owner_id = ${heir}
+      WHERE organization_id = ${organizationId} AND owner_id = ${userId}
+    `;
+    await s`
+      UPDATE organizations SET created_by = ${heir}
+      WHERE id = ${organizationId} AND created_by = ${userId}
+    `;
+  }
+
+  async updateOrganizationMemberRole(
+    organizationId: string,
+    userId: string,
+    role: OrganizationMemberRole,
+  ): Promise<OrganizationMemberRole | null> {
+    return this.tx(async (s) => {
+      await this.lockOrganization(s, organizationId);
+      const current = await this.getOrganizationMemberRole(organizationId, userId, s);
+      if (!current) return null;
+      if (current === role) return role;
+      if (current === 'owner' && !(await this.otherOwner(s, organizationId, userId))) {
+        throw lastOwnerError();
+      }
+      if (!MANAGER_ROLES.includes(role)) {
+        await this.handOverOrganizationAccess(s, organizationId, userId);
+      }
+      await s`
+        UPDATE organization_members SET role = ${role}, access_changed_at = now()
+        WHERE organization_id = ${organizationId} AND user_id = ${userId}
+      `;
+      return role;
+    });
+  }
+
+  async removeOrganizationMember(organizationId: string, userId: string): Promise<boolean> {
+    return this.tx(async (s) => {
+      await this.lockOrganization(s, organizationId);
+      const current = await this.getOrganizationMemberRole(organizationId, userId, s);
+      if (!current) return false;
+      if (current === 'owner' && !(await this.otherOwner(s, organizationId, userId))) {
+        throw lastOwnerError();
+      }
+      await this.handOverOrganizationAccess(s, organizationId, userId);
+      await s`
+        DELETE FROM organization_members
+        WHERE organization_id = ${organizationId} AND user_id = ${userId}
+      `;
+      await s`
+        UPDATE profiles SET default_organization_id = NULL
+        WHERE id = ${userId} AND default_organization_id = ${organizationId}
+      `;
+      return true;
+    });
   }
 
   async listAllOrganizationsForAdmin(): Promise<AdminOrganizationRow[]> {

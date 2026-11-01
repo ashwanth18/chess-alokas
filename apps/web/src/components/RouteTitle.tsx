@@ -11,6 +11,8 @@ const TITLES: [RegExp, string][] = [
   [/^\/simulator/, 'Simulator'],
   [/^\/account/, 'Account'],
   [/^\/settings/, 'Settings'],
+  [/^\/team/, 'Team'],
+  [/^\/invite\//, 'Team invite'],
   [/^\/admin/, 'Admin'],
   [/^\/login/, 'Sign in'],
   [/^\/signup/, 'Create account'],

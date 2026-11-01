@@ -19,6 +19,12 @@ import type {
   FloorZoneBoard,
   FilterGroup,
   SyncRejection,
+  AcceptInviteResult,
+  InviteEmailStatus,
+  OrganizationInvite,
+  OrganizationInvitePreview,
+  OrganizationInviteStatus,
+  OrganizationTeamMember,
 } from '@chess-alokas/shared';
 import { supabase } from '../lib/supabase';
 
@@ -55,7 +61,7 @@ async function getAuthHeaders(signal: AbortSignal): Promise<Record<string, strin
 async function req<T>(
   path: string,
   options?: RequestInit & { timeoutMs?: number },
-): Promise<{ data: T; ok: true } | { data: null; ok: false; error: string }> {
+): Promise<{ data: T; ok: true } | { data: null; ok: false; error: string; status?: number }> {
   const { timeoutMs, ...fetchOptions } = options ?? {};
   const defaultTimeout = path.startsWith('/sync')
     ? 60_000
@@ -101,7 +107,7 @@ async function req<T>(
         // again instead of failing every sync forever with no feedback.
         window.dispatchEvent(new CustomEvent('auth:session-expired'));
       }
-      return { data: null, ok: false, error };
+      return { data: null, ok: false, error, status: res.status };
     }
     if (res.status === 204) {
       return { data: null as T, ok: true };
@@ -798,6 +804,94 @@ export type UserOrganization = Organization & { memberRole: OrganizationMemberRo
 
 export async function apiListOrganizations() {
   return req<{ organizations: UserOrganization[] }>('/organizations');
+}
+
+// ── Team: members and invites ────────────────────────────────────────────────
+
+export type InviteRow = OrganizationInvite & { status: OrganizationInviteStatus };
+type IssuedInvite = { invite: InviteRow; inviteUrl: string; emailStatus: InviteEmailStatus };
+
+/** Sending an invite waits on the mail provider, so it gets longer than the default. */
+const INVITE_SEND_TIMEOUT_MS = 20_000;
+
+const orgPath = (id: string) => `/organizations/${encodeURIComponent(id)}`;
+
+export async function apiListMembers(organizationId: string) {
+  return req<{ members: OrganizationTeamMember[]; yourRole: OrganizationMemberRole }>(
+    `${orgPath(organizationId)}/members`,
+  );
+}
+
+export async function apiChangeMemberRole(
+  organizationId: string,
+  userId: string,
+  role: OrganizationMemberRole,
+) {
+  return req<{ userId: string; role: OrganizationMemberRole }>(
+    `${orgPath(organizationId)}/members/${encodeURIComponent(userId)}`,
+    { method: 'PATCH', body: JSON.stringify({ role }) },
+  );
+}
+
+export async function apiRemoveMember(organizationId: string, userId: string) {
+  return req<null>(`${orgPath(organizationId)}/members/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function apiLeaveOrganization(organizationId: string) {
+  return req<null>(`${orgPath(organizationId)}/leave`, { method: 'POST' });
+}
+
+export async function apiListInvites(organizationId: string) {
+  return req<{ invites: InviteRow[] }>(`${orgPath(organizationId)}/invites`);
+}
+
+export async function apiCreateInvite(
+  organizationId: string,
+  body: { email: string; role: OrganizationMemberRole },
+) {
+  return req<IssuedInvite>(`${orgPath(organizationId)}/invites`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    timeoutMs: INVITE_SEND_TIMEOUT_MS,
+  });
+}
+
+/** Issues a new link and kills the old one: only a hash of the link is stored. */
+export async function apiResendInvite(
+  organizationId: string,
+  inviteId: string,
+  sendEmail: boolean,
+) {
+  return req<IssuedInvite>(
+    `${orgPath(organizationId)}/invites/${encodeURIComponent(inviteId)}/resend`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ sendEmail }),
+      timeoutMs: INVITE_SEND_TIMEOUT_MS,
+    },
+  );
+}
+
+export async function apiRevokeInvite(organizationId: string, inviteId: string) {
+  return req<null>(`${orgPath(organizationId)}/invites/${encodeURIComponent(inviteId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function apiLookupInvite(token: string) {
+  return req<OrganizationInvitePreview>('/public/invites/lookup', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function apiAcceptInvite(token: string) {
+  return req<Extract<AcceptInviteResult, { ok: true }>>('/invites/accept', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
 }
 
 export async function apiCreateOrganization(body: {

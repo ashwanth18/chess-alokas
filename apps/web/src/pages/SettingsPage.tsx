@@ -107,6 +107,20 @@ export default function SettingsPage() {
         {message && <p className="form-hint">{message}</p>}
       </section>
 
+      {auth.user && (
+        <section className="account-panel">
+          <h3>Team</h3>
+          <p className="form-hint">
+            See who is in your organization, invite directors and arbiters, and change roles.
+          </p>
+          <div className="account-actions">
+            <Link className="btn btn-outline" to="/team">
+              Open team
+            </Link>
+          </div>
+        </section>
+      )}
+
       {isDesktop && (
         <section className="account-panel">
           <h3>Desktop updates</h3>
