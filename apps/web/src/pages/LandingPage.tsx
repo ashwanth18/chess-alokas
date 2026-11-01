@@ -472,7 +472,6 @@ export default function LandingPage() {
                   <li>Approve, waitlist or reject, one at a time, or approve all pending.</li>
                   <li>Likely duplicate entries are flagged for you to check.</li>
                   <li>Parents with an account fill the form from a saved profile and can register siblings quickly.</li>
-                  <li>Set a deadline and a roster cap.</li>
                   <li>Paid entries and listing on Find a tournament need a verified academy.</li>
                 </ul>
               </div>
