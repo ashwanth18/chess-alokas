@@ -158,6 +158,7 @@ pnpm --filter @chess-alokas/pairing-engine test
 | GET | `/certificates/:issueId/download` | Download issued PDF (organizer or linked player) |
 | GET/POST | `/organizations` | List / create B2B organization (Sandbox Trial) |
 | PATCH | `/organizations/:id` | Update organization contact & payment info |
+| POST | `/player/registrations/:id/receipt` | Add or replace a receipt on your own undecided entry |
 | GET/PATCH/DELETE | `/organizations/:id/members` | Team members and roles |
 | GET/POST/DELETE | `/organizations/:id/invites` | Staff invites (owner/admin) |
 | POST | `/public/invites/lookup`, `/invites/accept` | Open and accept an invite link |

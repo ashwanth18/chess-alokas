@@ -11,11 +11,13 @@ import {
   type TournamentRegistration,
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
+import { registrationTakesReceipt } from '../db.js';
 import { optionalAuth, requireAuth } from '../auth.js';
 import { rateLimit, type RateLimitBucket } from '../lib/rateLimit.js';
 import {
   MAX_RECEIPT_BYTES,
   decodeReceiptDataUrl,
+  deleteReceipt,
   readReceipt,
   saveReceipt,
 } from '../registrations/receipts.js';
@@ -140,6 +142,16 @@ const PublicRegisterBodySchema = z.object({
   guardianConsent: z.boolean().optional(),
   // base64 of MAX_RECEIPT_BYTES, plus the data URL prefix
   receiptDataUrl: z.string().max(7_000_100).nullable().optional(),
+});
+
+const RECEIPT_UPLOADS: RateLimitBucket = new Map();
+const RECEIPT_UPLOADS_PER_WINDOW = 20;
+const RECEIPT_REFUSED =
+  'This entry can’t take a receipt: it has no fee, has already been decided, or its payment is settled.';
+
+const UploadReceiptBodySchema = z.object({
+  // base64 of MAX_RECEIPT_BYTES, plus the data URL prefix
+  receiptDataUrl: z.string().max(7_000_100),
 });
 
 const ReviewRegistrationBodySchema = z.object({
@@ -676,6 +688,54 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
   );
 
   // 7. Signed-in participant/parent lists their submitted registrations
+  // The person who made an entry adds a receipt later, or replaces one before it is decided.
+  app.post<{ Params: { id: string }; Body: unknown }>(
+    '/player/registrations/:id/receipt',
+    { preHandler: requireAuth, bodyLimit: 8 * 1024 * 1024 },
+    async (request, reply) => {
+      const userId = request.userId ?? DEFAULT_USER_ID;
+      if (!rateLimit(RECEIPT_UPLOADS, userId, RECEIPT_UPLOADS_PER_WINDOW, REGISTER_WINDOW_MS)) {
+        return reply.code(429).send({ error: 'Too many uploads. Try again later.' });
+      }
+      // Looked up among the caller's own entries, so someone else's looks the same as none.
+      const mine = await store.listUserRegistrations(userId);
+      const reg = mine.find((r) => r.id === request.params.id);
+      if (!reg) return reply.code(404).send({ error: 'Registration not found' });
+      if (!registrationTakesReceipt(reg)) {
+        return reply.code(409).send({ error: RECEIPT_REFUSED });
+      }
+      const parsed = UploadReceiptBodySchema.safeParse(request.body);
+      const receipt = parsed.success ? decodeReceiptDataUrl(parsed.data.receiptDataUrl) : null;
+      if (!receipt) {
+        return reply.code(400).send({
+          error: `Receipt must be a PNG, JPEG, WebP or PDF file of at most ${Math.floor(MAX_RECEIPT_BYTES / (1024 * 1024))} MB.`,
+        });
+      }
+
+      // A new name each time: an upload that loses to an organizer's decision must not overwrite
+      // the file that decision was based on.
+      const storagePath = await saveReceipt(
+        reg.tournamentId,
+        `${reg.id}-${crypto.randomUUID()}`,
+        receipt,
+      );
+      const removeQuietly = (file: string) =>
+        deleteReceipt(file).catch(() => {
+          request.log.warn({ registrationId: reg.id }, 'could not remove a replaced receipt');
+        });
+      const result = await store.replaceRegistrationReceipt(reg.id, {
+        storagePath,
+        contentType: receipt.contentType,
+      });
+      if (!result) {
+        await removeQuietly(storagePath);
+        return reply.code(409).send({ error: RECEIPT_REFUSED });
+      }
+      if (result.previousStoragePath) await removeQuietly(result.previousStoragePath);
+      return { registration: toClientRegistration(result.registration) };
+    },
+  );
+
   app.get(
     '/player/registrations',
     { preHandler: requireAuth },

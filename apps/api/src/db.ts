@@ -237,6 +237,16 @@ export interface Store {
   /** Throws 409 rather than leave no owner. False if they are not a member. */
   removeOrganizationMember(organizationId: string, userId: string): Promise<boolean>;
 
+  /**
+   * Points a registration at a newly stored receipt, only while it can still take one. Checked and
+   * written as one step, so an organizer's decision made during the upload wins.
+   * Null if it no longer can. Returns the previous file for the caller to remove.
+   */
+  replaceRegistrationReceipt(
+    registrationId: string,
+    receipt: { storagePath: string; contentType: string },
+  ): Promise<{ registration: TournamentRegistration; previousStoragePath: string | null } | null>;
+
   // Consent
   /** Once per tournament and confirmedAt, however often it arrives. */
   recordRosterConsent(input: RosterConsentInput): Promise<void>;
@@ -405,6 +415,17 @@ export interface DueTournamentPurge {
   id: string;
   receiptPaths: string[];
   certificatePaths: string[];
+}
+
+/** A decided entry is settled, and a free one has nothing to pay. */
+export function registrationTakesReceipt(reg: {
+  status: string;
+  paymentStatus: string;
+}): boolean {
+  return (
+    (reg.status === 'pending' || reg.status === 'waitlisted') &&
+    (reg.paymentStatus === 'pending_receipt' || reg.paymentStatus === 'submitted')
+  );
 }
 
 /**
@@ -1655,6 +1676,24 @@ export class MemoryStore implements Store {
       role: existing?.role ?? row.role,
       alreadyMember: Boolean(existing),
     };
+  }
+
+  async replaceRegistrationReceipt(
+    registrationId: string,
+    receipt: { storagePath: string; contentType: string },
+  ): Promise<{ registration: TournamentRegistration; previousStoragePath: string | null } | null> {
+    const reg = this.registrations.get(registrationId);
+    if (!reg || !registrationTakesReceipt(reg)) return null;
+    const registration: TournamentRegistration = {
+      ...reg,
+      receiptDataUrl: null,
+      receiptStoragePath: receipt.storagePath,
+      receiptContentType: receipt.contentType,
+      paymentStatus: 'submitted',
+      updatedAt: new Date().toISOString(),
+    };
+    this.registrations.set(registrationId, registration);
+    return { registration, previousStoragePath: reg.receiptStoragePath ?? null };
   }
 
   // ---- Consent ----
@@ -4813,6 +4852,35 @@ export class PostgresStore implements Store {
         organizationId: invite.organizationId,
         role: existing ?? invite.role,
         alreadyMember: Boolean(existing),
+      };
+    });
+  }
+
+  async replaceRegistrationReceipt(
+    registrationId: string,
+    receipt: { storagePath: string; contentType: string },
+  ): Promise<{ registration: TournamentRegistration; previousStoragePath: string | null } | null> {
+    return this.tx(async (s) => {
+      const [current] = await s<TournamentRegistrationRow[]>`
+        SELECT * FROM tournament_registrations WHERE id = ${registrationId} FOR UPDATE
+      `;
+      if (
+        !current ||
+        !registrationTakesReceipt({ status: current.status, paymentStatus: current.payment_status })
+      ) {
+        return null;
+      }
+      const [updated] = await s<TournamentRegistrationRow[]>`
+        UPDATE tournament_registrations
+        SET receipt_data_url = NULL, receipt_storage_path = ${receipt.storagePath},
+            receipt_content_type = ${receipt.contentType}, payment_status = 'submitted',
+            updated_at = now()
+        WHERE id = ${registrationId}
+        RETURNING *
+      `;
+      return {
+        registration: rowToTournamentRegistration(updated!),
+        previousStoragePath: current.receipt_storage_path ?? null,
       };
     });
   }

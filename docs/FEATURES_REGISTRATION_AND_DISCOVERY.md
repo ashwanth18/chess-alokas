@@ -93,6 +93,15 @@ Inside each tournament's **`Registrations`** tab:
 
 ---
 
+## Adding a receipt after registering
+
+`POST /player/registrations/:id/receipt` with `{ "receiptDataUrl": "data:<type>;base64,..." }` needs sign-in. It uses the same file check and private storage as registering, and answers `200 { registration }`, with `hasReceipt: true` and `paymentStatus: "submitted"`.
+
+- **Who:** the account that submitted the entry, or whose saved profile made it. Anyone else, the organizer included, gets 404. An entry made without signing in can't use this.
+- **When:** while the entry is `pending` or `waitlisted` and its payment is `pending_receipt` or `submitted`. Otherwise 409. That covers an approved, rejected or cancelled entry, a free one, and settled payments.
+- **Replacing:** each upload gets a new file name and the old file is then removed, so a late upload can't overwrite the file an organizer based a decision on. If the old file can't be removed it is logged and left behind, unlinked.
+- **Limits:** PNG, JPEG, WebP or PDF up to 5 MB (otherwise 400), and 20 uploads per person per 15 minutes (otherwise 429).
+
 ## Registration review rules
 
 Each review runs in one transaction, locking the tournament and the registration.

@@ -32,6 +32,7 @@ import { floorPlugin } from './routes/floor.js';
 import { organizationsPlugin } from './routes/organizations.js';
 import { hashInviteToken, teamPlugin } from './routes/team.js';
 import { runPrivacyPurge } from './lib/privacyPurge.js';
+import { readReceipt } from './registrations/receipts.js';
 import { PRIVACY_NOTICE_VERSION } from '@chess-alokas/shared';
 import { pairingPlugin } from './routes/pairing.js';
 import { publicLivePlugin } from './routes/publicLive.js';
@@ -388,6 +389,173 @@ describe.each([
     });
     return updated!;
   }
+
+  describe('adding a receipt after registering', () => {
+    const PNG =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const PDF_URL = `data:application/pdf;base64,${PDF}`;
+    const upload = (user: string | null, regId: string, receiptDataUrl: unknown = PNG) =>
+      call(user, 'POST', `/player/registrations/${regId}/receipt`, { receiptDataUrl });
+
+    beforeAll(() => {
+      process.env['RECEIPTS_DIR'] = path.join(certDir, 'receipts');
+    });
+    afterAll(() => {
+      delete process.env['RECEIPTS_DIR'];
+    });
+
+    async function paidEntry(fee = 5000) {
+      const organizer = await newUser();
+      const t = await seedTournament(organizer, { registrationOpen: true });
+      await store.updateTournament(t.id, {
+        registrationOpen: true,
+        entryFeeCents: fee,
+        updatedAt: iso(-HOUR),
+      });
+      const user = await newUser();
+      const res = await call(user, 'POST', `/public/events/${t.id}/register`, {
+        name: `Paid ${crypto.randomUUID()}`,
+        email: `${crypto.randomUUID()}@x.test`,
+      });
+      expect(res.status).toBe(201);
+      return { organizer, t, user, regId: res.body.registration.id as string };
+    }
+    const stored = async (tournamentId: string, regId: string) =>
+      (await store.listTournamentRegistrations(tournamentId)).find((r) => r.id === regId)!;
+
+    it('attaches a receipt, marks it submitted, and lets the organizer read it', async () => {
+      const { organizer, t, user, regId } = await paidEntry();
+      expect((await stored(t.id, regId)).paymentStatus).toBe('pending_receipt');
+      const res = await upload(user, regId);
+      expect(res.status).toBe(200);
+      expect(res.body.registration).toMatchObject({
+        id: regId,
+        hasReceipt: true,
+        paymentStatus: 'submitted',
+        status: 'pending',
+      });
+      expect(res.body.registration).not.toHaveProperty('receiptStoragePath');
+      expect(res.body.registration).not.toHaveProperty('receiptDataUrl');
+      const read = await call(organizer, 'GET', `/tournaments/${t.id}/registrations/${regId}/receipt`);
+      expect(read.status).toBe(200);
+    });
+
+    it('replaces a receipt and removes the old file', async () => {
+      const { t, user, regId } = await paidEntry();
+      await upload(user, regId);
+      const first = (await stored(t.id, regId)).receiptStoragePath!;
+      const second = await upload(user, regId, PDF_URL);
+      expect(second.status).toBe(200);
+      const after = await stored(t.id, regId);
+      expect(after.receiptStoragePath).not.toBe(first);
+      expect(after.receiptContentType).toBe('application/pdf');
+      expect(await readReceipt(first)).toBeNull();
+      expect(await readReceipt(after.receiptStoragePath!)).not.toBeNull();
+    });
+
+    it('works for the account whose saved profile made the entry', async () => {
+      const organizer = await newUser();
+      const t = await seedTournament(organizer, { registrationOpen: true });
+      await store.updateTournament(t.id, {
+        registrationOpen: true,
+        entryFeeCents: 5000,
+        updatedAt: iso(-HOUR),
+      });
+      const parent = await newUser();
+      const child = await call(parent, 'POST', '/player/profiles', {
+        fullName: 'Kid',
+        relationship: 'child',
+      });
+      const entry = await call(parent, 'POST', `/public/events/${t.id}/register`, {
+        playerProfileId: child.body.profile.id,
+      });
+      expect((await upload(parent, entry.body.registration.id)).status).toBe(200);
+    });
+
+    it('refuses another account and the organizer, and changes nothing', async () => {
+      const { organizer, t, user, regId } = await paidEntry();
+      await upload(user, regId);
+      const before = await stored(t.id, regId);
+      expect((await upload(await newUser(), regId, PDF_URL)).status).toBe(404);
+      expect((await upload(organizer, regId, PDF_URL)).status).toBe(404);
+      const after = await stored(t.id, regId);
+      expect(after.receiptStoragePath).toBe(before.receiptStoragePath);
+      expect(after.receiptContentType).toBe('image/png');
+    });
+
+    it('a caller with no identity matches nobody’s entry', async () => {
+      const { regId } = await paidEntry();
+      expect((await upload(null, regId)).status).toBe(404);
+    });
+
+    it.each(['approve', 'reject'])('refuses an entry the organizer chose to %s', async (action) => {
+      const { organizer, t, user, regId } = await paidEntry();
+      await upload(user, regId);
+      const decided = await call(organizer, 'POST', `/tournaments/${t.id}/registrations/${regId}/review`, {
+        action,
+      });
+      expect(decided.status).toBe(200);
+      const before = await stored(t.id, regId);
+      const res = await upload(user, regId, PDF_URL);
+      expect(res.status).toBe(409);
+      const after = await stored(t.id, regId);
+      expect(after.receiptStoragePath).toBe(before.receiptStoragePath);
+      expect(after.paymentStatus).toBe(before.paymentStatus);
+    });
+
+    it('takes a receipt on a waitlisted entry', async () => {
+      const { organizer, t, user, regId } = await paidEntry();
+      const waited = await call(organizer, 'POST', `/tournaments/${t.id}/registrations/${regId}/review`, {
+        action: 'waitlist',
+      });
+      expect(waited.status).toBe(200);
+      expect((await upload(user, regId)).status).toBe(200);
+    });
+
+    it('refuses an entry with no fee', async () => {
+      const { user, regId } = await paidEntry(0);
+      expect((await upload(user, regId)).status).toBe(409);
+    });
+
+    it.each([
+      ['html', 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='],
+      ['svg', 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='],
+      ['a page claiming to be a PNG', 'data:image/png;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='],
+      ['not a string', 7],
+    ])('refuses %s, using the same check as registering', async (_label, bad) => {
+      const { t, user, regId } = await paidEntry();
+      expect((await upload(user, regId, bad)).status).toBe(400);
+      expect((await stored(t.id, regId)).receiptStoragePath).toBeNull();
+      expect((await stored(t.id, regId)).paymentStatus).toBe('pending_receipt');
+    });
+
+    it('an upload that loses to a decision leaves the decision and its file alone', async () => {
+      const { organizer, t, user, regId } = await paidEntry();
+      await upload(user, regId);
+      await call(organizer, 'POST', `/tournaments/${t.id}/registrations/${regId}/review`, {
+        action: 'approve',
+      });
+      const before = await stored(t.id, regId);
+      expect(
+        await store.replaceRegistrationReceipt(regId, {
+          storagePath: 'x/late.png',
+          contentType: 'image/png',
+        }),
+      ).toBeNull();
+      expect((await stored(t.id, regId)).receiptStoragePath).toBe(before.receiptStoragePath);
+    });
+
+    it('a deleted account’s entry can’t be reached, and its receipt stays scheduled', async () => {
+      const { t, user, regId } = await paidEntry();
+      await upload(user, regId);
+      await call(user, 'DELETE', '/me');
+      expect((await upload(user, regId, PDF_URL)).status).toBe(404);
+      const due = await store.listDueReceiptPurges(iso(31 * 24 * HOUR));
+      expect(due.map((d) => d.registrationId)).toContain(regId);
+      await store.clearPurgedReceipt(regId);
+      expect((await stored(t.id, regId)).receiptStoragePath).toBeNull();
+    });
+  });
 
   describe('consent notice acceptance', () => {
     async function openEvent() {
