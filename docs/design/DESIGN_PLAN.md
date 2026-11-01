@@ -1,5 +1,7 @@
 # Chess Alokas: UI/UX overhaul plan
 
+> **Direction changed 2026-11-01.** After seeing it on a real phone, the founder rejected the paper and ink look as dull. Use the old forest green and gold brand on every surface, with a plainer, denser variant for the organizer desk. This plan's layouts, workflows, name rules, sync honesty and accessibility targets still apply. Its palette, typography, "no cards" rule and the look of the mockups do not.
+
 Status: plan and mockups only. Nothing in the repo was changed. All evidence below comes from the current working copy (branch `feat/auth-cloud-deploy`, uncommitted edits included), built locally and walked with Playwright using invented players. API in memory mode, Supabase auth mocked in the browser. Screens from that walk are in `screenshots/current/`; mockup captures are in `screenshots/`.
 
 **Verdict.** The product logic is strong and the interface hides it. The app knows about score groups, floor PINs, offline queues and card rules, but it presents them as a dark green and gold theme over a stack of cards, tabs and paragraphs. The trouble is not only taste: names get cut to "SITI ..." on the director's desk, and two different children appear identical to a parent.
