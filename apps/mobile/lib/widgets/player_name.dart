@@ -70,6 +70,7 @@ String? disambiguatorFor(int? number, String? section) {
 /// look identical.
 class PlayerName extends StatelessWidget {
   static const List<double> widthSteps = [100, 92, 84, 76, 68, 62];
+  static const double _fitMargin = 1.08;
 
   final String name;
   final int? number;
@@ -109,7 +110,7 @@ class PlayerName extends StatelessWidget {
         maxLines: 1,
       )..layout();
       // A margin: measured and painted widths can differ slightly on a device.
-      final fits = painter.width * 1.08 <= maxWidth;
+      final fits = painter.width * _fitMargin <= maxWidth;
       painter.dispose();
       if (fits) return step;
     }
@@ -155,7 +156,8 @@ class PlayerName extends StatelessWidget {
               textScaler: MediaQuery.textScalerOf(context),
               maxLines: 1,
             )..layout();
-            final fitsOnOneLine = !max.isFinite || painter.width <= max;
+            final fitsOnOneLine =
+                !max.isFinite || painter.width * _fitMargin <= max;
             painter.dispose();
             if (fitsOnOneLine) {
               nameBlock = Text.rich(oneLine);

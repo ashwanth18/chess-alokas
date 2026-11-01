@@ -343,42 +343,57 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DropdownButtonFormField<String>(
-          key: const Key('city-picker'),
-          initialValue: selected.id,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Search near'),
-          items: [
-            if (usingDevice)
-              const DropdownMenuItem(
-                value: LocationPreset.deviceId,
-                child: Text('Near: your location'),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                key: const Key('city-picker'),
+                initialValue: selected.id,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Search near'),
+                items: [
+                  if (usingDevice)
+                    const DropdownMenuItem(
+                      value: LocationPreset.deviceId,
+                      child: Text('Near: your location'),
+                    ),
+                  ...locationPresets.map(
+                    (preset) => DropdownMenuItem<String>(
+                      value: preset.id,
+                      child: Text(preset.label),
+                    ),
+                  ),
+                ],
+                onChanged: (id) {
+                  if (id == null || id == LocationPreset.deviceId) return;
+                  widget.onLocationChanged(
+                    locationPresets.firstWhere((p) => p.id == id),
+                  );
+                },
               ),
-            ...locationPresets.map(
-              (preset) => DropdownMenuItem<String>(
-                value: preset.id,
-                child: Text(preset.label),
+            ),
+            const SizedBox(width: 8),
+            Tooltip(
+              message: usingDevice ? 'Update my location' : 'Use my location',
+              child: OutlinedButton(
+                key: const Key('use-my-location'),
+                onPressed: _locating ? null : _useDeviceLocation,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(56, 56),
+                  padding: EdgeInsets.zero,
+                ),
+                child: Icon(
+                  usingDevice ? Icons.my_location : Icons.location_searching,
+                  semanticLabel: _locating
+                      ? 'Finding your location'
+                      : usingDevice
+                      ? 'Update my location'
+                      : 'Use my location',
+                ),
               ),
             ),
           ],
-          onChanged: (id) {
-            if (id == null || id == LocationPreset.deviceId) return;
-            widget.onLocationChanged(
-              locationPresets.firstWhere((p) => p.id == id),
-            );
-          },
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton(
-          key: const Key('use-my-location'),
-          onPressed: _locating ? null : _useDeviceLocation,
-          child: Text(
-            _locating
-                ? 'Finding your location...'
-                : usingDevice
-                ? 'Update my location'
-                : 'Use my location',
-          ),
         ),
         if (problem != null) ...[
           const SizedBox(height: 8),
