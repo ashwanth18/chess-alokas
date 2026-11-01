@@ -124,10 +124,12 @@ Workflow: [`.github/workflows/desktop-release.yml`](../.github/workflows/desktop
 | Step | Detail |
 |------|--------|
 | Trigger | `push` tags matching `v*`, or manual `workflow_dispatch` |
-| Matrix | Windows, Linux, macOS |
-| Build | `pnpm run build:desktop` (web `--mode desktop` + API bundle + electron-builder) |
+| Verify | Stops unless the tag equals `apps/desktop/package.json` version and typecheck + tests pass |
+| Matrix | Windows, Linux, macOS, with a read-only token |
+| Build | `pnpm run build:desktop` (web `--mode desktop` + API bundle + electron-builder, `--publish never`) |
+| bbpPairings | Download is checked against a pinned SHA-256 in `scripts/fetch-bbp-pairings.mjs` |
 | Auth env | Baked from committed `apps/web/.env.desktop` — **do not** set empty `VITE_SUPABASE_*` secrets in the workflow |
-| On tag | Uploads installers + `latest*.yml` + `*.blockmap` to a GitHub Release |
+| On tag | After all three builds succeed, a final job creates a draft release, uploads installers + `latest*.yml` + `*.blockmap`, then publishes it |
 | Manual run | Uploads Actions artifacts only (no Release) |
 
 ### Artifacts
@@ -135,7 +137,7 @@ Workflow: [`.github/workflows/desktop-release.yml`](../.github/workflows/desktop
 | Platform | Files |
 |----------|--------|
 | Windows | `Chess-Alokas-Setup-win-x64.exe`, `Chess-Alokas-Portable-win-x64.exe` |
-| Linux | `Chess-Alokas-linux-x64.AppImage` |
+| Linux | `Chess-Alokas-linux-x86_64.AppImage` |
 | macOS | `Chess-Alokas-mac-x64.dmg`, `Chess-Alokas-mac-arm64.dmg` (unsigned) |
 
 Also published: `latest.yml` / `latest-*.yml` and blockmaps for `electron-updater`.
@@ -144,11 +146,11 @@ Also published: `latest.yml` / `latest-*.yml` and blockmaps for `electron-update
 
 | Build | Update path |
 |-------|-------------|
-| Windows **NSIS installer** | In-app check → download → silent install/restart (`electron-updater`) |
-| Windows portable / unsigned macOS | Opens [releases/latest](https://github.com/ashwanth18/chess-alokas/releases/latest) |
+| Windows **NSIS installer** / Linux AppImage | In-app check, then Download and Restart & update only when clicked (`electron-updater`). Warns while a tournament is in progress. Nothing installs on quit. |
+| Windows portable / unsigned macOS | Download opens [releases/latest](https://github.com/ashwanth18/chess-alokas/releases/latest) in the browser |
 | Landing page `/` | Fetches GitHub `releases/latest` for download links |
 
-Packaged desktop talks to **cloud** API (`https://chess-manager.alokas.com/api`) by default. Local API sidecar is for `pnpm --filter @chess-alokas/desktop dev` (or `DESKTOP_LOCAL_API=1`).
+Packaged desktop talks to **cloud** API (`https://chess-manager.alokas.com/api`) by default. Local API sidecar is for unpackaged runs only: `pnpm --filter @chess-alokas/desktop dev` (or `DESKTOP_LOCAL_API=1`). Packaged builds ignore it and ship no API bundle.
 
 ### Local desktop build (optional)
 
@@ -180,7 +182,7 @@ Use when a feature needs web **and** desktop:
 1. **Schema** — apply any new `supabase/migrations/*.sql` on production.
 2. **Web/API** — push to Dokploy branch → wait for deploy → `curl …/api/health`.
 3. **Desktop** — bump `apps/desktop/package.json` → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`.
-4. **Watch** GitHub Actions until all three OS jobs succeed and the Release has assets.
+4. **Watch** GitHub Actions until verify, all three OS builds and publish succeed. The Release stays a draft until the final job.
 5. **Smoke** — web in browser; installed Windows app update (or fresh installer from the Release).
 
 ---

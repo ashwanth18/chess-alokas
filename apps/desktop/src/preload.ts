@@ -53,6 +53,15 @@ export interface DesktopBridge {
     boards: Array<{ board: number; whiteId: string | null; blackId: string | null; isBye: boolean }>;
     byePlayerId: string | null;
   }>;
+  /** Tells the updater how many tournaments are running, so it can warn before updating. */
+  setLiveTournamentCount: (count: number) => void;
+  backupSave: (json: string, reason: string) => Promise<{ name: string }>;
+  backupList: () => Promise<Array<{ name: string; size: number; savedAt: string }>>;
+  backupRead: (name: string) => Promise<string>;
+  backupExport: (json: string) => Promise<string | null>;
+  backupImport: () => Promise<string | null>;
+  backupOpenFolder: () => Promise<void>;
+  backupFolder: () => string;
 }
 
 const apiBaseUrl = ipcRenderer.sendSync('desktop:get-api-base-url') as string;
@@ -86,6 +95,16 @@ const bridge: DesktopBridge = {
   },
   openLogsFolder: () => ipcRenderer.invoke('desktop:open-logs-folder') as Promise<void>,
   pairDutch: (input) => ipcRenderer.invoke('desktop:pair-dutch', input),
+  setLiveTournamentCount: (count) => {
+    ipcRenderer.send('desktop:set-live-tournament-count', count);
+  },
+  backupSave: (json, reason) => ipcRenderer.invoke('desktop:backup-save', json, reason),
+  backupList: () => ipcRenderer.invoke('desktop:backup-list'),
+  backupRead: (name) => ipcRenderer.invoke('desktop:backup-read', name),
+  backupExport: (json) => ipcRenderer.invoke('desktop:backup-export', json),
+  backupImport: () => ipcRenderer.invoke('desktop:backup-import'),
+  backupOpenFolder: () => ipcRenderer.invoke('desktop:backup-open-folder'),
+  backupFolder: () => ipcRenderer.sendSync('desktop:backup-folder') as string,
   onUpdateStatus: (listener) => {
     const handler = (_event: IpcRendererEvent, status: DesktopUpdateStatus) => listener(status);
     ipcRenderer.on('desktop:update-status', handler);

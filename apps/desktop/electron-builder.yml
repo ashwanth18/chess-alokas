@@ -5,30 +5,37 @@ executableName: Chess-Alokas
 copyright: Copyright © Chess Alokas
 directories:
   output: release
+  # An icon.png (at least 512x512) placed here is picked up automatically for all platforms.
   buildResources: resources
 files:
   - out/**/*
+  - '!out/**/*.map'
   - package.json
+# The API sidecar is development-only, so packaged builds ship no API bundle and no env template.
 extraResources:
   - from: ../web/dist
     to: web
-  - from: ../api/desktop-bundle
-    to: api
-    filter:
-      - '**/*'
-      - '!**/*.map'
-  - from: resources/api.env.example
-    to: api.env.example
 publish:
   provider: github
   owner: ashwanth18
   repo: chess-alokas
   releaseType: release
+# Runtime hardening. RunAsNode off is why a packaged build cannot start the sidecar.
+# GrantFileProtocolExtraPrivileges stays on because the app loads from file://.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 win:
   extraResources:
     - from: ../../vendor/bbp-pairings/win-x64/bbpPairings.exe
       to: bbp-pairings/bbpPairings.exe
-  # Unsigned CI builds: keep rcedit metadata, skip Authenticode (no cert on runners).
+  # CODE SIGNING: see "Code signing" in README.md. Once a certificate exists, delete
+  # signExecutable below and add the publisher name so updates are checked against it:
+  #   signtoolOptions:
+  #     publisherName: <exact certificate subject CN>
   signExecutable: false
   target:
     - target: nsis

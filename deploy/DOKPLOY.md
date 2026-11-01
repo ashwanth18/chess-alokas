@@ -89,11 +89,11 @@ Sign up on the site → create tournament → Sync → Issue digital.
 
 ## 6. Desktop
 
-Packaged Electron uses `https://chess-manager.alokas.com/api` by default. Users sign in (password / OTP / OAuth); they never paste secret keys.
+Packaged Electron uses `https://chess-manager.alokas.com/api` by default. Users sign in with password or email code (Google and GitHub are web only); they never paste secret keys.
 
 Downloads: landing page at `/` links to [GitHub Releases](https://github.com/ashwanth18/chess-alokas/releases/latest) (Windows / Linux / macOS). Publish with `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
-Local API sidecar is only for `pnpm --filter @chess-alokas/desktop dev` (or `DESKTOP_LOCAL_API=1`).
+Local API sidecar is only for unpackaged runs: `pnpm --filter @chess-alokas/desktop dev` (or `DESKTOP_LOCAL_API=1`). Packaged builds ignore it.
 
 ## 7. Claim legacy cloud rows (optional)
 

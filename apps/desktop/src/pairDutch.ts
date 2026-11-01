@@ -1,29 +1,17 @@
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveDesktopBbpBinary } from './bbpPath.js';
+import { validateDutchInput, type ValidDutchInput } from './policy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-export type DesktopDutchInput = {
-  players: Array<{ id: string; name: string; rating?: number | null; seed?: number | null }>;
-  pastGames: Array<{
-    round: number;
-    whiteId: string | null;
-    blackId: string | null;
-    result: string;
-    isBye: boolean;
-  }>;
-  round: number;
-  totalRounds?: number;
-  initialColor?: 'W' | 'B';
-};
 
 export type DesktopDutchOutput = {
   boards: Array<{ board: number; whiteId: string | null; blackId: string | null; isBye: boolean }>;
   byePlayerId: string | null;
 };
 
-export async function pairDutchFromMain(input: DesktopDutchInput): Promise<DesktopDutchOutput> {
+export async function pairDutchFromMain(raw: unknown): Promise<DesktopDutchOutput> {
+  const input = validateDutchInput(raw);
   if (process.platform === 'darwin') {
     throw new Error(
       'FIDE Dutch on macOS uses the cloud pairing service (no official bbpPairings Mac binary).',
@@ -37,7 +25,7 @@ export async function pairDutchFromMain(input: DesktopDutchInput): Promise<Deskt
 
   const bundled = path.join(__dirname, 'bbpEngine.js');
   const mod = (await import(pathToFileURL(bundled).href)) as {
-    pairDutchWithBbp: (next: DesktopDutchInput) => Promise<DesktopDutchOutput>;
+    pairDutchWithBbp: (next: ValidDutchInput) => Promise<DesktopDutchOutput>;
   };
   return mod.pairDutchWithBbp(input);
 }

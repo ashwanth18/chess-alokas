@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { createWriteStream } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -19,16 +20,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const vendor = path.join(root, 'vendor', 'bbp-pairings');
 
+// sha256 values were computed from the v6.0.0 release assets as they were downloaded
+// on 2026-11-01. The upstream project does not publish checksums, so this pins what
+// was fetched that day: it detects later tampering, not a problem already present.
 const allAssets = {
   win32: {
     url: `${BASE}/bbpPairings-v${VERSION}-x86_64-pc-windows.zip`,
     exeName: 'bbpPairings.exe',
     destDir: path.join(vendor, 'win-x64'),
+    sha256: 'd2bfc61cbd291a5458f18adccb43b19b6f1be40a9c0cc86a5142b605298dc0d7',
   },
   linux: {
     url: `${BASE}/bbpPairings-v${VERSION}-x86_64-pc-linux.tar.gz`,
     exeName: 'bbpPairings.exe',
     destDir: path.join(vendor, 'linux-x64'),
+    sha256: 'bffd2d5a4dc9d86eb3d9886339e8ca446d88683f77559f0889ea0d2040e7d827',
   },
 };
 
@@ -84,6 +90,11 @@ for (const key of keys) {
   const archivePath = path.join(spec.destDir, archiveName);
   console.log(`Fetching ${spec.url}`);
   await download(spec.url, archivePath);
+  const actual = createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex');
+  if (actual !== spec.sha256) {
+    fs.unlinkSync(archivePath);
+    throw new Error(`Checksum mismatch for ${archiveName}: expected ${spec.sha256}, got ${actual}`);
+  }
 
   if (archiveName.endsWith('.zip')) {
     await extractZip(archivePath, spec.destDir);

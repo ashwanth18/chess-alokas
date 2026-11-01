@@ -6,12 +6,55 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Build jobs run third-party install scripts, so they get a read-only token.
+# Only the final publish job, which runs no project code, can write to releases.
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      SENTRYCLI_SKIP_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match the desktop version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match apps/desktop/package.json version ${version}"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build native tools skipped by --ignore-scripts
+        run: pnpm rebuild esbuild
+
+      - name: Fetch bbpPairings v6 (pairing tests use it)
+        run: node scripts/fetch-bbp-pairings.mjs
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -26,6 +69,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     env:
+      # CODE SIGNING: when a certificate exists, see "Code signing" in apps/desktop/README.md.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       SENTRYCLI_SKIP_DOWNLOAD: '1'
       # Authenticated Electron binary download (avoids GitHub rate limits / hang-ups).
@@ -103,28 +147,50 @@ jobs:
           VITE_APP_VERSION: desktop@${{ github.ref_name }}
         run: pnpm run build:desktop
 
-      - name: Upload release artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Chess Alokas ${{ github.ref_name }}
-          draft: false
-          generate_release_notes: true
-          files: |
+          name: desktop-${{ matrix.platform }}
+          path: |
             apps/desktop/release/Chess-Alokas-*.exe
             apps/desktop/release/Chess-Alokas-*.AppImage
             apps/desktop/release/Chess-Alokas-*.dmg
             apps/desktop/release/latest*.yml
             apps/desktop/release/*.blockmap
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
 
-      - name: Upload build artifacts (manual run)
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+  # Clients see nothing until every platform built. The release stays a draft
+  # while assets upload, so "latest" never points at one without its update feed.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          name: desktop-${{ matrix.platform }}
-          path: |
-            apps/desktop/release/Chess-Alokas-*
-          if-no-files-found: warn
+          path: artifacts
+          merge-multiple: true
+
+      - name: Check every update feed and installer is present
+        shell: bash
+        run: |
+          for f in latest.yml latest-linux.yml latest-mac.yml Chess-Alokas-Setup-win-x64.exe; do
+            test -f "artifacts/$f" || { echo "::error::Missing $f"; exit 1; }
+          done
+
+      - name: Create draft release and upload assets
+        shell: bash
+        run: |
+          # A re-run after a failed upload reuses the draft from the first attempt.
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --draft --verify-tag --generate-notes --title "Chess Alokas $TAG"
+          gh release upload "$TAG" artifacts/* --clobber
+
+      - name: Publish
+        run: gh release edit "$TAG" --draft=false --latest

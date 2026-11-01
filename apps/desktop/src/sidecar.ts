@@ -38,13 +38,6 @@ function repoRootFromDev(): string {
   return path.resolve(__dirname, '../../..');
 }
 
-function resourcesRoot(): string {
-  if (app.isPackaged) {
-    return process.resourcesPath;
-  }
-  return repoRootFromDev();
-}
-
 /** Ensure userData/api.env exists (copy example or local apps/api/.env on first run). */
 export function ensureUserApiEnv(): string {
   const userData = app.getPath('userData');
@@ -53,7 +46,6 @@ export function ensureUserApiEnv(): string {
     const candidates = [
       // Dev convenience: reuse local API secrets if present
       path.join(repoRootFromDev(), 'apps/api/.env'),
-      path.join(resourcesRoot(), 'api.env.example'),
       path.join(repoRootFromDev(), 'apps/desktop/resources/api.env.example'),
       path.join(repoRootFromDev(), 'apps/api/.env.example'),
     ];
@@ -74,27 +66,13 @@ function certificatesDir(): string {
   return dir;
 }
 
-function nodeCommand(): { command: string; electronAsNode: boolean } {
-  if (app.isPackaged) {
-    return { command: process.execPath, electronAsNode: true };
-  }
-  const fromNpm = process.env['npm_node_execpath'];
-  if (fromNpm) return { command: fromNpm, electronAsNode: false };
-  return { command: 'node', electronAsNode: false };
+/** Development only: the RunAsNode fuse is off in packaged builds, which have no sidecar. */
+function nodeCommand(): string {
+  return process.env['npm_node_execpath'] ?? 'node';
 }
 
-function resolveApiEntry(): { command: string; args: string[]; cwd: string; electronAsNode: boolean } {
-  const { command, electronAsNode } = nodeCommand();
-
-  if (app.isPackaged) {
-    const apiRoot = path.join(process.resourcesPath, 'api');
-    return {
-      command,
-      args: [path.join(apiRoot, 'index.js')],
-      cwd: apiRoot,
-      electronAsNode,
-    };
-  }
+function resolveApiEntry(): { command: string; args: string[]; cwd: string } {
+  const command = nodeCommand();
 
   const apiPkg = path.join(repoRootFromDev(), 'apps/api');
   const distEntry = path.join(apiPkg, 'dist/index.js');
@@ -103,7 +81,6 @@ function resolveApiEntry(): { command: string; args: string[]; cwd: string; elec
       command,
       args: [distEntry],
       cwd: apiPkg,
-      electronAsNode,
     };
   }
 
@@ -115,7 +92,6 @@ function resolveApiEntry(): { command: string; args: string[]; cwd: string; elec
     command,
     args: [tsxCli, srcEntry],
     cwd: apiPkg,
-    electronAsNode,
   };
 }
 
@@ -139,7 +115,7 @@ export async function startApiSidecar(): Promise<SidecarHandle> {
   const port = await findFreePort();
   const envFile = ensureUserApiEnv();
   const certs = certificatesDir();
-  const { command, args, cwd, electronAsNode } = resolveApiEntry();
+  const { command, args, cwd } = resolveApiEntry();
   const baseUrl = `http://127.0.0.1:${port}`;
 
   const childEnv: NodeJS.ProcessEnv = {
@@ -152,13 +128,8 @@ export async function startApiSidecar(): Promise<SidecarHandle> {
   if (bbpExe) {
     childEnv['BBP_PAIRINGS_PATH'] = bbpExe;
   }
-  if (electronAsNode) {
-    childEnv['ELECTRON_RUN_AS_NODE'] = '1';
-  }
   // Avoid inheriting Electron's own ELECTRON_RUN_AS_NODE into unrelated tools
-  if (!electronAsNode) {
-    delete childEnv['ELECTRON_RUN_AS_NODE'];
-  }
+  delete childEnv['ELECTRON_RUN_AS_NODE'];
 
   const useEnvFileFlag = fs.existsSync(envFile);
   const finalArgs = useEnvFileFlag ? [`--env-file=${envFile}`, ...args] : args;

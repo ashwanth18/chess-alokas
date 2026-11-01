@@ -1,9 +1,7 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import { app, shell, type BrowserWindow } from 'electron';
+import { app, dialog, shell, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import type { AppUpdater, UpdateInfo, ProgressInfo } from 'electron-updater';
 
@@ -22,15 +20,15 @@ export type UpdateStatusPayload = {
   version?: string;
   percent?: number;
   message?: string;
-  /** Direct installer asset URL (never a GitHub HTML page). */
+  /** Kept for renderer compatibility; the app no longer downloads installers itself. */
   installerUrl?: string;
-  /** Local path after a manual installer download. */
   localInstallerPath?: string;
-  /** True when electron-updater can quitAndInstall silently (NSIS). */
+  /** True when electron-updater can quitAndInstall (NSIS / AppImage). */
   canInstall: boolean;
 };
 
 const RELEASES_API = 'https://api.github.com/repos/ashwanth18/chess-alokas/releases/latest';
+const RELEASES_PAGE = 'https://github.com/ashwanth18/chess-alokas/releases/latest';
 const PENDING_UPDATE_FILE = 'pending-update.json';
 const LAST_SEEN_VERSION_FILE = 'last-seen-version.txt';
 const JUST_UPDATED_NOTICE_FILE = 'just-updated-notice.json';
@@ -40,15 +38,8 @@ type PendingUpdateMarker = {
   to: string;
 };
 
-type GithubReleaseAsset = {
-  name: string;
-  browser_download_url: string;
-  size?: number;
-};
-
 type GithubRelease = {
   tag_name?: string;
-  assets?: GithubReleaseAsset[];
 };
 
 /** electron-updater is CommonJS; ESM named imports break in packaged Electron. */
@@ -58,7 +49,7 @@ function loadAutoUpdater(): AppUpdater | null {
     const mod = require('electron-updater') as { autoUpdater: AppUpdater };
     return mod.autoUpdater;
   } catch (err) {
-    log.error('Failed to load electron-updater — using direct installer download', err);
+    log.error('Failed to load electron-updater; updates will use the release page', err);
     return null;
   }
 }
@@ -72,10 +63,17 @@ let lastStatus: UpdateStatusPayload = {
 /** Survives until the renderer dismisses it (not cleared by update checks). */
 let activeJustUpdated: PendingUpdateMarker | null = null;
 
-/** Cached installer URL / local path for portable, mac, or updater fallback. */
-let pendingInstallerUrl: string | null = null;
-let pendingLocalInstaller: string | null = null;
-let downloadInFlight = false;
+/** True when the feed failed and only the tag comparison said an update exists. */
+let releasePageOnly = false;
+
+/** Tournaments currently running in this app's local database (reported by the renderer). */
+let liveTournamentCount = 0;
+
+export function setLiveTournamentCount(count: unknown): void {
+  if (typeof count === 'number' && Number.isInteger(count) && count >= 0 && count < 100_000) {
+    liveTournamentCount = count;
+  }
+}
 
 function userDataFile(name: string): string {
   return path.join(app.getPath('userData'), name);
@@ -151,7 +149,7 @@ function writePendingUpdate(toVersion: string) {
   }
 }
 
-/** After silent install + relaunch, surface a one-shot “updated” notice. */
+/** After silent install + relaunch, surface a one-shot "updated" notice. */
 function consumePendingUpdate(): PendingUpdateMarker | null {
   const file = userDataFile(PENDING_UPDATE_FILE);
   try {
@@ -222,47 +220,9 @@ function isPortableBuild(): boolean {
 function canAutoInstall(updater: AppUpdater | null): boolean {
   if (!updater) return false;
   if (isPortableBuild()) return false;
-  // Unsigned mac updates via electron-updater are unreliable; use direct .dmg download.
+  // Unsigned mac updates via electron-updater are unreliable; use the release page.
   if (process.platform === 'darwin') return false;
   return app.isPackaged;
-}
-
-function preferredInstallerName(): string {
-  if (process.platform === 'win32') {
-    return isPortableBuild()
-      ? 'Chess-Alokas-Portable-win-x64.exe'
-      : 'Chess-Alokas-Setup-win-x64.exe';
-  }
-  if (process.platform === 'darwin') {
-    return process.arch === 'arm64'
-      ? 'Chess-Alokas-mac-arm64.dmg'
-      : 'Chess-Alokas-mac-x64.dmg';
-  }
-  return 'Chess-Alokas-linux-x64.AppImage';
-}
-
-function pickInstallerAsset(assets: GithubReleaseAsset[] | undefined): GithubReleaseAsset | null {
-  if (!assets?.length) return null;
-  const preferred = preferredInstallerName();
-  const exact = assets.find((a) => a.name === preferred);
-  if (exact) return exact;
-  // Fallbacks if naming drifts slightly
-  if (process.platform === 'win32') {
-    return (
-      assets.find((a) => /Setup.*\.exe$/i.test(a.name)) ??
-      assets.find((a) => /Portable.*\.exe$/i.test(a.name)) ??
-      null
-    );
-  }
-  if (process.platform === 'darwin') {
-    const archHint = process.arch === 'arm64' ? 'arm64' : 'x64';
-    return (
-      assets.find((a) => a.name.toLowerCase().includes(archHint) && a.name.endsWith('.dmg')) ??
-      assets.find((a) => a.name.endsWith('.dmg')) ??
-      null
-    );
-  }
-  return assets.find((a) => a.name.endsWith('.AppImage')) ?? null;
 }
 
 function send(
@@ -281,8 +241,6 @@ function send(
     version: payload.version ?? (preserveVersion ? lastStatus.version : undefined),
     currentVersion: app.getVersion(),
     canInstall: payload.canInstall ?? canAutoInstall(updater),
-    installerUrl: payload.installerUrl ?? pendingInstallerUrl ?? undefined,
-    localInstallerPath: payload.localInstallerPath ?? pendingLocalInstaller ?? undefined,
   };
   const win = getWindow();
   if (!win || win.isDestroyed()) return;
@@ -311,6 +269,7 @@ function isNewer(remote: string, local: string): boolean {
 
 async function fetchLatestRelease(): Promise<GithubRelease | null> {
   const res = await fetch(RELEASES_API, {
+    signal: AbortSignal.timeout(10_000),
     headers: {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'Chess-Alokas-Desktop',
@@ -320,7 +279,12 @@ async function fetchLatestRelease(): Promise<GithubRelease | null> {
   return (await res.json()) as GithubRelease;
 }
 
-/** Fallback when electron-updater feed is missing or unsupported: compare tags + pick installer. */
+/**
+ * Tag comparison for builds without the feed (portable, macOS) or when the feed
+ * fails. It only ever tells the user; the update itself comes from the release
+ * page in their browser. This process never runs an installer it fetched itself,
+ * because outside electron-updater there is no checksum to verify it against.
+ */
 async function checkViaGithubApi(
   getWindow: () => BrowserWindow | null,
   updater: AppUpdater | null,
@@ -337,29 +301,13 @@ async function checkViaGithubApi(
       );
       return true;
     }
-    const asset = pickInstallerAsset(body.assets);
-    pendingInstallerUrl = asset?.browser_download_url ?? null;
-    pendingLocalInstaller = null;
-    if (!pendingInstallerUrl) {
-      send(
-        getWindow,
-        {
-          status: 'error',
-          version: remote,
-          message: `v${remote} is available, but no installer was found for this platform.`,
-          canInstall: false,
-        },
-        updater,
-      );
-      return true;
-    }
+    releasePageOnly = true;
     send(
       getWindow,
       {
         status: 'available',
         version: remote,
-        message: `Version ${remote} is available.`,
-        installerUrl: pendingInstallerUrl,
+        message: `Version ${remote} is available. Download opens the release page in your browser.`,
         canInstall: false,
       },
       updater,
@@ -371,139 +319,28 @@ async function checkViaGithubApi(
   }
 }
 
-async function downloadInstallerFile(
+/** Warn before touching the app while a tournament is running. Returns true to proceed. */
+async function confirmIfTournamentLive(
   getWindow: () => BrowserWindow | null,
-  updater: AppUpdater | null,
-  url: string,
-  version: string | undefined,
-): Promise<void> {
-  if (downloadInFlight) return;
-  downloadInFlight = true;
-  try {
-    send(
-      getWindow,
-      {
-        status: 'downloading',
-        version,
-        percent: 0,
-        message: `Downloading v${version ?? 'update'}…`,
-        installerUrl: url,
-        canInstall: false,
-      },
-      updater,
-    );
-
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/octet-stream',
-        'User-Agent': 'Chess-Alokas-Desktop',
-      },
-      redirect: 'follow',
-    });
-    if (!res.ok || !res.body) {
-      throw new Error(`Download failed (${res.status})`);
-    }
-
-    const total = Number(res.headers.get('content-length') || 0);
-    const fileName =
-      preferredInstallerName().replace(/(\.\w+)$/, (_m, ext: string) =>
-        version ? `-${version}${ext}` : ext,
-      ) || path.basename(new URL(url).pathname);
-    const dest = path.join(app.getPath('downloads'), fileName);
-    const tmp = `${dest}.part`;
-
-    let received = 0;
-    let lastPct = -1;
-    const nodeReadable = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream);
-    const fileStream = fs.createWriteStream(tmp);
-
-    nodeReadable.on('data', (chunk: Buffer) => {
-      received += chunk.length;
-      if (total > 0) {
-        const pct = Math.min(99, Math.round((received / total) * 100));
-        if (pct !== lastPct) {
-          lastPct = pct;
-          send(
-            getWindow,
-            {
-              status: 'downloading',
-              version,
-              percent: pct,
-              message: `Downloading update… ${pct}%`,
-              installerUrl: url,
-              canInstall: false,
-            },
-            updater,
-          );
-        }
-      }
-    });
-
-    await pipeline(nodeReadable, fileStream);
-    if (fs.existsSync(dest)) fs.unlinkSync(dest);
-    fs.renameSync(tmp, dest);
-    if (process.platform === 'linux') {
-      try {
-        fs.chmodSync(dest, 0o755);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    pendingLocalInstaller = dest;
-    if (version) writePendingUpdate(version);
-    send(
-      getWindow,
-      {
-        status: 'downloaded',
-        version,
-        percent: 100,
-        message: `v${version ?? 'Update'} downloaded — click Install to open the installer.`,
-        installerUrl: url,
-        localInstallerPath: dest,
-        canInstall: false,
-      },
-      updater,
-    );
-  } catch (err) {
-    log.error('Installer download failed', err);
-    send(
-      getWindow,
-      {
-        status: 'error',
-        version,
-        message: err instanceof Error ? err.message : 'Download failed',
-        installerUrl: url,
-        canInstall: false,
-      },
-      updater,
-    );
-  } finally {
-    downloadInFlight = false;
-  }
-}
-
-async function ensureInstallerUrl(): Promise<string | null> {
-  if (pendingInstallerUrl) return pendingInstallerUrl;
-  if (lastStatus.installerUrl) {
-    pendingInstallerUrl = lastStatus.installerUrl;
-    return pendingInstallerUrl;
-  }
-  const body = await fetchLatestRelease();
-  const asset = pickInstallerAsset(body?.assets);
-  pendingInstallerUrl = asset?.browser_download_url ?? null;
-  return pendingInstallerUrl;
-}
-
-async function openLocalInstaller(localPath: string): Promise<void> {
-  const err = await shell.openPath(localPath);
-  if (err) {
-    throw new Error(err);
-  }
-  // Give the OS a moment to launch the installer, then quit so files aren't locked.
-  setTimeout(() => {
-    app.quit();
-  }, 1200);
+  action: string,
+): Promise<boolean> {
+  if (liveTournamentCount === 0) return true;
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Not now', `${action} anyway`],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Tournament in progress',
+    message: 'A tournament is in progress on this computer.',
+    detail:
+      'We recommend updating after the event. Updating now uses venue bandwidth and restarts the app, and a new version cannot be rolled back.',
+  };
+  const win = getWindow();
+  const { response } = win
+    ? await dialog.showMessageBox(win, options)
+    : await dialog.showMessageBox(options);
+  log.info('Update during live tournament', { action, proceed: response === 1 });
+  return response === 1;
 }
 
 export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
@@ -516,23 +353,25 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
 
   if (autoUpdater) {
     autoUpdater.logger = log;
-    // Download as soon as an update is found — user only confirms restart.
-    autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = true;
+    // Updates happen only on explicit user action: a venue must not lose
+    // bandwidth to a download, nor get a new build by closing the app.
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowPrerelease = false;
+    autoUpdater.allowDowngrade = false;
 
     autoUpdater.on('checking-for-update', () => {
       send(getWindow, { status: 'checking', message: 'Checking for updates…' }, autoUpdater);
     });
 
     autoUpdater.on('update-available', (info: UpdateInfo) => {
+      releasePageOnly = false;
       send(
         getWindow,
         {
-          status: 'downloading',
+          status: 'available',
           version: info.version,
-          percent: 0,
-          message: `Downloading v${info.version}…`,
+          message: `Version ${info.version} is available. It downloads only when you choose.`,
           canInstall: canAutoInstall(autoUpdater),
         },
         autoUpdater,
@@ -561,13 +400,12 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
     });
 
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
-      writePendingUpdate(info.version);
       send(
         getWindow,
         {
           status: 'downloaded',
           version: info.version,
-          message: `v${info.version} ready — restart to install silently.`,
+          message: `v${info.version} ready. It installs only when you click restart.`,
           canInstall: true,
         },
         autoUpdater,
@@ -592,76 +430,45 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
     });
   }
 
+  async function openReleasePage() {
+    await shell.openExternal(RELEASES_PAGE);
+  }
+
   async function download() {
-    if (canAutoInstall(autoUpdater) && !pendingInstallerUrl) {
-      try {
-        await autoUpdater!.downloadUpdate();
-      } catch (err) {
-        log.error('downloadUpdate failed', err);
-        const url = await ensureInstallerUrl();
-        if (url) {
-          await downloadInstallerFile(getWindow, autoUpdater, url, lastStatus.version);
-          return;
-        }
-        send(
-          getWindow,
-          {
-            status: 'error',
-            message: err instanceof Error ? err.message : 'Download failed',
-            canInstall: false,
-          },
-          autoUpdater,
-        );
-      }
+    if (!canAutoInstall(autoUpdater) || releasePageOnly) {
+      await openReleasePage();
       return;
     }
-
-    const url = await ensureInstallerUrl();
-    if (!url) {
+    if (!(await confirmIfTournamentLive(getWindow, 'Download'))) return;
+    try {
+      send(
+        getWindow,
+        { status: 'downloading', percent: 0, message: 'Starting download…', canInstall: true },
+        autoUpdater,
+      );
+      await autoUpdater!.downloadUpdate();
+    } catch (err) {
+      log.error('downloadUpdate failed', err);
       send(
         getWindow,
         {
           status: 'error',
-          message: 'No installer available for this platform.',
+          message: err instanceof Error ? err.message : 'Download failed',
           canInstall: false,
         },
         autoUpdater,
       );
-      return;
     }
-    await downloadInstallerFile(getWindow, autoUpdater, url, lastStatus.version);
   }
 
   async function install() {
-    if (canAutoInstall(autoUpdater) && lastStatus.status === 'downloaded' && !pendingLocalInstaller) {
+    if (canAutoInstall(autoUpdater) && lastStatus.status === 'downloaded') {
+      if (!(await confirmIfTournamentLive(getWindow, 'Restart and update'))) return;
       if (lastStatus.version) writePendingUpdate(lastStatus.version);
-      // Silent NSIS (/S) — no Next/Next wizard; relaunch after install.
+      // Silent NSIS (/S) with relaunch; runs only from this explicit click.
       autoUpdater!.quitAndInstall(true, true);
       return;
     }
-
-    const local = pendingLocalInstaller || lastStatus.localInstallerPath;
-    if (local && fs.existsSync(local)) {
-      try {
-        if (lastStatus.version) writePendingUpdate(lastStatus.version);
-        await openLocalInstaller(local);
-      } catch (err) {
-        send(
-          getWindow,
-          {
-            status: 'error',
-            version: lastStatus.version,
-            message: err instanceof Error ? err.message : 'Could not open installer',
-            localInstallerPath: local,
-            canInstall: false,
-          },
-          autoUpdater,
-        );
-      }
-      return;
-    }
-
-    // Nothing ready yet — download first (never open a browser).
     await download();
   }
 
@@ -683,7 +490,7 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
     },
 
     async check() {
-      // Keep activeJustUpdated until the user dismisses — do not clear here.
+      // Keep activeJustUpdated until the user dismisses; do not clear here.
       send(getWindow, { status: 'checking', message: 'Checking for updates…' }, autoUpdater);
       if (!app.isPackaged || !canAutoInstall(autoUpdater)) {
         const ok = await checkViaGithubApi(getWindow, autoUpdater);
@@ -705,7 +512,7 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
       try {
         await autoUpdater!.checkForUpdates();
       } catch (err) {
-        log.warn('electron-updater check failed, using direct installer download', err);
+        log.warn('electron-updater check failed, comparing release tags instead', err);
         const ok = await checkViaGithubApi(getWindow, autoUpdater);
         if (!ok) {
           send(
@@ -724,9 +531,9 @@ export function setupAutoUpdater(getWindow: () => BrowserWindow | null) {
     download,
     install,
 
-    /** Kept for IPC compat; always downloads in-app — never opens GitHub. */
-    openDownloadPage(_url?: string) {
-      return download();
+    /** The url argument from the renderer is ignored; only the fixed release page opens. */
+    openDownloadPage() {
+      return openReleasePage();
     },
   };
 }

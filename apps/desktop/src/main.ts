@@ -1,17 +1,47 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  net,
+  session,
+  shell,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+} from 'electron';
 import log from 'electron-log/main';
 import { startApiSidecar, type SidecarHandle } from './sidecar.js';
-import { getLastUpdateStatus, setupAutoUpdater, dismissJustUpdatedNotice } from './updater.js';
+import {
+  getLastUpdateStatus,
+  setLiveTournamentCount,
+  setupAutoUpdater,
+  dismissJustUpdatedNotice,
+} from './updater.js';
 import { installAppMenu } from './menu.js';
 import { clearLastError, openLogsFolder, readLastError, writeLastError } from './errors.js';
-import { pairDutchFromMain, type DesktopDutchInput } from './pairDutch.js';
-
-function isSafeExternalUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url) || url.startsWith('mailto:');
-}
+import { pairDutchFromMain } from './pairDutch.js';
+import {
+  buildCsp,
+  createCrashGuard,
+  indexFileUrl,
+  isAppPageUrl,
+  isInsideWebRoot,
+  isSafeExternalUrl,
+  validateBootIssue,
+} from './policy.js';
+import { readBuildConfig } from './buildConfig.js';
+import { reportMainError } from './mainSentry.js';
+import {
+  backupsDir,
+  exportToFile,
+  importFromFile,
+  listSnapshots,
+  openBackupsFolder,
+  readSnapshot,
+  saveSnapshot,
+} from './backups.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,16 +82,36 @@ log.info('Chess Alokas desktop starting', {
   remoteSession: isRemoteSession,
 });
 
-const CLOUD_API_URL =
-  process.env['CHESS_ALOKAS_API_URL'] ?? 'https://chess-manager.alokas.com/api';
+const PRODUCTION_API_URL = 'https://chess-manager.alokas.com/api';
+// Environment overrides exist for development only; a packaged install always
+// talks to production so another process cannot redirect its auth tokens.
+const CLOUD_API_URL = app.isPackaged
+  ? PRODUCTION_API_URL
+  : (process.env['CHESS_ALOKAS_API_URL'] ?? PRODUCTION_API_URL);
+
+const APP_PARTITION = 'persist:chess-alokas';
+/** Never loaded: the error page navigates here and will-navigate turns it into a reload. */
+const RETRY_URL = 'https://chess-alokas.invalid/retry';
 
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarHandle | null = null;
 let apiBaseUrl = CLOUD_API_URL;
 
 const isDev = !app.isPackaged && process.env['ELECTRON_DEV'] !== '0';
-/** Packaged builds use the cloud API by default (no secrets on the device). */
-const useLocalSidecar = isDev || process.env['DESKTOP_LOCAL_API'] === '1';
+/** Local API sidecar is development-only; packaged builds have no secrets and use the cloud. */
+const useLocalSidecar = !app.isPackaged && (isDev || process.env['DESKTOP_LOCAL_API'] === '1');
+
+function webRoot(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'web')
+    : path.join(__dirname, '../../web/dist');
+}
+
+function indexHtmlPath(): string {
+  return path.join(webRoot(), 'index.html');
+}
+
+const crashGuard = createCrashGuard(3, 5 * 60_000);
 
 // Only initialize the auto-updater when this process actually holds the
 // single-instance lock; otherwise a duplicate launch would consume and delete
@@ -90,10 +140,16 @@ function loadFailHtml(message: string): string {
   <div>
     <h1>Chess Alokas could not start</h1>
     <p>${safe}</p>
-    <p>Quit the app from Task Manager, then open it again. You can keep working on chess-manager.alokas.com.</p>
-    <button onclick="location.reload()">Try again</button>
+    <p>Your tournament data is stored on this computer. If this keeps happening, close the app and open it again. You can keep working on chess-manager.alokas.com.</p>
+    <button onclick="location.href='${RETRY_URL}'">Try again</button>
   </div>
 </body></html>`;
+}
+
+function showFailPage(message: string) {
+  void mainWindow?.loadURL(
+    `data:text/html;charset=utf-8,${encodeURIComponent(loadFailHtml(message))}`,
+  );
 }
 
 function loadFailMessage(errorCode: number, errorDescription: string): string {
@@ -104,53 +160,118 @@ function loadFailMessage(errorCode: number, errorDescription: string): string {
   return errorDescription || `Page load failed (${errorCode}).`;
 }
 
+/** Bridge calls are honoured only from the app's own top-level page. */
+function isTrustedSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  if (!frame || !mainWindow || event.sender !== mainWindow.webContents || frame.parent) return false;
+  if (isDev) return /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\//i.test(frame.url);
+  return isAppPageUrl(frame.url, indexFileUrl(indexHtmlPath()));
+}
+
+function onSync(channel: string, fn: (...args: unknown[]) => unknown) {
+  ipcMain.on(channel, (event, ...args: unknown[]) => {
+    if (!isTrustedSender(event)) {
+      log.warn('Rejected IPC from untrusted sender', channel);
+      // sendSync callers block until returnValue is set.
+      event.returnValue = null;
+      return;
+    }
+    event.returnValue = fn(...args) ?? null;
+  });
+}
+
+function handle(channel: string, fn: (...args: unknown[]) => unknown) {
+  ipcMain.handle(channel, (event, ...args: unknown[]) => {
+    if (!isTrustedSender(event)) {
+      log.warn('Rejected IPC from untrusted sender', channel);
+      throw new Error('Forbidden');
+    }
+    return fn(...args);
+  });
+}
+
 function registerIpc() {
-  ipcMain.on('desktop:get-api-base-url', (event) => {
-    event.returnValue = apiBaseUrl;
+  onSync('desktop:get-api-base-url', () => apiBaseUrl);
+  onSync('desktop:get-app-version', () => app.getVersion());
+  onSync('desktop:get-user-data-path', () => app.getPath('userData'));
+
+  handle('desktop:check-for-updates', () => updater.check());
+  handle('desktop:download-update', () => updater.download());
+  handle('desktop:install-update', () => updater.install());
+  handle('desktop:open-download-page', () => updater.openDownloadPage());
+  handle('desktop:get-update-status', () => getLastUpdateStatus());
+  handle('desktop:dismiss-just-updated', () => dismissJustUpdatedNotice());
+  onSync('desktop:get-last-error', () => readLastError());
+  onSync('desktop:clear-last-error', () => clearLastError());
+  onSync('desktop:report-boot-issue', (issue) => {
+    const clean = validateBootIssue(issue);
+    if (clean) writeLastError(clean);
   });
-  ipcMain.on('desktop:get-app-version', (event) => {
-    event.returnValue = app.getVersion();
+  handle('desktop:open-logs-folder', () => openLogsFolder());
+  handle('desktop:pair-dutch', (input) => pairDutchFromMain(input));
+
+  onSync('desktop:set-live-tournament-count', (count) => setLiveTournamentCount(count));
+  handle('desktop:backup-save', (json, reason) => saveSnapshot(json, reason));
+  handle('desktop:backup-list', () => listSnapshots());
+  handle('desktop:backup-read', (name) => readSnapshot(name));
+  handle('desktop:backup-export', (json) => exportToFile(mainWindow, json));
+  handle('desktop:backup-import', () => importFromFile(mainWindow));
+  handle('desktop:backup-open-folder', () => openBackupsFolder());
+  onSync('desktop:backup-folder', () => backupsDir());
+}
+
+/**
+ * Packaged page policy. file:// responses have no HTTP headers, so the app's
+ * session serves them through this handler, which adds the CSP and refuses
+ * anything outside the web root. The origin stays file://, so existing
+ * IndexedDB and localStorage data keep opening.
+ */
+function installPagePolicy() {
+  const ses = session.fromPartition(APP_PARTITION);
+  const { supabaseUrl, sentryDsn } = readBuildConfig();
+  const csp = buildCsp({
+    html: fs.readFileSync(indexHtmlPath(), 'utf8'),
+    apiBaseUrl,
+    supabaseUrl,
+    sentryDsn,
   });
-  ipcMain.on('desktop:get-user-data-path', (event) => {
-    event.returnValue = app.getPath('userData');
+  const rootUrl = pathToFileURL(webRoot()).href;
+  ses.protocol.handle('file', async (request) => {
+    if (!isInsideWebRoot(request.url, rootUrl)) {
+      log.warn('Blocked file request outside the app');
+      return new Response('Not found', { status: 404 });
+    }
+    const res = await net.fetch(request.url, { bypassCustomProtocolHandlers: true });
+    const headers = new Headers(res.headers);
+    headers.set('Content-Security-Policy', csp);
+    return new Response(res.body, { status: res.status, headers });
   });
 
-  ipcMain.handle('desktop:check-for-updates', async () => {
-    await updater.check();
+  ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(
+      permission === 'geolocation' ||
+        permission === 'clipboard-sanitized-write' ||
+        permission === 'clipboard-read' ||
+        permission === 'fullscreen',
+    );
   });
-  ipcMain.handle('desktop:download-update', async () => {
-    await updater.download();
-  });
-  ipcMain.handle('desktop:install-update', async () => {
-    await updater.install();
-  });
-  ipcMain.handle('desktop:open-download-page', async (_event, url?: string) => {
-    await updater.openDownloadPage(typeof url === 'string' ? url : undefined);
-  });
-  ipcMain.handle('desktop:get-update-status', () => getLastUpdateStatus());
-  ipcMain.handle('desktop:dismiss-just-updated', () => dismissJustUpdatedNotice());
-  ipcMain.on('desktop:get-last-error', (event) => {
-    event.returnValue = readLastError();
-  });
-  ipcMain.on('desktop:clear-last-error', () => {
-    clearLastError();
-  });
-  ipcMain.on('desktop:report-boot-issue', (_event, issue) => {
-    if (!issue || typeof issue !== 'object') return;
-    const rec = issue as { code?: string; message?: string; details?: string; at?: string };
-    if (!rec.code || !rec.message) return;
-    writeLastError({
-      code: String(rec.code),
-      message: String(rec.message),
-      details: rec.details ? String(rec.details) : undefined,
-      at: rec.at ? String(rec.at) : undefined,
-    });
-  });
-  ipcMain.handle('desktop:open-logs-folder', async () => {
-    await openLogsFolder();
-  });
-  ipcMain.handle('desktop:pair-dutch', async (_event, input: DesktopDutchInput) => {
-    return pairDutchFromMain(input);
+}
+
+async function loadApp() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (isDev) {
+    const viteUrl = process.env['VITE_DEV_SERVER_URL'] ?? 'http://localhost:5173';
+    await mainWindow.loadURL(viteUrl);
+    return;
+  }
+  // loadFile — never chess-alokas:// or app://. Windows 11 treats unknown
+  // custom schemes as Store “get an app to open this link” prompts.
+  await mainWindow.loadFile(indexHtmlPath());
+}
+
+function reloadAfterFailure() {
+  loadApp().catch((err: unknown) => {
+    log.error('Reload failed', err);
   });
 }
 
@@ -177,11 +298,11 @@ async function createWindow() {
         }),
     backgroundColor: '#071f17',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
-      partition: 'persist:chess-alokas',
+      sandbox: true,
+      partition: APP_PARTITION,
     },
   });
 
@@ -204,13 +325,15 @@ async function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (
-      url.startsWith('file:') ||
-      url.startsWith('data:') ||
-      (isDev && /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\//i.test(url))
-    ) {
+    if (url === RETRY_URL) {
+      event.preventDefault();
+      crashGuard.reset();
+      clearLastError();
+      reloadAfterFailure();
       return;
     }
+    if (isDev && /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\//i.test(url)) return;
+    if (!isDev && isAppPageUrl(url, indexFileUrl(indexHtmlPath()))) return;
     event.preventDefault();
     if (isSafeExternalUrl(url)) void shell.openExternal(url);
   });
@@ -231,9 +354,7 @@ async function createWindow() {
         message,
         details: `${errorCode} ${errorDescription} ${validatedURL}`,
       });
-      void mainWindow?.loadURL(
-        `data:text/html;charset=utf-8,${encodeURIComponent(loadFailHtml(message))}`,
-      );
+      showFailPage(message);
     },
   );
   mainWindow.webContents.on('unresponsive', () => {
@@ -241,27 +362,29 @@ async function createWindow() {
       code: 'WINDOW_UNRESPONSIVE',
       message: 'The window stopped responding.',
     });
+    reportMainError('WINDOW_UNRESPONSIVE', 'The window stopped responding.');
   });
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    const message = `Display process ended (${details.reason}).`;
     writeLastError({
       code: 'RENDERER_CRASH',
-      message: `Display process ended (${details.reason}).`,
+      message,
       details: JSON.stringify(details),
     });
+    reportMainError('RENDERER_CRASH', `${message} exitCode=${details.exitCode}`);
+    if (details.reason === 'clean-exit' || !mainWindow || mainWindow.isDestroyed()) return;
+    if (crashGuard.allow()) {
+      log.warn('Reloading after renderer crash');
+      setTimeout(reloadAfterFailure, 500);
+    } else {
+      // Repeated crashes: stop the loop and let the person decide.
+      log.error('Renderer keeps crashing; showing the error page');
+      showFailPage('The display process keeps stopping.');
+    }
   });
 
-  if (isDev) {
-    const viteUrl = process.env['VITE_DEV_SERVER_URL'] ?? 'http://localhost:5173';
-    await mainWindow.loadURL(viteUrl);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    // loadFile — never chess-alokas:// or app://. Windows 11 treats unknown
-    // custom schemes as Store “get an app to open this link” prompts.
-    const indexHtml = app.isPackaged
-      ? path.join(process.resourcesPath, 'web', 'index.html')
-      : path.join(__dirname, '../../web/dist/index.html');
-    await mainWindow.loadFile(indexHtml);
-  }
+  if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
+  await loadApp();
 }
 
 async function boot() {
@@ -297,12 +420,18 @@ async function boot() {
     log.info('Using cloud API', apiBaseUrl);
   }
 
+  if (!isDev) installPagePolicy();
+
   await createWindow();
 }
 
 app.whenReady().then(() => {
   if (!gotLock) return;
-  void boot();
+  boot().catch((err: unknown) => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    writeLastError({ code: 'BOOT_FAILED', message: e.message, details: e.stack });
+    reportMainError('BOOT_FAILED', e.message, e.stack);
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -327,6 +456,7 @@ app.on('child-process-gone', (_event, details) => {
   try {
     fs.writeFileSync(GPU_FLAG, new Date().toISOString(), 'utf8');
     log.error('GPU process gone — next launch will disable hardware acceleration', details);
+    reportMainError('GPU_PROCESS_GONE', `GPU process ended (${details.reason}).`);
   } catch {
     /* ignore */
   }
@@ -342,4 +472,15 @@ process.on('uncaughtException', (err) => {
     message: err.message,
     details: err.stack,
   });
+  reportMainError('MAIN_UNCAUGHT', err.message, err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  writeLastError({
+    code: 'MAIN_UNHANDLED_REJECTION',
+    message: err.message,
+    details: err.stack,
+  });
+  reportMainError('MAIN_UNHANDLED_REJECTION', err.message, err.stack);
 });
