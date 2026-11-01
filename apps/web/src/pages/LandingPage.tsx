@@ -211,6 +211,7 @@ export default function LandingPage() {
 
   const signedIn = Boolean(auth.user);
   const primaryTo = signedIn ? '/app' : '/signup';
+  const trialTo = signedIn ? '/app' : '/signup?role=organizer';
   const primaryLabel = signedIn ? 'Open the app' : 'Start a trial tournament';
 
   return (
@@ -281,7 +282,7 @@ export default function LandingPage() {
                   keep working at the desk when the Wi-Fi gives up.
                 </p>
                 <div className="lp-cta">
-                  <Link className="lp-btn lp-btn-primary" to={primaryTo}>
+                  <Link className="lp-btn lp-btn-primary" to={trialTo}>
                     {primaryLabel}
                   </Link>
                   <a className="lp-btn" href="#round">
@@ -625,7 +626,7 @@ export default function LandingPage() {
           <div className="lp-wrap">
             <h2 id="lp-h-final">Run your next event from the sheet, not a spreadsheet.</h2>
             <div className="lp-cta">
-              <Link className="lp-btn lp-btn-primary" to={primaryTo}>
+              <Link className="lp-btn lp-btn-primary" to={trialTo}>
                 {primaryLabel}
               </Link>
               <Link className="lp-btn" to="/discover">
@@ -648,6 +649,8 @@ export default function LandingPage() {
             <a href="#download">Downloads</a>
             <Link to="/login">Sign in</Link>
             <Link to="/signup">Create account</Link>
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/terms">Terms</Link>
           </nav>
         </div>
       </footer>
