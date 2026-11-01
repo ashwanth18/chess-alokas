@@ -1,0 +1,17 @@
+/*
+ * The one stylesheet entry. The order line must stay first: later layers beat earlier ones whatever
+ * the selectors, so new work never fights index.css.
+ *
+ * Caveat: `!important` inverts across layers, so an !important in legacy beats anything here. The
+ * five left in index.css were audited and only touch legacy classes (see COMPONENTS.md). Never add
+ * a new one to index.css, and never put a legacy class on a new component.
+ *
+ * Unlayered CSS beats every layer. Anything new goes in a layer, including one-page stylesheets.
+ */
+@layer legacy, tokens, ui, shell;
+
+@import "./fonts.css";
+@import "./tokens.css" layer(tokens);
+@import "../index.css" layer(legacy);
+@import "./ui.css" layer(ui);
+@import "./shell.css" layer(shell);

@@ -1,0 +1,33 @@
+/*
+ * Page frames for new surfaces. Imported into `@layer shell`, the top layer, by app.css.
+ * Nothing here applies until a page sets `html[data-surface]` through `useSurface`, so legacy
+ * pages are untouched.
+ */
+
+/* Repaint behind a new page: index.css gives body a green gradient and its own type. */
+html[data-surface] { background: var(--paper); }
+html[data-surface] body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 var(--t-body)/1.4 var(--font);
+  letter-spacing: 0;
+}
+
+/* Hall: the whole stage scales from one unit, 19.2 px at 1080p and 38.4 px at 4K. */
+html[data-surface="hall"] { --u: calc(100vw / 100); overflow: hidden; }
+
+/*
+ * The new top bar. In Electron it is the window's drag region, every control in it opts out, and it
+ * leaves room for the window controls: traffic lights on the left on macOS, titleBarOverlay on the
+ * right on Windows and Linux. Same numbers as the legacy .topbar in index.css.
+ */
+.ui-topbar {
+  display: flex; align-items: center; gap: var(--s5);
+  min-height: 44px; padding: 0 var(--s5);
+  border-bottom: 1px solid var(--rule);
+}
+html.is-desktop .ui-topbar { -webkit-app-region: drag; }
+html.is-desktop .ui-topbar :is(a, button, input, select, [role="button"], [tabindex]) { -webkit-app-region: no-drag; }
+html.is-desktop-mac .ui-topbar { padding-left: 78px; }
+html.is-desktop-win .ui-topbar,
+html.is-desktop-linux .ui-topbar { padding-right: 140px; }
