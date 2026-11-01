@@ -2,7 +2,7 @@
 
 **Read this first** when context is full or starting a new session on this repo.
 
-Last updated: 2026-11-01 (Chess Alokas 2.0 Phase 3: Floor Arbiter Zone Grid, Chief Arbiter Alerts, Offline Floor Queue, Morning Roll Call Check-In, and Live Venue TV / Projector Mode `/live/:token/tv` — migration `027`)
+Last updated: 2026-11-01 (Chess Alokas 2.0 Phase 4: Flutter Participant & Family Mobile App `apps/mobile` — GPS Event Discovery, 1-Tap Family Registration, Live Matchday Companion & Digital Certificate Vault, installed on Android `R5CW2242D5J`)
 
 ## What this product is
 
@@ -36,6 +36,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 - [x] **Chess Alokas 2.0 Phase 1**: Multi-tenant B2B `organizations` & `organization_members` (`024_organizations_and_roles.sql`), Sandbox Trial quota enforcement (`1` tournament / `24` players), Platform Admin B2B approval actions (`/admin`), Global `player_profiles` & family sub-profiles (`025_player_profiles.sql`), and Web Participant Portal (`/player` + Workspace Switcher)
 - [x] **Chess Alokas 2.0 Phase 2**: Tournament Discovery & Shareable Registrations (`026_tournament_discovery_and_registrations.sql`), GPS Haversine nearby search (`/discover`), 1-click family/player registration with payment receipt upload (`/register/:slug`), B2B verification gate for global publishing/paid fees, and Organizer `Registrations` approval queue in `TournamentPage.tsx`
 - [x] **Chess Alokas 2.0 Phase 3**: Floor Arbiter Zone Grid (`GET /public/tables/:slug/zone`), Call Chief Arbiter alerts (`027_floor_alerts_and_checkin.sql`, `POST /public/tables/:slug/call-chief`, `/tournaments/:id/floor/alerts`), Offline Floor Result Queue (`alokas-floor-offline-queue`), Morning Roll Call check-in on `Players` tab, and Live Venue TV / Projector Mode (`/live/:token/tv`, `LiveTvPage.tsx`)
+- [x] **Chess Alokas 2.0 Phase 4**: Flutter Participant & Family Mobile App (`apps/mobile`) with 4 tabs (`Discover`, `Matchday`, `Career & Certs`, `Family & Auth`), Haversine GPS nearby events, 1-Tap family registration with auto-category matching, Morning Check-In QR Pass modal, Next Match board card, Rating Progression chart, and Digital Certificate Vault (`apps/mobile/README.md`)
 
 ## Auth model
 
@@ -75,6 +76,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 | `docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md` | Multi-tenant B2B organizations, Sandbox Trial, and `/player` portal docs |
 | `docs/FEATURES_REGISTRATION_AND_DISCOVERY.md` | Tournament discovery (GPS), `/register/:slug` 1-click autofill, and organizer approval queue docs |
 | `docs/FEATURES_ARBITER_AND_VENUE_TV.md` | Floor Arbiter Zone Grid, Chief Arbiter alerts, Offline queue, Roll Call check-in & Venue TV mode docs |
+| `apps/mobile/` | Flutter Participant & Family Mobile App (`lib/main.dart`, `lib/screens/*`, `lib/services/alokas_api.dart`, `test/widget_test.dart`, `README.md`) |
 | `scripts/replay-arcc-dutch.mts` | Replays a real event through Dutch/Swiss engines vs. actual results — validation tool, run with `npx tsx` |
 
 ## How to resume

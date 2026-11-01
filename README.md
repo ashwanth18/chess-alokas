@@ -16,6 +16,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - **GPS Tournament Discovery & 1-Click Registration (`/discover`, `/register/:slug`)** — Haversine GPS nearby event search, shareable registration forms with 1-click family profile autofill, DuitNow/QR payment receipt upload, and organizer approval queue that auto-populates the tournament roster
 - **Floor Arbiter Zone Grid, Chief Arbiter Alerts & Offline Queue (`/t/:slug`)** — score an entire zone of tables (`1–15`, `16–30`, `31+`, `Pending Only`) from one round PIN unlock, raise one-tap `"Call Chief Arbiter"` alerts to the Director Desk, and queue floor results offline when venue Wi-Fi drops
 - **Morning Roll Call Check-In & Venue TV / Projector Mode (`/live/:token/tv`)** — check in arriving players on the `Players` tab and exclude unchecked no-shows before Round 1; display auto-rotating pairings, category standings, and a round countdown clock on 1080p/4K venue screens
+- **Flutter Participant & Family Mobile App (`apps/mobile`)** — native Android/iOS companion app featuring GPS Nearby Event Discovery, 1-Tap Family Profile Registration with automatic age-category matching and DuitNow receipt attachment, Live Matchday Companion (Next Match board/color hero card, Morning Check-In QR Pass, live standings, arbiter dispute alert), and Digital Certificate & Trophy Vault
 - **Certificates** — PDF designer, print pack, Issue digital → Supabase Storage (or local disk)
 - **Desktop app** — Electron shell; production builds use cloud API (no user secrets)
 - **Simulator** — generate players, auto-play rounds, visualize boards/standings/diagnostics
@@ -39,6 +40,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 | `apps/api` | `@chess-alokas/api` | Fastify API, import, pairing, sync, certificates |
 | `apps/web` | `@chess-alokas/web` | React UI (browser PWA + Electron renderer) |
 | `apps/desktop` | `@chess-alokas/desktop` | Electron main / preload / installer |
+| `apps/mobile` | `chess_alokas_mobile` | Flutter participant & family mobile app (Android / iOS) |
 | `packages/pairing-engine` | `@chess-alokas/pairing-engine` | Swiss engine + simulator |
 | `packages/shared` | `@chess-alokas/shared` | Types, Zod schemas, category filters |
 | `packages/certificates` | `@chess-alokas/certificates` | PDF stamp / batch / light compress |
