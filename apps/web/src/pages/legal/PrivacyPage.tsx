@@ -80,8 +80,9 @@ const SECTIONS: LegalSection[] = [
             <strong>What this doesn&apos;t do.</strong> This is a notice, not a separate consent
             step: there is no box to tick, and we don&apos;t refuse a registration or profile over it.
             We don&apos;t check anyone&apos;s age or identity, or that the person submitting really is
-            a parent or guardian. Ages are what people enter. The current mobile app doesn&apos;t show
-            this notice yet, so nothing is recorded for what it submits. On a roster import, no parent
+            a parent or guardian. Ages are what people enter. The mobile app shows this notice for a
+            child, a player under 18 or a player of unknown age, not for an adult registering
+            themselves. On a roster import, no parent
             takes part in Chess Alokas. A roster typed in by hand has no notice.
           </p>
         </div>
@@ -356,7 +357,7 @@ const SECTIONS: LegalSection[] = [
           </p>
         </div>
         <h3>When you delete your account</h3>
-        <p>You can do this on the Account page on the website. The mobile app can&apos;t do it yet.</p>
+        <p>You can do this on the Account page on the website or in the mobile app.</p>
         <LegalTable
           caption="What is removed and what stays when an account is deleted."
           head={['Data', 'What happens']}
