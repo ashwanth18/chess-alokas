@@ -83,6 +83,17 @@ class AlokasTheme {
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AlokasColors.brightGold, width: 1.5),
         ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AlokasColors.crimsonDanger),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: AlokasColors.crimsonDanger,
+            width: 1.5,
+          ),
+        ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -142,7 +153,6 @@ class AlokasBadge extends StatelessWidget {
           Flexible(
             child: Text(
               text,
-              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: color,
                 fontSize: 11.5,

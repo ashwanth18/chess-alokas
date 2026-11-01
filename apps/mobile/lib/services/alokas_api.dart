@@ -1,945 +1,637 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../config.dart';
 import '../models/models.dart';
+import 'session_storage.dart';
 
-class AlokasApiClient {
-  final String apiBaseUrl;
-  final String supabaseUrl;
-  final String supabaseAnonKey;
-  final bool enableNetwork;
-  String? accessToken;
-  String? signedInEmail;
+sealed class ApiResult<T> {
+  const ApiResult();
+}
 
-  AlokasApiClient({
-    this.apiBaseUrl = 'https://chess-manager.alokas.com/api',
-    this.supabaseUrl = 'https://chess-manager.alokas.com/supabase',
-    this.supabaseAnonKey = '',
-    this.enableNetwork = true,
-    this.accessToken,
-    this.signedInEmail = 'ashwanth@alokas.com',
+final class ApiSuccess<T> extends ApiResult<T> {
+  final T value;
+
+  const ApiSuccess(this.value);
+}
+
+final class ApiFailure<T> extends ApiResult<T> {
+  final String message;
+  final int? statusCode;
+
+  /// Per-field reasons from the API's `details`, keyed by request field name.
+  final Map<String, String> fieldErrors;
+
+  const ApiFailure(
+    this.message, {
+    this.statusCode,
+    this.fieldErrors = const {},
+  });
+}
+
+class AuthSession {
+  final String accessToken;
+  final String refreshToken;
+  final DateTime? expiresAt;
+  final String? userId;
+  final String? email;
+
+  const AuthSession({
+    required this.accessToken,
+    required this.refreshToken,
+    this.expiresAt,
+    this.userId,
+    this.email,
   });
 
-  static const List<GpsLocationPreset> gpsPresets = [
-    GpsLocationPreset(
-      id: 'kl',
-      label: 'Kuala Lumpur (Current GPS)',
-      city: 'Kuala Lumpur',
-      state: 'WP Kuala Lumpur',
-      latitude: 3.1390,
-      longitude: 101.6869,
-    ),
-    GpsLocationPreset(
-      id: 'pj',
-      label: 'Petaling Jaya, Selangor',
-      city: 'Petaling Jaya',
-      state: 'Selangor',
-      latitude: 3.1073,
-      longitude: 101.6067,
-    ),
-    GpsLocationPreset(
-      id: 'penang',
-      label: 'George Town, Penang',
-      city: 'George Town',
-      state: 'Pulau Pinang',
-      latitude: 5.4141,
-      longitude: 100.3288,
-    ),
-    GpsLocationPreset(
-      id: 'jb',
-      label: 'Johor Bahru, Johor',
-      city: 'Johor Bahru',
-      state: 'Johor',
-      latitude: 1.4927,
-      longitude: 103.7414,
-    ),
-  ];
-
-  static List<MobileEventItem> seedEvents() {
-    return [
-      const MobileEventItem(
-        id: 'evt-arcc-kl-2026',
-        publicSlug: 'arcc-kl-junior-rapid-2026',
-        name: 'ARCC Kuala Lumpur Junior & Open Rapid Championship 2026',
-        organizationName: 'Alokas Royal Chess Academy (Verified)',
-        date: '2026-11-15',
-        style: 'dutch',
-        rounds: 6,
-        status: 'in_progress',
-        registrationOpen: true,
-        registeredCount: 142,
-        maxParticipants: 180,
-        venueName: 'KL Gateway Convention Hall, Bangsar South',
-        venueAddress: 'Level 3, KL Gateway Mall, Jalan Kerinchi, 59200 Kuala Lumpur',
-        city: 'Kuala Lumpur',
-        state: 'WP Kuala Lumpur',
-        latitude: 3.1142,
-        longitude: 101.6634,
-        timeControl: '15m + 5s Rapid',
-        entryFeeCents: 4500,
-        currency: 'MYR',
-        descriptionMd:
-            'Official FIDE Dutch-system 6-round rapid tournament featuring live floor QR scoring, projector standings, and instant digital certificates.',
-        rulesMd:
-            'FIDE Rapid Laws apply. 6 Rounds Swiss (bbpPairings Dutch). Tiebreaks: Buchholz, BH-C1, Sonneborn-Berger.',
-        paymentInstructions:
-            'DuitNow QR • Maybank 5140-8892-1104 (Alokas Royal Chess Academy Sdn Bhd). Attach payment screenshot for instant roster verification.',
-        categories: [
-          EventCategoryInfo(
-            id: 'cat-arcc-u8',
-            name: 'Under 8 (U8)',
-            code: 'U8',
-            maxAge: 8,
-            prizeSummary: '1st MYR 200 + Trophy • Top 10 Medals & Digital Certs',
-          ),
-          EventCategoryInfo(
-            id: 'cat-arcc-u12',
-            name: 'Under 12 (U12)',
-            code: 'U12',
-            maxAge: 12,
-            prizeSummary: '1st MYR 300 + Trophy • Top 10 Medals & Digital Certs',
-          ),
-          EventCategoryInfo(
-            id: 'cat-arcc-u18',
-            name: 'Under 18 (U18)',
-            code: 'U18',
-            maxAge: 18,
-            prizeSummary: '1st MYR 400 + Trophy • Top 10 Medals & Digital Certs',
-          ),
-          EventCategoryInfo(
-            id: 'cat-arcc-open',
-            name: 'Open Masters',
-            code: 'Open',
-            prizeSummary: '1st MYR 800 + Champion Trophy • Top 10 Cash Prizes',
-          ),
-        ],
-      ),
-      const MobileEventItem(
-        id: 'evt-pj-scholastic-2026',
-        publicSlug: 'pj-scholastic-chess-cup-2026',
-        name: 'Petaling Jaya Scholastic Age-Group Chess Cup',
-        organizationName: 'Selangor Scholastic Chess Guild (Verified)',
-        date: '2026-11-22',
-        style: 'dutch',
-        rounds: 7,
-        status: 'ready',
-        registrationOpen: true,
-        registeredCount: 96,
-        maxParticipants: 150,
-        venueName: 'Civic Centre Hall (MBPJ), Petaling Jaya',
-        venueAddress: 'Jalan Yong Shook Lin, Seksyen 52, 46675 Petaling Jaya, Selangor',
-        city: 'Petaling Jaya',
-        state: 'Selangor',
-        latitude: 3.0991,
-        longitude: 101.6448,
-        timeControl: '20m + 5s Rapid',
-        entryFeeCents: 3500,
-        currency: 'MYR',
-        descriptionMd:
-            'MSSM & MSSD preparation event for primary and secondary school players across Selangor & KL.',
-        rulesMd:
-            '7 Rounds Swiss. Players must check in via Alokas QR Pass by 8:30 AM before Round 1.',
-        paymentInstructions:
-            'DuitNow QR • CIMB 8009-4412-09 (Selangor Scholastic Chess Guild).',
-        categories: [
-          EventCategoryInfo(
-            id: 'cat-pj-u8',
-            name: 'Under 8 (U8)',
-            code: 'U8',
-            maxAge: 8,
-            prizeSummary: 'Top 8 Trophies + Participation Certs',
-          ),
-          EventCategoryInfo(
-            id: 'cat-pj-u12',
-            name: 'Under 12 (U12)',
-            code: 'U12',
-            maxAge: 12,
-            prizeSummary: 'Top 8 Trophies + Participation Certs',
-          ),
-          EventCategoryInfo(
-            id: 'cat-pj-u18',
-            name: 'Under 18 (U18)',
-            code: 'U18',
-            maxAge: 18,
-            prizeSummary: 'Top 8 Trophies + Participation Certs',
-          ),
-        ],
-      ),
-      const MobileEventItem(
-        id: 'evt-subang-community-blitz',
-        publicSlug: 'subang-friday-community-blitz',
-        name: 'Subang Jaya Community Friday Night Blitz',
-        organizationName: 'Subang Chess Club (Verified)',
-        date: '2026-11-27',
-        style: 'swiss',
-        rounds: 9,
-        status: 'ready',
-        registrationOpen: true,
-        registeredCount: 54,
-        maxParticipants: 80,
-        venueName: 'SS15 Courtyard Atrium, Subang Jaya',
-        venueAddress: 'Jalan SS 15/4G, SS15, 47500 Subang Jaya, Selangor',
-        city: 'Subang Jaya',
-        state: 'Selangor',
-        latitude: 3.0762,
-        longitude: 101.5881,
-        timeControl: '3m + 2s Blitz',
-        entryFeeCents: 0,
-        currency: 'MYR',
-        descriptionMd:
-            'Free community 9-round blitz night open to all club players, juniors, and parents.',
-        rulesMd:
-            'FIDE Blitz rules. 9 Rounds Swiss. Free registration via 1-Tap Alokas Profile.',
-        paymentInstructions: 'Free entry — no payment receipt required.',
-        categories: [
-          EventCategoryInfo(
-            id: 'cat-subang-u12',
-            name: 'Under 12 Junior Blitz (U12)',
-            code: 'U12',
-            maxAge: 12,
-          ),
-          EventCategoryInfo(
-            id: 'cat-subang-open',
-            name: 'Open Blitz',
-            code: 'Open',
-          ),
-        ],
-      ),
-      const MobileEventItem(
-        id: 'evt-penang-heritage-open',
-        publicSlug: 'penang-heritage-fide-rapid-2026',
-        name: 'Penang Heritage International FIDE Rapid Open 2026',
-        organizationName: 'Penang Chess Association (Verified)',
-        date: '2026-12-06',
-        style: 'dutch',
-        rounds: 7,
-        status: 'ready',
-        registrationOpen: true,
-        registeredCount: 188,
-        maxParticipants: 240,
-        venueName: 'Setia SPICE Convention Centre, Penang',
-        venueAddress: '108, Jalan Tun Dr Awang, Relau, 11900 Bayan Lepas, Pulau Pinang',
-        city: 'George Town',
-        state: 'Pulau Pinang',
-        latitude: 5.3292,
-        longitude: 100.2797,
-        timeControl: '25m + 10s Rapid',
-        entryFeeCents: 6000,
-        currency: 'MYR',
-        descriptionMd:
-            'FIDE-rated rapid championship in Penang featuring Open Masters and Junior U12/U18 divisions.',
-        rulesMd:
-            'FIDE ID required for Open section. 7 Rounds FIDE Dutch pairing.',
-        paymentInstructions:
-            'DuitNow QR • Public Bank 3198-7721-18 (Penang Chess Association).',
-        categories: [
-          EventCategoryInfo(
-            id: 'cat-pg-u12',
-            name: 'Under 12 (U12)',
-            code: 'U12',
-            maxAge: 12,
-          ),
-          EventCategoryInfo(
-            id: 'cat-pg-u18',
-            name: 'Under 18 (U18)',
-            code: 'U18',
-            maxAge: 18,
-          ),
-          EventCategoryInfo(
-            id: 'cat-pg-open',
-            name: 'Open FIDE Rated',
-            code: 'Open',
-          ),
-        ],
-      ),
-      const MobileEventItem(
-        id: 'evt-jb-southern-classic',
-        publicSlug: 'johor-southern-rapid-classic-2026',
-        name: 'Johor Southern Causeway Rapid Classic 2026',
-        organizationName: 'Johor Chess Academy (Verified)',
-        date: '2026-12-13',
-        style: 'dutch',
-        rounds: 6,
-        status: 'ready',
-        registrationOpen: true,
-        registeredCount: 112,
-        maxParticipants: 160,
-        venueName: 'Persada Johor International Convention Centre',
-        venueAddress: 'Jalan Abdullah Ibrahim, Bandar Johor Bahru, 80000 Johor Bahru, Johor',
-        city: 'Johor Bahru',
-        state: 'Johor',
-        latitude: 1.4619,
-        longitude: 103.7618,
-        timeControl: '15m + 10s Rapid',
-        entryFeeCents: 5000,
-        currency: 'MYR',
-        descriptionMd:
-            'Cross-border rapid chess championship welcoming players from Johor, KL, and Singapore.',
-        rulesMd: '6 Rounds FIDE Dutch system. Digital certificates for all finishers.',
-        paymentInstructions:
-            'DuitNow QR • RHB Bank 2011-9943-20 (Johor Chess Academy).',
-        categories: [
-          EventCategoryInfo(
-            id: 'cat-jb-u8',
-            name: 'Under 8 (U8)',
-            code: 'U8',
-            maxAge: 8,
-          ),
-          EventCategoryInfo(
-            id: 'cat-jb-u12',
-            name: 'Under 12 (U12)',
-            code: 'U12',
-            maxAge: 12,
-          ),
-          EventCategoryInfo(
-            id: 'cat-jb-open',
-            name: 'Open Category',
-            code: 'Open',
-          ),
-        ],
-      ),
-    ];
+  /// Reads a Supabase token response. Null if it holds no usable tokens.
+  static AuthSession? tryFromTokenResponse(
+    Map<String, dynamic> json,
+    DateTime now,
+  ) {
+    final access = json['access_token'];
+    final refresh = json['refresh_token'];
+    if (access is! String || access.isEmpty) return null;
+    if (refresh is! String || refresh.isEmpty) return null;
+    final expiresAtSeconds = json['expires_at'];
+    final expiresIn = json['expires_in'];
+    final user = json['user'];
+    return AuthSession(
+      accessToken: access,
+      refreshToken: refresh,
+      expiresAt: expiresAtSeconds is num
+          ? DateTime.fromMillisecondsSinceEpoch(
+              expiresAtSeconds.toInt() * 1000,
+              isUtc: true,
+            )
+          : expiresIn is num
+              ? now.add(Duration(seconds: expiresIn.toInt()))
+              : null,
+      userId: user is Map<String, dynamic> ? user['id'] as String? : null,
+      email: user is Map<String, dynamic> ? user['email'] as String? : null,
+    );
   }
 
-  static List<MobilePlayerProfile> seedFamilyProfiles() {
-    return const [
-      MobilePlayerProfile(
-        id: 'prof-aarav-u12',
-        fullName: 'Aarav Ashwanth',
-        username: 'aarav_u12',
-        relationship: 'child',
-        isPrimary: false,
-        yearOfBirth: 2015,
-        gender: 'M',
-        fideId: 5729810,
-        fideStandard: 1390,
-        fideRapid: 1425,
-        fideBlitz: 1440,
-        alokasRating: 1460,
-        school: 'SK Bukit Damansara',
-        club: 'Alokas Royal Chess Academy',
-        city: 'Kuala Lumpur',
-        state: 'WP Kuala Lumpur',
-        email: 'ashwanth@alokas.com',
-        phone: '+60 12-345 6789',
-        checkedInToday: true,
-      ),
-      MobilePlayerProfile(
-        id: 'prof-ashwanth-self',
-        fullName: 'Ashwanth Kumar',
-        username: 'ashwanth',
-        relationship: 'self',
-        isPrimary: true,
-        yearOfBirth: 1994,
-        gender: 'M',
-        fideId: 5710421,
-        fideStandard: 1762,
-        fideRapid: 1740,
-        fideBlitz: 1715,
-        alokasRating: 1785,
-        school: 'KL Chess Academy',
-        club: 'KL Chess Academy',
-        city: 'Kuala Lumpur',
-        state: 'WP Kuala Lumpur',
-        email: 'ashwanth@alokas.com',
-        phone: '+60 12-345 6789',
-        checkedInToday: true,
-      ),
-      MobilePlayerProfile(
-        id: 'prof-meera-u8',
-        fullName: 'Meera Ashwanth',
-        username: 'meera_u8',
-        relationship: 'child',
-        isPrimary: false,
-        yearOfBirth: 2019,
-        gender: 'F',
-        fideId: 5734102,
-        fideStandard: null,
-        fideRapid: 1150,
-        fideBlitz: 1120,
-        alokasRating: 1180,
-        school: 'Garden International School',
-        club: 'Alokas Royal Chess Academy',
-        city: 'Kuala Lumpur',
-        state: 'WP Kuala Lumpur',
-        email: 'ashwanth@alokas.com',
-        phone: '+60 12-345 6789',
-        checkedInToday: true,
-      ),
-    ];
-  }
-
-  static Map<String, LiveTournamentState> seedLiveStates() {
-    return {
-      'prof-aarav-u12': const LiveTournamentState(
-        tournamentId: 'evt-arcc-kl-2026',
-        tournamentName: 'ARCC Kuala Lumpur Junior & Open Rapid Championship 2026',
-        venueName: 'KL Gateway Convention Hall • Hall B',
-        categoryName: 'Under 12 (U12)',
-        currentRound: 3,
-        totalRounds: 6,
-        profileId: 'prof-aarav-u12',
-        playerName: 'Aarav Ashwanth',
-        fideId: 5729810,
-        myBoard: 4,
-        myColor: 'WHITE',
-        opponentName: 'Danish Hakim',
-        opponentRating: 1448,
-        opponentSchool: 'Victoria Institution Junior',
-        currentScore: 2.0,
-        checkInCode: 'ALOKAS-CHECKIN:ARCC2026:U12:5729810:AARAV',
-        checkedIn: true,
-        roundPairings: [
-          LiveRoundPairing(
-            round: 3,
-            board: 4,
-            whiteName: 'Aarav Ashwanth',
-            whiteRating: 1425,
-            blackName: 'Danish Hakim',
-            blackRating: 1448,
-            result: 'PENDING (LIVE)',
-            isMyBoard: true,
-          ),
-          LiveRoundPairing(
-            round: 2,
-            board: 7,
-            whiteName: 'Jayden Lim Wei',
-            whiteRating: 1310,
-            blackName: 'Aarav Ashwanth',
-            blackRating: 1425,
-            result: '0 - 1 (Won)',
-            isMyBoard: true,
-          ),
-          LiveRoundPairing(
-            round: 1,
-            board: 11,
-            whiteName: 'Aarav Ashwanth',
-            whiteRating: 1425,
-            blackName: 'Rohan Nair',
-            blackRating: 1195,
-            result: '1 - 0 (Won)',
-            isMyBoard: true,
-          ),
-        ],
-        standings: [
-          LiveStandingEntry(
-            rank: 1,
-            playerName: 'Ethan Wong Kai',
-            school: 'SJKC Kuen Cheng 2',
-            rating: 1510,
-            score: 2.0,
-            buchholz: 4.0,
-            buchholzCut1: 2.5,
-            sonnebornBerger: 4.0,
-          ),
-          LiveStandingEntry(
-            rank: 2,
-            playerName: 'Aarav Ashwanth',
-            school: 'SK Bukit Damansara',
-            rating: 1425,
-            score: 2.0,
-            buchholz: 3.5,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 3.5,
-            isMe: true,
-          ),
-          LiveStandingEntry(
-            rank: 3,
-            playerName: 'Danish Hakim',
-            school: 'Victoria Institution Junior',
-            rating: 1448,
-            score: 2.0,
-            buchholz: 3.0,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 3.0,
-          ),
-          LiveStandingEntry(
-            rank: 4,
-            playerName: 'Nurul Aina Sofia',
-            school: 'SK Seri Bintang Utara',
-            rating: 1385,
-            score: 1.5,
-            buchholz: 3.5,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 2.25,
-          ),
-          LiveStandingEntry(
-            rank: 5,
-            playerName: 'Jayden Lim Wei',
-            school: 'SJKC Puay Chai 2',
-            rating: 1310,
-            score: 1.0,
-            buchholz: 3.0,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 1.0,
-          ),
-        ],
-      ),
-      'prof-ashwanth-self': const LiveTournamentState(
-        tournamentId: 'evt-arcc-kl-2026',
-        tournamentName: 'ARCC Kuala Lumpur Junior & Open Rapid Championship 2026',
-        venueName: 'KL Gateway Convention Hall • Main Arena',
-        categoryName: 'Open Masters',
-        currentRound: 3,
-        totalRounds: 6,
-        profileId: 'prof-ashwanth-self',
-        playerName: 'Ashwanth Kumar',
-        fideId: 5710421,
-        myBoard: 2,
-        myColor: 'BLACK',
-        opponentName: 'FM Lim Zhuo Ren',
-        opponentRating: 2145,
-        opponentSchool: 'Penang Chess Association',
-        currentScore: 2.0,
-        checkInCode: 'ALOKAS-CHECKIN:ARCC2026:OPEN:5710421:ASHWANTH',
-        checkedIn: true,
-        roundPairings: [
-          LiveRoundPairing(
-            round: 3,
-            board: 2,
-            whiteName: 'FM Lim Zhuo Ren',
-            whiteRating: 2145,
-            blackName: 'Ashwanth Kumar',
-            blackRating: 1740,
-            result: 'PENDING (LIVE)',
-            isMyBoard: true,
-          ),
-          LiveRoundPairing(
-            round: 2,
-            board: 5,
-            whiteName: 'Ashwanth Kumar',
-            whiteRating: 1740,
-            blackName: 'Arvind Rajagopal',
-            blackRating: 1680,
-            result: '1 - 0 (Won)',
-            isMyBoard: true,
-          ),
-          LiveRoundPairing(
-            round: 1,
-            board: 9,
-            whiteName: 'Hafizuddin Zulkifli',
-            whiteRating: 1540,
-            blackName: 'Ashwanth Kumar',
-            blackRating: 1740,
-            result: '0 - 1 (Won)',
-            isMyBoard: true,
-          ),
-        ],
-        standings: [
-          LiveStandingEntry(
-            rank: 1,
-            playerName: 'IM Yeoh Li Tian',
-            school: 'Selangor State Team',
-            rating: 2380,
-            score: 2.0,
-            buchholz: 4.0,
-            buchholzCut1: 2.5,
-            sonnebornBerger: 4.0,
-          ),
-          LiveStandingEntry(
-            rank: 2,
-            playerName: 'FM Lim Zhuo Ren',
-            school: 'Penang Chess Association',
-            rating: 2145,
-            score: 2.0,
-            buchholz: 3.5,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 3.5,
-          ),
-          LiveStandingEntry(
-            rank: 3,
-            playerName: 'Ashwanth Kumar',
-            school: 'KL Chess Academy',
-            rating: 1740,
-            score: 2.0,
-            buchholz: 3.0,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 3.0,
-            isMe: true,
-          ),
-          LiveStandingEntry(
-            rank: 4,
-            playerName: 'CM Tan Jun Ying',
-            school: 'Johor Chess Academy',
-            rating: 1990,
-            score: 1.5,
-            buchholz: 3.5,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 2.25,
-          ),
-        ],
-      ),
-      'prof-meera-u8': const LiveTournamentState(
-        tournamentId: 'evt-arcc-kl-2026',
-        tournamentName: 'ARCC Kuala Lumpur Junior & Open Rapid Championship 2026',
-        venueName: 'KL Gateway Convention Hall • Junior Wing',
-        categoryName: 'Under 8 (U8)',
-        currentRound: 3,
-        totalRounds: 6,
-        profileId: 'prof-meera-u8',
-        playerName: 'Meera Ashwanth',
-        fideId: 5734102,
-        myBoard: 1,
-        myColor: 'WHITE',
-        opponentName: 'Chloe Tan Mei Ling',
-        opponentRating: 1120,
-        opponentSchool: 'SJKC Yuk Chai',
-        currentScore: 2.0,
-        checkInCode: 'ALOKAS-CHECKIN:ARCC2026:U8:5734102:MEERA',
-        checkedIn: true,
-        roundPairings: [
-          LiveRoundPairing(
-            round: 3,
-            board: 1,
-            whiteName: 'Meera Ashwanth',
-            whiteRating: 1150,
-            blackName: 'Chloe Tan Mei Ling',
-            blackRating: 1120,
-            result: 'PENDING (LIVE)',
-            isMyBoard: true,
-          ),
-          LiveRoundPairing(
-            round: 2,
-            board: 3,
-            whiteName: 'Lucas Chong',
-            whiteRating: 1050,
-            blackName: 'Meera Ashwanth',
-            blackRating: 1150,
-            result: '0 - 1 (Won)',
-            isMyBoard: true,
-          ),
-          LiveRoundPairing(
-            round: 1,
-            board: 6,
-            whiteName: 'Meera Ashwanth',
-            whiteRating: 1150,
-            blackName: 'Zara Imani',
-            blackRating: 980,
-            result: '1 - 0 (Won)',
-            isMyBoard: true,
-          ),
-        ],
-        standings: [
-          LiveStandingEntry(
-            rank: 1,
-            playerName: 'Meera Ashwanth',
-            school: 'Garden International School',
-            rating: 1150,
-            score: 2.0,
-            buchholz: 3.5,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 3.5,
-            isMe: true,
-          ),
-          LiveStandingEntry(
-            rank: 2,
-            playerName: 'Chloe Tan Mei Ling',
-            school: 'SJKC Yuk Chai',
-            rating: 1120,
-            score: 2.0,
-            buchholz: 3.0,
-            buchholzCut1: 2.0,
-            sonnebornBerger: 3.0,
-          ),
-        ],
-      ),
-    };
-  }
-
-  static List<CertificateVaultItem> seedCertificates() {
-    return const [
-      CertificateVaultItem(
-        id: 'cert-arcc-001',
-        serial: 'ARCC/001/2026',
-        tournamentName: 'ARCC Selangor Junior Rapid Series I',
-        tournamentDate: '2026-09-14',
-        recipientName: 'Aarav Ashwanth',
-        categoryName: 'Under 12 (U12)',
-        type: 'winner',
-        rank: 1,
-        sha256Hash: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
-      ),
-      CertificateVaultItem(
-        id: 'cert-arcc-014',
-        serial: 'ARCC/014/2026',
-        tournamentName: 'KL Merdeka FIDE Rapid Open 2026',
-        tournamentDate: '2026-08-31',
-        recipientName: 'Ashwanth Kumar',
-        categoryName: 'Open Masters',
-        type: 'winner',
-        rank: 3,
-        sha256Hash: '4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a',
-      ),
-      CertificateVaultItem(
-        id: 'cert-sel-088',
-        serial: 'SEL/088/2026',
-        tournamentName: 'Bukit Damansara Scholastic Invitational 2026',
-        tournamentDate: '2026-06-21',
-        recipientName: 'Meera Ashwanth',
-        categoryName: 'Under 8 Girls (U8G)',
-        type: 'participation',
-        rank: null,
-        sha256Hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      ),
-    ];
-  }
-
-  static List<PastTournamentRecord> seedPastTournaments() {
-    return const [
-      PastTournamentRecord(
-        id: 'hist-1',
-        name: 'ARCC Selangor Junior Rapid Series I',
-        date: '2026-09-14',
-        city: 'Petaling Jaya',
-        style: 'FIDE Dutch (6 Rounds)',
-        category: 'Under 12 (U12)',
-        score: 5.5,
-        rounds: 6,
-        rank: 1,
-        ratingDelta: 34,
-        wins: 5,
-        draws: 1,
-        losses: 0,
-      ),
-      PastTournamentRecord(
-        id: 'hist-2',
-        name: 'KL Merdeka FIDE Rapid Open 2026',
-        date: '2026-08-31',
-        city: 'Kuala Lumpur',
-        style: 'FIDE Dutch (7 Rounds)',
-        category: 'Open / U12',
-        score: 5.0,
-        rounds: 7,
-        rank: 3,
-        ratingDelta: 22,
-        wins: 4,
-        draws: 2,
-        losses: 1,
-      ),
-      PastTournamentRecord(
-        id: 'hist-3',
-        name: 'Bukit Damansara Scholastic Invitational 2026',
-        date: '2026-06-21',
-        city: 'Kuala Lumpur',
-        style: 'Swiss (6 Rounds)',
-        category: 'Under 12 (U12)',
-        score: 4.5,
-        rounds: 6,
-        rank: 4,
-        ratingDelta: 16,
-        wins: 4,
-        draws: 1,
-        losses: 1,
-      ),
-      PastTournamentRecord(
-        id: 'hist-4',
-        name: 'Malaysia National Youth Rapid Qualifier',
-        date: '2026-04-12',
-        city: 'Putrajaya',
-        style: 'FIDE Dutch (7 Rounds)',
-        category: 'Under 12 (U12)',
-        score: 5.0,
-        rounds: 7,
-        rank: 5,
-        ratingDelta: 28,
-        wins: 5,
-        draws: 0,
-        losses: 2,
-      ),
-    ];
-  }
-
-  static List<RatingPoint> seedRatingProgression(String profileId) {
-    if (profileId == 'prof-ashwanth-self') {
-      return const [
-        RatingPoint(label: 'Jan', rating: 1690),
-        RatingPoint(label: 'Mar', rating: 1712),
-        RatingPoint(label: 'May', rating: 1728),
-        RatingPoint(label: 'Jul', rating: 1750),
-        RatingPoint(label: 'Sep', rating: 1768),
-        RatingPoint(label: 'Nov', rating: 1785),
-      ];
+  static AuthSession? tryDecode(String stored) {
+    try {
+      final json = jsonDecode(stored);
+      if (json is! Map<String, dynamic>) return null;
+      final access = json['accessToken'];
+      final refresh = json['refreshToken'];
+      if (access is! String || refresh is! String) return null;
+      final expires = json['expiresAt'];
+      return AuthSession(
+        accessToken: access,
+        refreshToken: refresh,
+        expiresAt: expires is String ? DateTime.tryParse(expires) : null,
+        userId: json['userId'] as String?,
+        email: json['email'] as String?,
+      );
+    } on Object {
+      return null;
     }
-    if (profileId == 'prof-meera-u8') {
-      return const [
-        RatingPoint(label: 'Jan', rating: 1020),
-        RatingPoint(label: 'Mar', rating: 1055),
-        RatingPoint(label: 'May', rating: 1090),
-        RatingPoint(label: 'Jul', rating: 1125),
-        RatingPoint(label: 'Sep', rating: 1152),
-        RatingPoint(label: 'Nov', rating: 1180),
-      ];
-    }
-    return const [
-      RatingPoint(label: 'Jan', rating: 1310),
-      RatingPoint(label: 'Mar', rating: 1345),
-      RatingPoint(label: 'May', rating: 1372),
-      RatingPoint(label: 'Jul', rating: 1404),
-      RatingPoint(label: 'Sep', rating: 1432),
-      RatingPoint(label: 'Nov', rating: 1460),
-    ];
   }
 
-  /// Fetches `/public/events` from the cloud API and merges with rich Malaysia seed events.
-  Future<List<MobileEventItem>> fetchEvents({
+  String encode() => jsonEncode({
+        'accessToken': accessToken,
+        'refreshToken': refreshToken,
+        'expiresAt': expiresAt?.toUtc().toIso8601String(),
+        'userId': userId,
+        'email': email,
+      });
+
+  AuthSession mergedWith(AuthSession? previous) => AuthSession(
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        expiresAt: expiresAt,
+        userId: userId ?? previous?.userId,
+        email: email ?? previous?.email,
+      );
+}
+
+enum _RefreshOutcome { refreshed, rejected, unavailable }
+
+const String _offlineMessage =
+    'Could not reach the server. Check your connection and try again.';
+const String _sessionExpiredMessage =
+    'Your session has expired. Please sign in again.';
+const String _signInRequiredMessage = 'Please sign in first.';
+const String notConfiguredMessage =
+    "Sign-in isn't available in this version of the app. You can still browse "
+    'events.';
+
+class AlokasApiClient {
+  static const Duration _defaultTimeout = Duration(seconds: 15);
+  static const Duration _uploadTimeout = Duration(seconds: 90);
+  static const Duration _refreshMargin = Duration(seconds: 60);
+
+  final AppConfig config;
+  final http.Client _http;
+  final SessionStorage _storage;
+  final DateTime Function() _now;
+
+  /// The current session; null means signed out.
+  final ValueNotifier<AuthSession?> session = ValueNotifier<AuthSession?>(null);
+
+  Future<_RefreshOutcome>? _refreshInFlight;
+
+  AlokasApiClient({
+    AppConfig? config,
+    http.Client? httpClient,
+    SessionStorage? sessionStorage,
+    DateTime Function()? clock,
+  })  : config = config ?? AppConfig.fromEnvironment(),
+        _http = httpClient ?? http.Client(),
+        _storage = sessionStorage ?? const SecureSessionStorage(),
+        _now = clock ?? DateTime.now;
+
+  bool get isSignedIn => session.value != null;
+
+  // ---- Auth ----
+
+  Uri _authUri(String path, [Map<String, String>? query]) {
+    final base = config.supabaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    return Uri.parse('$base/auth/v1/$path').replace(queryParameters: query);
+  }
+
+  Map<String, String> get _authHeaders => {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'apikey': config.supabaseAnonKey.trim(),
+      };
+
+  /// Loads a saved session at startup. Without one the app is simply signed out.
+  Future<void> restoreSession() async {
+    if (!config.isAuthConfigured) return;
+    String? stored;
+    try {
+      stored = await _storage.read();
+    } on Object {
+      return;
+    }
+    if (stored == null) return;
+    final saved = AuthSession.tryDecode(stored);
+    if (saved == null) {
+      await _setSession(null);
+      return;
+    }
+    session.value = saved;
+    if (_isExpiring(saved)) await _refresh();
+  }
+
+  Future<ApiResult<AuthSession>> signInWithPassword({
+    required String email,
+    required String password,
+  }) async {
+    if (!config.isAuthConfigured) {
+      return const ApiFailure(notConfiguredMessage);
+    }
+    final http.Response response;
+    try {
+      response = await _send(
+        'POST',
+        _authUri('token', {'grant_type': 'password'}),
+        _authHeaders,
+        jsonEncode({'email': email.trim(), 'password': password}),
+        _defaultTimeout,
+      );
+    } on Object {
+      return const ApiFailure(_offlineMessage);
+    }
+    if (response.statusCode != 200) {
+      return ApiFailure(
+        _errorText(response),
+        statusCode: response.statusCode,
+      );
+    }
+    final decoded = _decodeMap(response);
+    final next = decoded == null
+        ? null
+        : AuthSession.tryFromTokenResponse(decoded, _now());
+    if (next == null) {
+      return const ApiFailure('The sign-in service returned no session.');
+    }
+    await _setSession(next);
+    return ApiSuccess(next);
+  }
+
+  /// Always signs out on this device, even if the server cannot be told. Other
+  /// devices, such as the website, stay signed in.
+  Future<void> signOut() async {
+    final current = session.value;
+    await _setSession(null);
+    if (current == null || !config.isAuthConfigured) return;
+    try {
+      await _send(
+        'POST',
+        _authUri('logout', {'scope': 'local'}),
+        {..._authHeaders, 'Authorization': 'Bearer ${current.accessToken}'},
+        null,
+        _defaultTimeout,
+      );
+    } on Object {
+      // The token stays valid until it expires; it is gone from this device.
+    }
+  }
+
+  Future<void> _setSession(AuthSession? next) async {
+    session.value = next;
+    try {
+      if (next == null) {
+        await _storage.delete();
+      } else {
+        await _storage.write(next.encode());
+      }
+    } on Object {
+      // Keystore trouble: the session works for this run but will not persist.
+    }
+  }
+
+  bool _isExpiring(AuthSession value) {
+    final expiresAt = value.expiresAt;
+    return expiresAt != null &&
+        !_now().add(_refreshMargin).isBefore(expiresAt);
+  }
+
+  /// Supabase rotates refresh tokens, so concurrent callers share one refresh.
+  Future<_RefreshOutcome> _refresh() {
+    return _refreshInFlight ??=
+        _doRefresh().whenComplete(() => _refreshInFlight = null);
+  }
+
+  Future<_RefreshOutcome> _doRefresh() async {
+    final current = session.value;
+    if (current == null || !config.isAuthConfigured) {
+      return _RefreshOutcome.rejected;
+    }
+    final http.Response response;
+    try {
+      response = await _send(
+        'POST',
+        _authUri('token', {'grant_type': 'refresh_token'}),
+        _authHeaders,
+        jsonEncode({'refresh_token': current.refreshToken}),
+        _defaultTimeout,
+      );
+    } on Object {
+      return _RefreshOutcome.unavailable;
+    }
+    if (response.statusCode == 200) {
+      final decoded = _decodeMap(response);
+      final next = decoded == null
+          ? null
+          : AuthSession.tryFromTokenResponse(decoded, _now());
+      if (next != null) {
+        await _setSession(next.mergedWith(current));
+        return _RefreshOutcome.refreshed;
+      }
+    }
+    if (response.statusCode >= 400 &&
+        response.statusCode < 500 &&
+        response.statusCode != 429) {
+      await _setSession(null);
+      return _RefreshOutcome.rejected;
+    }
+    return _RefreshOutcome.unavailable;
+  }
+
+  // ---- Transport ----
+
+  Future<http.Response> _send(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+    String? body,
+    Duration timeout,
+  ) async {
+    final request = http.Request(method, uri)..headers.addAll(headers);
+    if (body != null) request.body = body;
+    final streamed = await _http.send(request).timeout(timeout);
+    return http.Response.fromStream(streamed).timeout(timeout);
+  }
+
+  Uri _apiUri(String path, [Map<String, String>? query]) {
+    final base = config.apiBaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    return Uri.parse('$base$path').replace(
+      queryParameters: query == null || query.isEmpty ? null : query,
+    );
+  }
+
+  /// Sends a request to the API. With [authed] it attaches a fresh token and
+  /// retries once after a 401, refreshing the session in between.
+  Future<ApiResult<http.Response>> _request(
+    String method,
+    String path, {
+    Map<String, String>? query,
+    Object? body,
+    bool authed = false,
+    Duration timeout = _defaultTimeout,
+  }) async {
+    final uri = _apiUri(path, query);
+    final encoded = body == null ? null : jsonEncode(body);
+
+    Future<http.Response> sendWith(String? token) => _send(
+          method,
+          uri,
+          {
+            'Accept': 'application/json',
+            if (encoded != null) 'Content-Type': 'application/json',
+            if (token != null) 'Authorization': 'Bearer $token',
+          },
+          encoded,
+          timeout,
+        );
+
+    try {
+      if (!authed) return ApiSuccess(await sendWith(null));
+
+      var current = session.value;
+      if (current == null) {
+        return const ApiFailure(_signInRequiredMessage, statusCode: 401);
+      }
+      if (_isExpiring(current)) {
+        final outcome = await _refresh();
+        if (outcome == _RefreshOutcome.rejected) {
+          return const ApiFailure(_sessionExpiredMessage, statusCode: 401);
+        }
+        if (outcome == _RefreshOutcome.unavailable) {
+          return const ApiFailure(_offlineMessage);
+        }
+        current = session.value;
+        if (current == null) {
+          return const ApiFailure(_sessionExpiredMessage, statusCode: 401);
+        }
+      }
+
+      final first = await sendWith(current.accessToken);
+      if (first.statusCode != 401) return ApiSuccess(first);
+
+      final outcome = await _refresh();
+      if (outcome == _RefreshOutcome.rejected) {
+        return const ApiFailure(_sessionExpiredMessage, statusCode: 401);
+      }
+      final refreshed = session.value;
+      if (outcome == _RefreshOutcome.unavailable || refreshed == null) {
+        return ApiSuccess(first);
+      }
+      return ApiSuccess(await sendWith(refreshed.accessToken));
+    } on Object {
+      return const ApiFailure(_offlineMessage);
+    }
+  }
+
+  Map<String, dynamic>? _decodeMap(http.Response response) {
+    try {
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// The server's own wording when it gave any, otherwise its status code.
+  String _errorText(http.Response response) {
+    final body = _decodeMap(response);
+    if (body != null) {
+      for (final key in const ['error_description', 'msg', 'message', 'error']) {
+        final value = body[key];
+        if (value is String && value.trim().isNotEmpty) return value.trim();
+      }
+    }
+    return 'The server returned HTTP ${response.statusCode}.';
+  }
+
+  /// Reads validation errors shaped `{details: {field: {_errors: ["why"]}}}`.
+  Map<String, String> _fieldErrorsFrom(http.Response response) {
+    final details = _decodeMap(response)?['details'];
+    if (details is! Map) return const {};
+    final errors = <String, String>{};
+    details.forEach((key, value) {
+      if (key == '_errors' || key is! String || value is! Map) return;
+      final reasons = value['_errors'];
+      if (reasons is List && reasons.isNotEmpty && reasons.first is String) {
+        errors[key] = reasons.first as String;
+      }
+    });
+    return errors;
+  }
+
+  ApiFailure<T> _failureFrom<T>(http.Response response) => ApiFailure<T>(
+        _errorText(response),
+        statusCode: response.statusCode,
+        fieldErrors: _fieldErrorsFrom(response),
+      );
+
+  ApiFailure<T> _unexpected<T>() =>
+      ApiFailure<T>('The server sent a response the app could not read.');
+
+  Future<ApiResult<T>> _readJson<T>(
+    Future<ApiResult<http.Response>> pending,
+    T? Function(Map<String, dynamic> json) parse, {
+    int expectedStatus = 200,
+  }) async {
+    final outcome = await pending;
+    switch (outcome) {
+      case ApiFailure(:final message, :final statusCode):
+        return ApiFailure<T>(message, statusCode: statusCode);
+      case ApiSuccess(value: final response):
+        if (response.statusCode != expectedStatus) {
+          return _failureFrom<T>(response);
+        }
+        final body = _decodeMap(response);
+        final parsed = body == null ? null : parse(body);
+        return parsed == null ? _unexpected<T>() : ApiSuccess<T>(parsed);
+    }
+  }
+
+  // ---- Public events ----
+
+  Future<ApiResult<List<MobileEventItem>>> fetchEvents({
     double? lat,
     double? lng,
     double? radiusKm,
     String? search,
-  }) async {
-    final fallback = seedEvents();
-    if (!enableNetwork) return fallback;
-
-    try {
-      final query = <String, String>{};
-      if (lat != null) query['lat'] = lat.toString();
-      if (lng != null) query['lng'] = lng.toString();
-      if (radiusKm != null) query['radiusKm'] = radiusKm.toString();
-      if (search != null && search.trim().isNotEmpty) {
-        query['search'] = search.trim();
-      }
-      final uri = Uri.parse('$apiBaseUrl/public/events')
-          .replace(queryParameters: query.isEmpty ? null : query);
-
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 4);
-      final req = await client.getUrl(uri);
-      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200) {
-        final body = await res.transform(utf8.decoder).join();
-        final decoded = jsonDecode(body);
-        if (decoded is Map<String, dynamic> && decoded['events'] is List) {
-          final remoteList = (decoded['events'] as List)
-              .whereType<Map<String, dynamic>>()
-              .map(MobileEventItem.fromJson)
-              .toList();
-          if (remoteList.isNotEmpty) {
-            final existingIds = remoteList.map((e) => e.id).toSet();
-            return [
-              ...remoteList,
-              ...fallback.where((e) => !existingIds.contains(e.id)),
-            ];
-          }
-        }
-      }
-      client.close(force: true);
-    } catch (_) {
-      // Offline or local test mode — fall back cleanly to rich seed events.
-    }
-    return fallback;
+  }) {
+    return _readJson(
+      _request('GET', '/public/events', query: {
+        if (lat != null) 'lat': lat.toString(),
+        if (lng != null) 'lng': lng.toString(),
+        if (radiusKm != null) 'radiusKm': radiusKm.toString(),
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      }),
+      (json) {
+        final events = json['events'];
+        if (events is! List) return null;
+        return events
+            .whereType<Map<String, dynamic>>()
+            .map(MobileEventItem.tryFromJson)
+            .whereType<MobileEventItem>()
+            .toList();
+      },
+    );
   }
 
-  /// Submits 1-tap registration to `POST /public/events/:slug/register`.
-  Future<bool> submitEventRegistration({
+  Future<ApiResult<EventDetail>> fetchEventDetail(String slugOrId) {
+    return _readJson(
+      _request('GET', '/public/events/${Uri.encodeComponent(slugOrId)}'),
+      EventDetail.tryFromJson,
+    );
+  }
+
+  // ---- Registration ----
+
+  /// `POST /public/events/:slugOrId/register`. Only a 201 counts as registered.
+  Future<ApiResult<RegistrationRecord>> submitEventRegistration({
     required String slugOrId,
     required MobilePlayerProfile profile,
-    required String categoryId,
-    required bool attachReceipt,
-  }) async {
-    if (!enableNetwork) return true;
-    try {
-      final uri = Uri.parse('$apiBaseUrl/public/events/$slugOrId/register');
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 4);
-      final req = await client.postUrl(uri);
-      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-      if (accessToken != null && accessToken!.isNotEmpty) {
-        req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
-      }
-      final payload = jsonEncode({
-        'name': profile.fullName,
-        'age': profile.age,
-        'yearOfBirth': profile.yearOfBirth,
-        'gender': profile.gender,
-        'fideId': profile.fideId,
-        'rating': profile.bestRating,
-        'school': profile.school,
-        'club': profile.club,
-        'city': profile.city,
-        'state': profile.state,
-        'country': profile.country,
-        'email': profile.email ?? signedInEmail,
-        'phone': profile.phone,
-        'selectedCategoryId': categoryId,
-        if (attachReceipt)
-          'receiptDataUrl': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-      });
-      req.add(utf8.encode(payload));
-      final res = await req.close().timeout(const Duration(seconds: 4));
-      client.close(force: true);
-      return res.statusCode == 200 || res.statusCode == 201;
-    } catch (_) {
-      return true;
+    String? categoryId,
+    ReceiptFile? receipt,
+  }) {
+    return _readJson(
+      _request(
+        'POST',
+        '/public/events/${Uri.encodeComponent(slugOrId)}/register',
+        body: {
+          'playerProfileId': profile.id,
+          if (categoryId != null && isUuid(categoryId))
+            'selectedCategoryId': categoryId,
+          if (receipt != null) 'receiptDataUrl': receipt.toDataUrl(),
+        },
+        authed: true,
+        timeout: receipt == null ? _defaultTimeout : _uploadTimeout,
+      ),
+      (json) {
+        final registration = json['registration'];
+        return registration is Map<String, dynamic>
+            ? RegistrationRecord.fromJson(registration)
+            : null;
+      },
+      expectedStatus: 201,
+    );
+  }
+
+  Future<ApiResult<List<RegistrationRecord>>> fetchMyRegistrations() {
+    return _readJson(
+      _request('GET', '/player/registrations', authed: true),
+      (json) {
+        final rows = json['registrations'];
+        if (rows is! List) return null;
+        return rows
+            .whereType<Map<String, dynamic>>()
+            .map(RegistrationRecord.fromJson)
+            .toList();
+      },
+    );
+  }
+
+  // ---- Player profiles ----
+
+  Future<ApiResult<List<MobilePlayerProfile>>> fetchProfiles() {
+    return _readJson(
+      _request('GET', '/player/profiles', authed: true),
+      (json) => json['profiles'] is List
+          ? MobilePlayerProfile.listFromJson(json['profiles'])
+          : null,
+    );
+  }
+
+  MobilePlayerProfile? _profileFrom(Map<String, dynamic> json) {
+    final profile = json['profile'];
+    return profile is Map<String, dynamic>
+        ? MobilePlayerProfile.tryFromJson(profile)
+        : null;
+  }
+
+  Future<ApiResult<MobilePlayerProfile>> createProfile(
+    Map<String, dynamic> fields,
+  ) {
+    return _readJson(
+      _request('POST', '/player/profiles', body: fields, authed: true),
+      _profileFrom,
+      expectedStatus: 201,
+    );
+  }
+
+  Future<ApiResult<MobilePlayerProfile>> updateProfile(
+    String id,
+    Map<String, dynamic> fields,
+  ) {
+    return _readJson(
+      _request(
+        'PATCH',
+        '/player/profiles/${Uri.encodeComponent(id)}',
+        body: fields,
+        authed: true,
+      ),
+      _profileFrom,
+    );
+  }
+
+  Future<ApiResult<void>> deleteProfile(String id) async {
+    final outcome = await _request(
+      'DELETE',
+      '/player/profiles/${Uri.encodeComponent(id)}',
+      authed: true,
+    );
+    switch (outcome) {
+      case ApiFailure(:final message, :final statusCode):
+        return ApiFailure(message, statusCode: statusCode);
+      case ApiSuccess(value: final response):
+        return response.statusCode == 204
+            ? const ApiSuccess(null)
+            : _failureFrom(response);
     }
   }
 
-  /// Calls `POST /player/profiles/:id/claim` to link past tournaments by FIDE ID / Email.
-  Future<int> claimPastTournaments(MobilePlayerProfile profile) async {
-    if (!enableNetwork || accessToken == null) {
-      return 3;
-    }
-    try {
-      final uri = Uri.parse('$apiBaseUrl/player/profiles/${profile.id}/claim');
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 4);
-      final req = await client.postUrl(uri);
-      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
-      req.add(
-        utf8.encode(
-          jsonEncode({
-            'email': profile.email ?? signedInEmail,
-            'fideId': profile.fideId,
-            'fullName': profile.fullName,
-          }),
-        ),
-      );
-      final res = await req.close().timeout(const Duration(seconds: 4));
-      client.close(force: true);
-      if (res.statusCode == 200) {
-        return 3;
-      }
-    } catch (_) {
-      // Ignore network error in offline mode
-    }
-    return 3;
+  /// Returns the server's `claimedCount`. The server links an entry only when
+  /// its email matches the account's confirmed email and its name matches the
+  /// profile's full name, and answers 403 if the email is not confirmed.
+  Future<ApiResult<int>> claimPastTournaments(MobilePlayerProfile profile) {
+    return _readJson(
+      _request(
+        'POST',
+        '/player/profiles/${Uri.encodeComponent(profile.id)}/claim',
+        body: const <String, dynamic>{},
+        authed: true,
+      ),
+      (json) {
+        final count = json['claimedCount'];
+        return count is num ? count.toInt() : null;
+      },
+    );
   }
 
-  /// Signs in via Supabase Auth REST (`/auth/v1/token?grant_type=password`) or switches demo account.
-  Future<String> signInWithPassword({
-    required String email,
-    required String password,
-  }) async {
-    final cleanedEmail = email.trim().toLowerCase();
-    signedInEmail = cleanedEmail;
-    if (!enableNetwork || supabaseAnonKey.isEmpty) {
-      accessToken = 'alokas-session-${cleanedEmail.hashCode.abs()}';
-      return signedInEmail!;
+  // ---- Dashboard & certificates ----
+
+  Future<ApiResult<PlayerDashboard>> fetchDashboard(String? profileId) {
+    return _readJson(
+      _request(
+        'GET',
+        '/player/dashboard',
+        query: {'profileId': ?profileId},
+        authed: true,
+      ),
+      PlayerDashboard.fromJson,
+    );
+  }
+
+  Future<ApiResult<Uint8List>> downloadCertificate(String issueId) async {
+    final outcome = await _request(
+      'GET',
+      '/certificates/${Uri.encodeComponent(issueId)}/download',
+      authed: true,
+      timeout: _uploadTimeout,
+    );
+    switch (outcome) {
+      case ApiFailure(:final message, :final statusCode):
+        return ApiFailure(message, statusCode: statusCode);
+      case ApiSuccess(value: final response):
+        return response.statusCode == 200
+            ? ApiSuccess(response.bodyBytes)
+            : _failureFrom(response);
     }
-    try {
-      final uri =
-          Uri.parse('$supabaseUrl/auth/v1/token?grant_type=password');
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 4);
-      final req = await client.postUrl(uri);
-      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-      req.headers.set('apikey', supabaseAnonKey);
-      req.add(
-        utf8.encode(
-          jsonEncode({'email': cleanedEmail, 'password': password}),
-        ),
-      );
-      final res = await req.close().timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200) {
-        final body = await res.transform(utf8.decoder).join();
-        final data = jsonDecode(body) as Map<String, dynamic>;
-        accessToken = data['access_token']?.toString();
-      }
-      client.close(force: true);
-    } catch (_) {
-      accessToken = 'alokas-session-${cleanedEmail.hashCode.abs()}';
-    }
-    return signedInEmail!;
   }
 }

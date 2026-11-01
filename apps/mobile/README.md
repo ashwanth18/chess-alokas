@@ -1,73 +1,76 @@
-# Chess Alokas — Participant & Family Mobile Companion (`apps/mobile`)
+# Chess Alokas Mobile (`apps/mobile`)
 
-Production-ready Flutter mobile app (`chess_alokas_mobile`, package `com.chessalokas.chess_alokas_mobile`) for chess players, parents, and academy students.
+Flutter app for players and parents (`chess_alokas_mobile`, package `com.chessalokas.chess_alokas_mobile`).
 
----
+**Status: in development, not production-ready.** The app shows only what the API returns. It has no demo data: when something is unknown, missing or failed, it says so. See the tables below for what works and what does not exist yet.
 
-## Features & 4-Tab Architecture
+## Configuration
 
-| Tab | Screen | Key Capabilities |
-|-----|--------|------------------|
-| **1. Discover** | `lib/screens/discover_screen.dart` | GPS location selector (`Kuala Lumpur`, `Petaling Jaya`, `George Town`, `Johor Bahru`), Haversine distance badges (`X.X km away`), radius filter chips (`10 km`, `25 km`, `50 km`, `All Malaysia`), category filter chips (`U8`, `U12`, `U18`, `Open`), and **1-Tap Family Registration Bottom Sheet** with age-group category auto-matching and DuitNow receipt attachment |
-| **2. Matchday** | `lib/screens/matchday_screen.dart` | **Family Live Strip** (switch between active children/self), **Morning Check-In QR Pass Modal** (custom-painted QR matrix + check-in badge), **My Next Match Hero Card** (Round, Table/Board `#`, Piece Color `WHITE`/`BLACK`, Opponent rating & school), Round-by-Round pairings, Live Category Standings (`Pts`, `BH`, `BH-C1`, `SB`), and **Flag Result Dispute for Arbiter** |
-| **3. Career & Certs** | `lib/screens/career_screen.dart` | **Alokas Rating** + **FIDE Rapid / Standard / Blitz** cards, Win/Draw/Loss & White/Black color split, custom-painted **Rating Progression Chart (`CustomPainter`)**, **Digital Certificate & Trophy Vault** (`ARCC/001/2026`, SHA-256 verification & full certificate preview modal), and Past Tournaments Attended history |
-| **4. Family & Auth** | `lib/screens/profiles_screen.dart` | Supabase Cloud Account sign-in sheet, **Managed Family & Student Sub-Profiles** (`Primary Self`, `Child`, `Academy Student`), **+ Add Profile** dialog, and **Claim Past Tournaments & Certificates** (`POST /player/profiles/:id/claim`) |
+Set with `--dart-define` at build or run time:
 
----
+| Name | Default | Notes |
+|------|---------|-------|
+| `API_BASE_URL` | `https://chess-manager.alokas.com/api` | |
+| `SUPABASE_URL` | none | Required for sign-in. |
+| `SUPABASE_ANON_KEY` | none | Required for sign-in. Do not commit it. |
 
-## Directory Layout
-
-```text
-apps/mobile/
-├── android/                        # Android Gradle config (com.chessalokas.chess_alokas_mobile)
-├── ios/                            # iOS Runner config
-├── lib/
-│   ├── main.dart                   # Root app state, bottom navigation & cloud/seed sync
-│   ├── models/
-│   │   └── models.dart             # Domain models, Haversine distance & age-category matcher
-│   ├── screens/
-│   │   ├── discover_screen.dart    # Nearby GPS events & 1-Tap family registration sheet
-│   │   ├── matchday_screen.dart    # Live matchday board hero card, QR pass & standings
-│   │   ├── career_screen.dart      # Ratings, CustomPainter chart & Certificate Vault
-│   │   └── profiles_screen.dart    # Supabase Auth & family/student sub-profile manager
-│   ├── services/
-│   │   └── alokas_api.dart         # REST client for chess-manager.alokas.com/api + Malaysia seed data
-│   └── theme/
-│       └── alokas_theme.dart       # Deep Forest Green (#071F17) & Warm Gold (#D4B98A) theme
-└── test/
-    └── widget_test.dart            # Unit + widget tests covering all 4 tabs and modals
-```
-
----
-
-## API Endpoints Used
-
-- `GET https://chess-manager.alokas.com/api/public/events?lat=&lng=&radiusKm=&search=` — GPS Haversine tournament discovery feed
-- `POST https://chess-manager.alokas.com/api/public/events/:slug/register` — 1-Tap player/family registration with DuitNow receipt upload
-- `GET/POST https://chess-manager.alokas.com/api/player/profiles` — Global player & family sub-profiles
-- `POST https://chess-manager.alokas.com/api/player/profiles/:id/claim` — Claim past tournament participations & digital certificates
-- `GET https://chess-manager.alokas.com/api/player/dashboard` — Player career dashboard, live matchday board, and issued certificates
-
----
-
-## Development, Testing & Android Phone Deployment
+Without the two Supabase values you can browse events, and sign-in says it isn't available in this version of the app.
 
 ```powershell
-cd apps/mobile
+flutter run --dart-define=SUPABASE_URL=<url> --dart-define=SUPABASE_ANON_KEY=<anon key>
+```
 
-# 1. Static analysis (must report 0 issues)
+## What is real
+
+| Area | Behaviour | API |
+|------|-----------|-----|
+| Discover | Event feed with loading, empty and error-with-retry states. Fields the API omits stay unknown. Closed and past-deadline events offer no way to register. A full event warns that new entries are waitlisted. The chosen city is remembered. | `GET /public/events` |
+| Event detail | Payment instructions and QR, only as the organizer published them. If there are none, the app says to contact the organizer. | `GET /public/events/:slugOrId` |
+| Refreshing | Each tab reloads when you return to it or the app resumes, and on pull to refresh. If a reload fails, data already on screen stays with an "out of date" notice and Retry. If nothing was loaded yet, the error state shows. Nothing is saved for a cold start offline. | |
+| Sign-in | Supabase password sign-in with token refresh. The session is kept in secure storage. The app works signed out for browsing. | Supabase `/auth/v1/token` |
+| Registration | Sends the saved profile and a real category id, plus an optional receipt (PNG, JPEG, WebP or PDF, 5 MB max, as a data URL). Only a 201 counts as registered. Server errors are shown as failures. `waitlisted` is shown as waitlisted. | `POST /public/events/:slugOrId/register`, `GET /player/registrations` |
+| Profiles | List, add, edit and delete. Validation errors, including the API's `details`, appear on the field and take focus. Deleting warns about active registrations, which stay with the organizers. Claim shows the server's `claimedCount`, and links an entry only if its email is the account's confirmed email and its name is the profile's full name. | `GET/POST/PATCH/DELETE /player/profiles`, `POST /player/profiles/:id/claim` |
+| Matchday | The current round's board, colour, opponent, result and score, if the player has one. | `GET /player/dashboard` |
+| Career | Ratings on the profile, win/draw/loss totals, tournament history, certificates. | `GET /player/dashboard` |
+| Certificates | PDF download with a system save dialog. | `GET /certificates/:issueId/download` |
+
+## What does not exist yet
+
+- **Device location.** "Near: <city>" is a city you choose, and the app has no location permission. Distances are from that city.
+- **Registering without an account** or typing in a player by hand. Registration needs a signed-in account with a saved profile.
+- **Creating an account or resetting a password** in the app. Use the website.
+- **Adding a receipt after registering.** The API has no route for it, so the player must send it to the organizer.
+- **The organizer's custom registration questions.** The app shows a warning instead of asking them.
+- **Check-in passes, full pairings, standings, result disputes and rating charts.** The API offers the app none of these.
+
+## Known limits
+
+- Production API: on 2026-11-01, `GET /public/events`, `/player/profiles`, `/player/dashboard` and `/player/registrations` all returned 404 on `chess-manager.alokas.com`. Until a build with those routes is deployed there, Discover shows an error and signed-in screens cannot load. Point `API_BASE_URL` at a server that has them.
+- Automated tests use a mocked HTTP client. On 2026-11-01 the app was also driven on an Android 16 (API 36) emulator against a local in-memory API, with Supabase sign-in replaced by a local stub. It has not run against real Supabase or a deployed API that has these routes.
+- Category suggestions are read from the category's name and the player's age, so the user should check them. The organizer's real eligibility rules are not applied.
+
+## Layout
+
+```text
+lib/
+  config.dart                  --dart-define configuration
+  main.dart                    App state and bottom navigation
+  models/models.dart           API models with nullable fields; receipt validation
+  screens/                     Discover, Matchday, Career, Profiles
+  services/alokas_api.dart     HTTP client, results, session and refresh
+  services/session_storage.dart  Secure session storage
+  services/preferences.dart    Remembers the chosen city
+  services/file_gateway.dart   Receipt picking and certificate saving
+  theme/, widgets/             Theme and shared widgets
+test/
+  fixtures/fake_api.dart       Obviously fake test data and a mock backend
+  widget_test.dart             Tests that mock HTTP
+  regression_test.dart         Tests for bugs found on the emulator
+```
+
+## Development
+
+```powershell
 flutter analyze
-
-# 2. Run unit & widget test suite
 flutter test
-
-# 3. List connected devices (e.g. SM S918B • R5CW2242D5J)
-flutter devices
-
-# 4. Run live on connected Android phone
-flutter run -d R5CW2242D5J
-
-# 5. Or build & install APK directly onto the phone
-flutter build apk --debug
-flutter install --debug -d R5CW2242D5J
 ```

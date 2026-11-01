@@ -1,179 +1,166 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../services/alokas_api.dart';
+import '../services/file_gateway.dart';
 import '../theme/alokas_theme.dart';
+import '../widgets/message_card.dart';
 
 class CareerScreen extends StatelessWidget {
+  final bool isSignedIn;
   final List<MobilePlayerProfile> profiles;
-  final String selectedProfileId;
+  final String? selectedProfileId;
   final ValueChanged<String> onSelectProfile;
-  final List<CertificateVaultItem> certificates;
-  final List<PastTournamentRecord> pastTournaments;
+  final bool loading;
+  final String? error;
+  final PlayerDashboard? dashboard;
+
+  /// When [dashboard] last came from the server.
+  final DateTime? dashboardUpdatedAt;
+  final Future<void> Function() onRefresh;
+  final VoidCallback onGoToAccount;
+  final Future<ApiResult<Uint8List>> Function(String issueId)
+  onDownloadCertificate;
+  final CertificateSaver certificateSaver;
 
   const CareerScreen({
     super.key,
+    required this.isSignedIn,
     required this.profiles,
     required this.selectedProfileId,
     required this.onSelectProfile,
-    required this.certificates,
-    required this.pastTournaments,
+    required this.loading,
+    required this.error,
+    required this.dashboard,
+    this.dashboardUpdatedAt,
+    required this.onRefresh,
+    required this.onGoToAccount,
+    required this.onDownloadCertificate,
+    required this.certificateSaver,
   });
 
-  MobilePlayerProfile get _activeProfile {
-    return profiles.firstWhere(
-      (p) => p.id == selectedProfileId,
-      orElse: () => profiles.first,
-    );
+  MobilePlayerProfile? get _activeProfile {
+    final matches = profiles.where((p) => p.id == selectedProfileId);
+    return matches.isEmpty ? null : matches.first;
   }
 
-  void _showCertificatePreview(
+  Future<void> _download(
     BuildContext context,
-    CertificateVaultItem cert,
-  ) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AlokasColors.forestSurface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: AlokasColors.warmGold, width: 1.5),
-        ),
-        title: Row(
-          children: [
-            const Icon(Icons.workspace_premium, color: AlokasColors.brightGold),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Digital Certificate • ${cert.serial}',
-                style: const TextStyle(
-                  color: AlokasColors.creamIvory,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ],
-        ),
-        content: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AlokasColors.creamIvory,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AlokasColors.warmGold, width: 3),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'CHESS ALOKAS OFFICIAL CERTIFICATE',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AlokasColors.deepForest,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.1,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                cert.type == 'winner'
-                    ? 'CERTIFICATE OF EXCELLENCE'
-                    : 'CERTIFICATE OF PARTICIPATION',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AlokasColors.forestElevated,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Proudly presented to',
-                style: TextStyle(
-                  color: AlokasColors.deepForest,
-                  fontSize: 11.5,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                cert.recipientName,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AlokasColors.deepForest,
-                  fontSize: 19,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                cert.rank != null
-                    ? 'Rank #${cert.rank} • ${cert.categoryName}'
-                    : cert.categoryName,
-                style: const TextStyle(
-                  color: AlokasColors.forestCard,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${cert.tournamentName}\nIssued ${cert.tournamentDate}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AlokasColors.deepForest,
-                  fontSize: 11.5,
-                ),
-              ),
-              const Divider(color: AlokasColors.warmGold, height: 18),
-              Text(
-                'Serial: ${cert.serial}\nSHA-256: ${cert.sha256Hash.substring(0, 24)}…',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AlokasColors.forestCard,
-                  fontSize: 10,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
+    PlayerCertificate certificate,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    void say(String text) {
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: AlokasColors.forestElevated,
+          content: Text(
+            text,
+            style: const TextStyle(color: AlokasColors.creamIvory),
           ),
         ),
-        actions: [
-          ElevatedButton.icon(
-            onPressed: () => Navigator.of(ctx).pop(),
-            icon: const Icon(Icons.verified, size: 17),
-            label: const Text('Verified Authentic'),
-          ),
-        ],
-      ),
-    );
+      );
+    }
+
+    final result = await onDownloadCertificate(certificate.id);
+    switch (result) {
+      case ApiFailure(:final message):
+        say('Certificate download failed: $message');
+      case ApiSuccess(:final value):
+        try {
+          final saved = await certificateSaver(certificate.fileName, value);
+          if (saved) say('Certificate saved.');
+        } on Object {
+          say('The certificate downloaded but could not be saved.');
+        }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final profile = _activeProfile;
-    final progression = AlokasApiClient.seedRatingProgression(profile.id);
-    final totalWins = pastTournaments.fold<int>(0, (s, e) => s + e.wins);
-    final totalDraws = pastTournaments.fold<int>(0, (s, e) => s + e.draws);
-    final totalLosses = pastTournaments.fold<int>(0, (s, e) => s + e.losses);
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-      children: [
-        _buildProfileSelector(),
-        const SizedBox(height: 12),
-        _buildRatingsGrid(profile),
-        const SizedBox(height: 14),
-        _buildWdlPerformanceCard(totalWins, totalDraws, totalLosses),
-        const SizedBox(height: 14),
-        _buildRatingChartCard(profile, progression),
-        const SizedBox(height: 16),
-        _buildCertificateVaultSection(context),
-        const SizedBox(height: 16),
-        _buildPastTournamentsSection(),
-      ],
+    return RefreshIndicator(
+      color: AlokasColors.warmGold,
+      backgroundColor: AlokasColors.forestCard,
+      onRefresh: onRefresh,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        children: _buildContent(context),
+      ),
     );
+  }
+
+  List<Widget> _buildContent(BuildContext context) {
+    final current = dashboard;
+    final profile = _activeProfile;
+    if (!isSignedIn) {
+      return [
+        MessageCard(
+          icon: Icons.login,
+          title: 'Sign in to see your career',
+          message: 'Ratings, results and certificates appear here.',
+          actionLabel: 'Go to Sign In',
+          onAction: onGoToAccount,
+        ),
+      ];
+    }
+    if (current == null && loading) {
+      return const [
+        Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(
+            child: CircularProgressIndicator(color: AlokasColors.warmGold),
+          ),
+        ),
+      ];
+    }
+    final problem = error;
+    if (problem != null && (current == null || profile == null)) {
+      return [
+        MessageCard(
+          icon: Icons.cloud_off,
+          accent: AlokasColors.crimsonDanger,
+          title: 'Could not load this career',
+          message: error,
+          actionLabel: 'Retry',
+          onAction: onRefresh,
+        ),
+      ];
+    }
+    if (profile == null) {
+      return [
+        MessageCard(
+          icon: Icons.person_add_alt_1,
+          title: 'No player profile yet',
+          message: 'Add a player profile to see their career here.',
+          actionLabel: 'Go to Profiles',
+          onAction: onGoToAccount,
+        ),
+      ];
+    }
+    return [
+      if (problem != null)
+        StaleNotice(
+          reason: problem,
+          lastLoadedAt: dashboardUpdatedAt,
+          onRetry: onRefresh,
+        ),
+      _buildProfileSelector(),
+      const SizedBox(height: 12),
+      _buildRatingsGrid(profile),
+      const SizedBox(height: 14),
+      _buildPerformanceCard(current?.stats),
+      const SizedBox(height: 16),
+      _buildCertificateSection(context, current?.certificates ?? const []),
+      const SizedBox(height: 16),
+      _buildTournamentsSection(current?.tournaments ?? const []),
+      const SizedBox(height: 16),
+      const Text(
+        'Rating history charts are not available yet.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12),
+      ),
+    ];
   }
 
   Widget _buildProfileSelector() {
@@ -188,10 +175,15 @@ class CareerScreen extends StatelessWidget {
               selected: selected,
               selectedColor: AlokasColors.warmGold,
               backgroundColor: AlokasColors.forestCard,
-              label: Text('${p.fullName} (@${p.username})'),
+              label: Text(
+                p.username == null
+                    ? p.fullName
+                    : '${p.fullName} (@${p.username})',
+              ),
               labelStyle: TextStyle(
-                color:
-                    selected ? AlokasColors.deepForest : AlokasColors.creamIvory,
+                color: selected
+                    ? AlokasColors.deepForest
+                    : AlokasColors.creamIvory,
                 fontWeight: FontWeight.w700,
                 fontSize: 12.5,
               ),
@@ -203,38 +195,52 @@ class CareerScreen extends StatelessWidget {
     );
   }
 
+  String _rating(int? value) => value == null ? 'None' : '$value';
+
   Widget _buildRatingsGrid(MobilePlayerProfile profile) {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 1.9,
+    // Rows sized by their content, so large system fonts cannot overflow.
+    Widget row(Widget left, Widget right) => IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: left),
+          const SizedBox(width: 10),
+          Expanded(child: right),
+        ],
+      ),
+    );
+    return Column(
       children: [
-        _ratingTile(
-          'ALOKAS RATING',
-          '${profile.alokasRating}',
-          '+34 last 30d',
-          AlokasColors.brightGold,
+        row(
+          _ratingTile(
+            'ALOKAS RATING',
+            _rating(profile.alokasRating),
+            'On this profile',
+            AlokasColors.brightGold,
+          ),
+          _ratingTile(
+            'FIDE RAPID',
+            _rating(profile.fideRapid),
+            profile.fideId == null
+                ? 'No FIDE ID saved'
+                : 'FIDE ID: ${profile.fideId}',
+            AlokasColors.emeraldSuccess,
+          ),
         ),
-        _ratingTile(
-          'FIDE RAPID',
-          profile.fideRapid != null ? '${profile.fideRapid}' : 'Unrated',
-          'FIDE ID: ${profile.fideId ?? "N/A"}',
-          AlokasColors.emeraldSuccess,
-        ),
-        _ratingTile(
-          'FIDE STANDARD',
-          profile.fideStandard != null ? '${profile.fideStandard}' : 'Unrated',
-          'Classical ELO',
-          AlokasColors.skyInfo,
-        ),
-        _ratingTile(
-          'FIDE BLITZ',
-          profile.fideBlitz != null ? '${profile.fideBlitz}' : 'Unrated',
-          'Speed Chess',
-          AlokasColors.warmGold,
+        const SizedBox(height: 10),
+        row(
+          _ratingTile(
+            'FIDE STANDARD',
+            _rating(profile.fideStandard),
+            'Classical',
+            AlokasColors.skyInfo,
+          ),
+          _ratingTile(
+            'FIDE BLITZ',
+            _rating(profile.fideBlitz),
+            'Blitz',
+            AlokasColors.warmGold,
+          ),
         ),
       ],
     );
@@ -277,7 +283,6 @@ class CareerScreen extends StatelessWidget {
           ),
           Text(
             subtitle,
-            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: AlokasColors.creamIvory,
               fontSize: 11,
@@ -288,9 +293,9 @@ class CareerScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildWdlPerformanceCard(int wins, int draws, int losses) {
-    final total = wins + draws + losses;
-    final winPct = total > 0 ? ((wins / total) * 100).round() : 0;
+  Widget _buildPerformanceCard(PlayerCareerStats? stats) {
+    final games = stats?.gamesPlayed;
+    final wins = stats?.wins;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(15),
@@ -301,7 +306,7 @@ class CareerScreen extends StatelessWidget {
               children: [
                 const Expanded(
                   child: Text(
-                    'CAREER PERFORMANCE & COLOR SPLIT',
+                    'CAREER PERFORMANCE',
                     style: TextStyle(
                       color: AlokasColors.warmGold,
                       fontSize: 11.5,
@@ -310,24 +315,53 @@ class CareerScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                AlokasBadge(
-                  text: '$winPct% Win Rate ($total Games)',
-                  color: AlokasColors.emeraldSuccess,
-                ),
+                if (games != null && games > 0 && wins != null) ...[
+                  const SizedBox(width: 8),
+                  AlokasBadge(
+                    text:
+                        '${((wins / games) * 100).round()}% Win Rate (${pluralize(games, 'Game')})',
+                    color: AlokasColors.emeraldSuccess,
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _statCol('WINS', '$wins', AlokasColors.emeraldSuccess),
-                _statCol('DRAWS', '$draws', AlokasColors.amberWarning),
-                _statCol('LOSSES', '$losses', AlokasColors.crimsonDanger),
-                _statCol('WHITE SCORE', '74%', AlokasColors.creamIvory),
-                _statCol('BLACK SCORE', '66%', AlokasColors.warmGold),
-              ],
-            ),
+            if (stats == null || (games ?? 0) == 0)
+              const Text(
+                'No completed games on record for this player.',
+                style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12.5),
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _statCol(
+                    'EVENTS',
+                    '${stats.tournamentsCount ?? '–'}',
+                    AlokasColors.creamIvory,
+                  ),
+                  _statCol(
+                    'WINS',
+                    '${stats.wins ?? '–'}',
+                    AlokasColors.emeraldSuccess,
+                  ),
+                  _statCol(
+                    'DRAWS',
+                    '${stats.draws ?? '–'}',
+                    AlokasColors.amberWarning,
+                  ),
+                  _statCol(
+                    'LOSSES',
+                    '${stats.losses ?? '–'}',
+                    AlokasColors.crimsonDanger,
+                  ),
+                  _statCol(
+                    'POINTS',
+                    stats.totalPoints?.toStringAsFixed(1) ?? '–',
+                    AlokasColors.warmGold,
+                  ),
+                ],
+              ),
           ],
         ),
       ),
@@ -358,57 +392,10 @@ class CareerScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildRatingChartCard(
-    MobilePlayerProfile profile,
-    List<RatingPoint> points,
+  Widget _buildCertificateSection(
+    BuildContext context,
+    List<PlayerCertificate> certificates,
   ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'RATING PROGRESSION (2026 • ${profile.fullName.toUpperCase()})',
-              style: const TextStyle(
-                color: AlokasColors.warmGold,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.7,
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 120,
-              width: double.infinity,
-              child: CustomPaint(
-                painter: _RatingProgressionPainter(points: points),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: points
-                  .map(
-                    (pt) => Text(
-                      '${pt.label}\n${pt.rating}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: AlokasColors.mutedSage,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCertificateVaultSection(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -425,7 +412,7 @@ class CareerScreen extends StatelessWidget {
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
-                    'DIGITAL CERTIFICATE & TROPHY VAULT',
+                    'CERTIFICATES',
                     style: TextStyle(
                       color: AlokasColors.warmGold,
                       fontSize: 12,
@@ -441,7 +428,17 @@ class CareerScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
+            if (certificates.isEmpty)
+              const Text(
+                'No certificates issued to this player yet.',
+                style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12.5),
+              ),
             ...certificates.map((cert) {
+              final details = [
+                cert.recipientName,
+                formatDateForPeople(cert.tournamentDate),
+              ].whereType<String>().join(' • ');
+              final rank = cert.rank;
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(12),
@@ -453,17 +450,20 @@ class CareerScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
                       children: [
-                        AlokasBadge(
-                          text: cert.serial,
-                          color: AlokasColors.brightGold,
-                          icon: Icons.verified_outlined,
-                        ),
+                        if (cert.serial != null)
+                          AlokasBadge(
+                            text: cert.serial!,
+                            color: AlokasColors.brightGold,
+                          ),
                         AlokasBadge(
                           text: cert.type == 'winner'
-                              ? 'Winner • Rank #${cert.rank}'
+                              ? (rank == null
+                                    ? 'Winner'
+                                    : 'Winner • Rank #$rank')
                               : 'Participation',
                           color: cert.type == 'winner'
                               ? AlokasColors.emeraldSuccess
@@ -473,28 +473,30 @@ class CareerScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      cert.tournamentName,
+                      cert.tournamentName ?? 'Unnamed tournament',
                       style: const TextStyle(
                         color: AlokasColors.creamIvory,
                         fontWeight: FontWeight.w800,
                         fontSize: 14,
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Recipient: ${cert.recipientName} • ${cert.categoryName} • ${cert.tournamentDate}',
-                      style: const TextStyle(
-                        color: AlokasColors.mutedSage,
-                        fontSize: 12,
+                    if (details.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        details,
+                        style: const TextStyle(
+                          color: AlokasColors.mutedSage,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 8),
                     Align(
                       alignment: Alignment.centerRight,
                       child: OutlinedButton.icon(
-                        onPressed: () => _showCertificatePreview(context, cert),
-                        icon: const Icon(Icons.visibility_outlined, size: 16),
-                        label: const Text('Preview Certificate'),
+                        onPressed: () => _download(context, cert),
+                        icon: const Icon(Icons.download, size: 16),
+                        label: const Text('Download PDF'),
                       ),
                     ),
                   ],
@@ -507,7 +509,7 @@ class CareerScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildPastTournamentsSection() {
+  Widget _buildTournamentsSection(List<PlayerTournamentHistoryItem> items) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -515,7 +517,7 @@ class CareerScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'PAST TOURNAMENTS ATTENDED',
+              'TOURNAMENTS',
               style: TextStyle(
                 color: AlokasColors.warmGold,
                 fontSize: 12,
@@ -524,7 +526,14 @@ class CareerScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            ...pastTournaments.map((t) {
+            if (items.isEmpty)
+              const Text(
+                'No tournaments linked to this player. If they have played before, try "Claim Past Tournaments" on the Family & Auth tab.',
+                style: TextStyle(color: AlokasColors.mutedSage, fontSize: 12.5),
+              ),
+            ...items.map((t) {
+              final score = t.score;
+              final rounds = t.rounds;
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(12),
@@ -540,7 +549,7 @@ class CareerScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            t.name,
+                            t.tournamentName ?? 'Unnamed tournament',
                             style: const TextStyle(
                               color: AlokasColors.creamIvory,
                               fontWeight: FontWeight.w700,
@@ -549,7 +558,8 @@ class CareerScreen extends StatelessWidget {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${t.date} • ${t.city} • ${t.category}',
+                            formatDateForPeople(t.tournamentDate) ??
+                                'Date not listed',
                             style: const TextStyle(
                               color: AlokasColors.mutedSage,
                               fontSize: 11.5,
@@ -561,18 +571,19 @@ class CareerScreen extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          '#${t.rank} (${t.score}/${t.rounds})',
-                          style: const TextStyle(
-                            color: AlokasColors.brightGold,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13,
+                        if (score != null)
+                          Text(
+                            rounds == null ? '$score pts' : '$score / $rounds',
+                            style: const TextStyle(
+                              color: AlokasColors.brightGold,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
                           ),
-                        ),
                         Text(
-                          '+${t.ratingDelta} ELO',
+                          'W${t.wins ?? '–'} D${t.draws ?? '–'} L${t.losses ?? '–'}',
                           style: const TextStyle(
-                            color: AlokasColors.emeraldSuccess,
+                            color: AlokasColors.mutedSage,
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,
                           ),
@@ -588,51 +599,4 @@ class CareerScreen extends StatelessWidget {
       ),
     );
   }
-}
-
-class _RatingProgressionPainter extends CustomPainter {
-  final List<RatingPoint> points;
-
-  const _RatingProgressionPainter({required this.points});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.length < 2) return;
-    final ratings = points.map((p) => p.rating.toDouble()).toList();
-    final minR = ratings.reduce((a, b) => a < b ? a : b) - 20;
-    final maxR = ratings.reduce((a, b) => a > b ? a : b) + 20;
-    final range = (maxR - minR).clamp(1.0, 2000.0);
-
-    final gridPaint = Paint()
-      ..color = AlokasColors.goldBorder
-      ..strokeWidth = 1;
-    for (int i = 0; i <= 3; i++) {
-      final y = size.height * (i / 3);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
-
-    final linePath = Path();
-    final dotPaint = Paint()..color = AlokasColors.brightGold;
-    for (int i = 0; i < points.length; i++) {
-      final x = (i / (points.length - 1)) * (size.width - 16) + 8;
-      final norm = (points[i].rating - minR) / range;
-      final y = size.height - (norm * (size.height - 20)) - 10;
-      if (i == 0) {
-        linePath.moveTo(x, y);
-      } else {
-        linePath.lineTo(x, y);
-      }
-      canvas.drawCircle(Offset(x, y), 4.5, dotPaint);
-    }
-
-    final strokePaint = Paint()
-      ..color = AlokasColors.warmGold
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.6;
-    canvas.drawPath(linePath, strokePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _RatingProgressionPainter oldDelegate) =>
-      oldDelegate.points != points;
 }
