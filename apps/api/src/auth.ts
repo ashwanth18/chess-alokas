@@ -67,7 +67,13 @@ export async function requirePlatformAdmin(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  if (!authEnabled()) return;
+  if (!authEnabled()) {
+    const testAdmin = request.headers['x-test-admin'];
+    if (testAdmin === '0' || testAdmin === 'false') {
+      return reply.code(403).send({ error: 'Forbidden', message: 'Platform admin required' });
+    }
+    return;
+  }
   if (!request.userId) {
     return reply.code(401).send({ error: 'Unauthorized' });
   }
@@ -107,7 +113,13 @@ function sessionIdFromBearer(request: FastifyRequest): string | null {
 }
 
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  if (!authEnabled()) return;
+  if (!authEnabled()) {
+    const testUserId = request.headers['x-test-user-id'];
+    if (typeof testUserId === 'string' && testUserId.trim()) {
+      request.userId = testUserId.trim();
+    }
+    return;
+  }
 
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ')) {

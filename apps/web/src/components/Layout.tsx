@@ -1,11 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
-import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
-import { checkOnline } from '../api/client';
+import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { NavLink, Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+  checkOnline,
+  apiListOrganizations,
+  apiCreateOrganization,
+  apiUpdateOrganization,
+  apiCreatePlayerProfile,
+  type UserOrganization,
+} from '../api/client';
 import { syncOnline } from '../sync/sync';
 import { getLastSyncAt } from '../db/local';
 import { useAuth } from '../auth/AuthContext';
 import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
 import { reportSyncFailure, syncErrorMessage } from '../lib/syncError';
+import { PENDING_SIGNUP_STORAGE_KEY } from '../pages/SignupPage';
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return 'Never';
@@ -16,12 +24,102 @@ function formatSyncTime(iso: string | null): string {
 export default function Layout() {
   const auth = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [online, setOnline] = useState(navigator.onLine);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [syncFailed, setSyncFailed] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
+  const [orgsLoaded, setOrgsLoaded] = useState(false);
+  const [orgModalOpen, setOrgModalOpen] = useState(false);
+  const [orgFormName, setOrgFormName] = useState('');
+  const [orgFormCity, setOrgFormCity] = useState('');
+  const [orgFormState, setOrgFormState] = useState('');
+  const [orgFormPhone, setOrgFormPhone] = useState('');
+  const [orgFormPayment, setOrgFormPayment] = useState('');
+  const [orgBusy, setOrgBusy] = useState(false);
+  const [orgError, setOrgError] = useState<string | null>(null);
+
+  const isPlayerWorkspace = location.pathname.startsWith('/player');
+  const isOrganizerRoute =
+    location.pathname === '/app' ||
+    location.pathname.startsWith('/tournaments') ||
+    location.pathname.startsWith('/certificates') ||
+    location.pathname.startsWith('/simulator');
+
+  const loadOrganizations = useCallback(async () => {
+    if (!auth.user) return;
+    const res = await apiListOrganizations();
+    if (res.ok) {
+      setOrganizations(res.data.organizations);
+      const primary = res.data.organizations[0];
+      if (primary) {
+        setOrgFormName(primary.name);
+        setOrgFormCity(primary.city ?? '');
+        setOrgFormState(primary.state ?? '');
+        setOrgFormPhone(primary.contactPhone ?? '');
+        setOrgFormPayment(primary.paymentInstructions ?? '');
+      }
+    }
+    setOrgsLoaded(true);
+  }, [auth.user]);
+
+  useEffect(() => {
+    void loadOrganizations();
+  }, [loadOrganizations]);
+
+  // Complete any pending signup action stored before email verification
+  useEffect(() => {
+    if (!auth.user) return;
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(PENDING_SIGNUP_STORAGE_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      localStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
+      const pending = JSON.parse(raw) as {
+        role?: 'participant' | 'organizer';
+        displayName?: string;
+        email?: string;
+        orgName?: string;
+        orgCity?: string;
+        orgState?: string;
+        orgPhone?: string;
+      };
+      void (async () => {
+        if (pending.role === 'organizer' && pending.orgName) {
+          await apiCreateOrganization({
+            name: pending.orgName,
+            city: pending.orgCity || null,
+            state: pending.orgState || null,
+            contactPhone: pending.orgPhone || null,
+            contactEmail: pending.email || auth.user?.email || null,
+          });
+          await loadOrganizations();
+        } else if (pending.role === 'participant') {
+          if (pending.displayName) {
+            await apiCreatePlayerProfile({
+              fullName: pending.displayName,
+              relationship: 'self',
+              isPrimary: true,
+              email: pending.email || auth.user?.email || null,
+            });
+          }
+          if (location.pathname === '/app') {
+            navigate('/player', { replace: true });
+          }
+        }
+      })();
+    } catch {
+      /* ignore */
+    }
+  }, [auth.user, loadOrganizations, location.pathname, navigate]);
 
   useEffect(() => {
     getLastSyncAt().then(setLastSync);
@@ -114,18 +212,77 @@ export default function Layout() {
     };
   }, [auth.user]);
 
+  async function handleSaveOrganization(e: FormEvent) {
+    e.preventDefault();
+    if (!orgFormName.trim()) {
+      setOrgError('Organization name is required.');
+      return;
+    }
+    setOrgBusy(true);
+    setOrgError(null);
+    const activeOrg = organizations[0];
+    if (activeOrg) {
+      const res = await apiUpdateOrganization(activeOrg.id, {
+        name: orgFormName.trim(),
+        city: orgFormCity.trim() || null,
+        state: orgFormState.trim() || null,
+        contactPhone: orgFormPhone.trim() || null,
+        paymentInstructions: orgFormPayment.trim() || null,
+      });
+      setOrgBusy(false);
+      if (!res.ok) {
+        setOrgError(res.error);
+        return;
+      }
+    } else {
+      const res = await apiCreateOrganization({
+        name: orgFormName.trim(),
+        city: orgFormCity.trim() || null,
+        state: orgFormState.trim() || null,
+        contactPhone: orgFormPhone.trim() || null,
+        contactEmail: auth.user?.email ?? null,
+        paymentInstructions: orgFormPayment.trim() || null,
+      });
+      setOrgBusy(false);
+      if (!res.ok) {
+        setOrgError(res.error);
+        return;
+      }
+    }
+    await loadOrganizations();
+    setOrgModalOpen(false);
+  }
+
   const label = auth.displayName || auth.user?.email?.split('@')[0] || 'Account';
   const closeMenu = () => setMenuOpen(false);
+  const primaryOrg = organizations[0] ?? null;
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <NavLink to="/app" className="brand" onClick={closeMenu}>
+        <NavLink to={isPlayerWorkspace ? '/player' : '/app'} className="brand" onClick={closeMenu}>
           <span className="brand-knight" aria-hidden>
             ♕
           </span>
           <span className="brand-name">Chess Alokas</span>
         </NavLink>
+
+        <div className="workspace-switcher" role="navigation" aria-label="Workspace switcher">
+          <NavLink
+            to="/player"
+            className={({ isActive }) => `workspace-pill ${isActive ? 'active' : ''}`}
+            onClick={closeMenu}
+          >
+            ♟ Player Portal
+          </NavLink>
+          <NavLink
+            to="/app"
+            className={() => `workspace-pill ${!isPlayerWorkspace ? 'active' : ''}`}
+            onClick={closeMenu}
+          >
+            ♕ Organizer Desk
+          </NavLink>
+        </div>
 
         <button
           type="button"
@@ -138,24 +295,40 @@ export default function Layout() {
         </button>
 
         <nav className={`topnav ${menuOpen ? 'open' : ''}`} aria-label="Main">
-          <NavLink to="/app" end onClick={closeMenu}>
-            Tournaments
-          </NavLink>
-          <NavLink to="/tournaments/new" onClick={closeMenu}>
-            New
-          </NavLink>
-          <NavLink to="/certificates" onClick={closeMenu}>
-            Certificates
-          </NavLink>
-          <NavLink to="/simulator" onClick={closeMenu}>
-            Simulator
-          </NavLink>
-          <NavLink to="/account" onClick={closeMenu}>
-            Account
-          </NavLink>
-          <NavLink to="/settings" onClick={closeMenu}>
-            Settings
-          </NavLink>
+          {isPlayerWorkspace ? (
+            <>
+              <NavLink to="/player" end onClick={closeMenu}>
+                Dashboard &amp; Family
+              </NavLink>
+              <NavLink to="/account" onClick={closeMenu}>
+                Account
+              </NavLink>
+              <NavLink to="/settings" onClick={closeMenu}>
+                Settings
+              </NavLink>
+            </>
+          ) : (
+            <>
+              <NavLink to="/app" end onClick={closeMenu}>
+                Tournaments
+              </NavLink>
+              <NavLink to="/tournaments/new" onClick={closeMenu}>
+                New
+              </NavLink>
+              <NavLink to="/certificates" onClick={closeMenu}>
+                Certificates
+              </NavLink>
+              <NavLink to="/simulator" onClick={closeMenu}>
+                Simulator
+              </NavLink>
+              <NavLink to="/account" onClick={closeMenu}>
+                Account
+              </NavLink>
+              <NavLink to="/settings" onClick={closeMenu}>
+                Settings
+              </NavLink>
+            </>
+          )}
           {auth.isPlatformAdmin && (
             <NavLink to="/admin" onClick={closeMenu}>
               Admin
@@ -227,6 +400,147 @@ export default function Layout() {
         </div>
       </header>
 
+      {isOrganizerRoute && orgsLoaded && (!primaryOrg || primaryOrg.planTier === 'trial' || primaryOrg.verificationStatus !== 'verified') && (
+        <div className="desktop-update-banner" role="region" aria-label="Organization status">
+          <div className="desktop-update-banner-copy">
+            {primaryOrg ? (
+              <>
+                <strong>
+                  {primaryOrg.name} ·{' '}
+                  {primaryOrg.planTier === 'trial'
+                    ? 'Sandbox Trial'
+                    : primaryOrg.planTier.toUpperCase()}{' '}
+                  ({primaryOrg.verificationStatus.replace('_', ' ')})
+                </strong>
+                <span>
+                  {primaryOrg.planTier === 'trial'
+                    ? `Trial quota: up to ${primaryOrg.maxTournamentsQuota ?? 1} active tournament and ${primaryOrg.maxPlayersPerTournament ?? 24} players per tournament. Verified organizers unlock public event discovery & higher limits.`
+                    : 'Verification pending — once verified by platform admin, global event discovery is enabled.'}
+                </span>
+              </>
+            ) : (
+              <>
+                <strong>Set up your Organizer / Academy profile</strong>
+                <span>
+                  Register your organization to manage team members, payment instructions, and B2B verification.
+                </span>
+              </>
+            )}
+          </div>
+          <div className="desktop-update-banner-actions">
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              onClick={() => {
+                setOrgError(null);
+                setOrgModalOpen(true);
+              }}
+            >
+              {primaryOrg ? 'Organization & Trial Info' : '+ Register Organization'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {orgModalOpen && (
+        <div className="modal-backdrop" onClick={() => setOrgModalOpen(false)}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Organization settings"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2>{primaryOrg ? 'Organization & B2B Status' : 'Register Organization / Academy'}</h2>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={() => setOrgModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {primaryOrg && (
+              <div className="org-quota-box" style={{ marginBottom: '1rem' }}>
+                <p className="form-hint" style={{ margin: 0 }}>
+                  <strong>Plan tier:</strong> {primaryOrg.planTier.toUpperCase()} ·{' '}
+                  <strong>Verification:</strong> {primaryOrg.verificationStatus.replace('_', ' ')} ·{' '}
+                  <strong>Max tournaments:</strong>{' '}
+                  {primaryOrg.maxTournamentsQuota ?? 'Unlimited'} ·{' '}
+                  <strong>Max players/event:</strong>{' '}
+                  {primaryOrg.maxPlayersPerTournament ?? 'Unlimited'}
+                </p>
+              </div>
+            )}
+            <form className="auth-form" onSubmit={(e) => void handleSaveOrganization(e)}>
+              <label>
+                Organization / Academy Name
+                <input
+                  className="input"
+                  value={orgFormName}
+                  onChange={(e) => setOrgFormName(e.target.value)}
+                  placeholder="e.g. KL Junior Chess Academy"
+                  required
+                />
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
+                <label>
+                  City
+                  <input
+                    className="input"
+                    value={orgFormCity}
+                    onChange={(e) => setOrgFormCity(e.target.value)}
+                    placeholder="Kuala Lumpur"
+                  />
+                </label>
+                <label>
+                  State
+                  <input
+                    className="input"
+                    value={orgFormState}
+                    onChange={(e) => setOrgFormState(e.target.value)}
+                    placeholder="Selangor / WP KL"
+                  />
+                </label>
+              </div>
+              <label>
+                Contact Phone / WhatsApp
+                <input
+                  className="input"
+                  value={orgFormPhone}
+                  onChange={(e) => setOrgFormPhone(e.target.value)}
+                  placeholder="+60 12-345 6789"
+                />
+              </label>
+              <label>
+                Payment Instructions (DuitNow / Bank Transfer info for participants)
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={orgFormPayment}
+                  onChange={(e) => setOrgFormPayment(e.target.value)}
+                  placeholder="Maybank 5140-xxxx-xxxx (KL Junior Chess Academy)"
+                />
+              </label>
+              {orgError && <div className="form-error">{orgError}</div>}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setOrgModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={orgBusy}>
+                  {orgBusy ? 'Saving…' : primaryOrg ? 'Save Organization' : 'Create Organization'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {menuOpen && (
         <button
           type="button"
@@ -256,6 +570,12 @@ export default function Layout() {
               Home
             </Link>
           )}
+          <Link to="/player" className="app-footer-link">
+            Player Portal
+          </Link>
+          <Link to="/app" className="app-footer-link">
+            Organizer Desk
+          </Link>
           <Link to="/account" className="app-footer-link">
             Account
           </Link>

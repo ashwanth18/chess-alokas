@@ -12,6 +12,19 @@ import {
   TournamentStyle,
   TournamentStatus,
   GameResult,
+  Organization,
+  OrganizationMemberRole,
+  OrganizationVerificationStatus,
+  OrganizationPlanTier,
+  AdminOrganizationRow,
+  PlayerProfile,
+  PlayerRelationship,
+  PlayerCareerDashboard,
+  PlayerLiveMatchCard,
+  PlayerTournamentHistoryItem,
+  PlayerCertificateItem,
+  CertificateIssue,
+  CertificateIssueType,
   certificateYear,
   DEFAULT_CERT_SERIAL_PAD,
   DEFAULT_CERT_SERIAL_PREFIX,
@@ -108,6 +121,78 @@ export interface Store {
   // Sync
   pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult>;
   pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void>;
+
+  // Organizations (B2B multi-tenant)
+  listUserOrganizations(
+    userId: string,
+  ): Promise<Array<Organization & { memberRole: OrganizationMemberRole }>>;
+  getOrganization(id: string): Promise<Organization | null>;
+  getOrganizationBySlug(slug: string): Promise<Organization | null>;
+  isOrganizationMember(
+    organizationId: string,
+    userId: string,
+    roles?: OrganizationMemberRole[],
+  ): Promise<boolean>;
+  createOrganization(org: Organization, ownerUserId: string): Promise<Organization>;
+  updateOrganization(
+    id: string,
+    patch: Partial<
+      Pick<
+        Organization,
+        | 'name'
+        | 'slug'
+        | 'logoUrl'
+        | 'description'
+        | 'website'
+        | 'contactEmail'
+        | 'contactPhone'
+        | 'city'
+        | 'state'
+        | 'country'
+        | 'paymentInstructions'
+        | 'paymentQrStoragePath'
+      >
+    >,
+  ): Promise<Organization | null>;
+  listAllOrganizationsForAdmin(): Promise<AdminOrganizationRow[]>;
+  adminUpdateOrganization(
+    id: string,
+    patch: Partial<
+      Pick<
+        Organization,
+        | 'verificationStatus'
+        | 'planTier'
+        | 'trialEndsAt'
+        | 'maxTournamentsQuota'
+        | 'maxPlayersPerTournament'
+        | 'eventCreditsRemaining'
+        | 'canPublishGlobal'
+        | 'canAcceptPaidRegistrations'
+        | 'verifiedAt'
+        | 'verifiedBy'
+      >
+    >,
+  ): Promise<Organization | null>;
+
+  // Player Profiles (B2C global participant & family profiles)
+  listPlayerProfiles(accountUserId: string): Promise<PlayerProfile[]>;
+  getPlayerProfile(id: string): Promise<PlayerProfile | null>;
+  createPlayerProfile(profile: PlayerProfile): Promise<PlayerProfile>;
+  updatePlayerProfile(
+    id: string,
+    accountUserId: string,
+    patch: Partial<Omit<PlayerProfile, 'id' | 'accountUserId' | 'createdAt'>>,
+  ): Promise<PlayerProfile | null>;
+  deletePlayerProfile(id: string, accountUserId: string): Promise<boolean>;
+  claimPastParticipations(
+    accountUserId: string,
+    profileId: string,
+    match?: { email?: string | null; fideId?: number | null; fullName?: string | null },
+  ): Promise<{ claimedCount: number; participantIds: string[] }>;
+  getPlayerCareerDashboard(
+    accountUserId: string,
+    profileId?: string | null,
+  ): Promise<PlayerCareerDashboard>;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +207,13 @@ export class MemoryStore implements Store {
   private tables = new Map<string, TournamentTable>();
   private gameCards = new Map<string, GameCard>();
   private pinMeta = new Map<string, { hash: string; round: number }>();
+  private organizations = new Map<string, Organization>();
+  private organizationMembers = new Map<
+    string,
+    { organizationId: string; userId: string; role: OrganizationMemberRole; createdAt: string }
+  >();
+  private playerProfiles = new Map<string, PlayerProfile>();
+  private certificateIssues = new Map<string, CertificateIssue>();
   private resultEvents: Array<{
     id: string;
     gameId: string;
@@ -135,11 +227,93 @@ export class MemoryStore implements Store {
     createdAt: string;
   }> = [];
 
+  /** Register a certificate issue in memory so getPlayerCareerDashboard can surface it in offline/unit tests. */
+  registerCertificateIssue(issue: CertificateIssue): void {
+    this.certificateIssues.set(issue.id, issue);
+  }
+
+  private async resolveTournamentOrganization(t: {
+    organizationId?: string | null;
+    ownerId?: string | null;
+  }): Promise<Organization | null> {
+    if (t.organizationId) {
+      return this.organizations.get(t.organizationId) ?? null;
+    }
+    if (t.ownerId) {
+      const userOrgs = await this.listUserOrganizations(t.ownerId);
+      return userOrgs[0] ?? null;
+    }
+    return null;
+  }
+
+  private async assertTournamentCreationQuota(t: Tournament): Promise<Organization | null> {
+    const org = await this.resolveTournamentOrganization(t);
+    if (!org) return null;
+    if (org.verificationStatus === 'suspended' || org.verificationStatus === 'rejected') {
+      throw Object.assign(
+        new Error('Organization is suspended or rejected and cannot create tournaments.'),
+        { statusCode: 403 },
+      );
+    }
+    if (org.planTier === 'trial' && org.maxTournamentsQuota != null) {
+      const activeCount = [...this.tournaments.values()].filter(
+        (row) =>
+          !row.deletedAt &&
+          row.id !== t.id &&
+          (row.organizationId === org.id || (!row.organizationId && row.ownerId && row.ownerId === org.createdBy)),
+      ).length;
+      if (activeCount >= org.maxTournamentsQuota) {
+        throw Object.assign(
+          new Error(
+            `Sandbox Trial quota reached: maximum ${org.maxTournamentsQuota} active tournament(s) allowed in trial mode.`,
+          ),
+          { statusCode: 403 },
+        );
+      }
+    }
+    return org;
+  }
+
+  private async assertParticipantQuota(
+    tournamentId: string,
+    incomingParticipants: Array<{ id: string; deletedAt?: string | null }>,
+  ): Promise<void> {
+    const t = this.tournaments.get(tournamentId);
+    if (!t || t.deletedAt) return;
+    const org = await this.resolveTournamentOrganization(t);
+    if (!org) return;
+    if (org.planTier === 'trial' && org.maxPlayersPerTournament != null) {
+      const activeIds = new Set(
+        [...this.participants.values()]
+          .filter((p) => p.tournamentId === tournamentId && !p.deletedAt)
+          .map((p) => p.id),
+      );
+      for (const inc of incomingParticipants) {
+        if (inc.deletedAt) activeIds.delete(inc.id);
+        else activeIds.add(inc.id);
+      }
+      if (activeIds.size > org.maxPlayersPerTournament) {
+        throw Object.assign(
+          new Error(
+            `Sandbox Trial quota reached: maximum ${org.maxPlayersPerTournament} players per tournament allowed in trial mode.`,
+          ),
+          { statusCode: 403 },
+        );
+      }
+    }
+  }
+
   // ---- Tournaments ----
 
   async listTournaments(ownerId?: string | null): Promise<Tournament[]> {
+    if (!ownerId) {
+      return [...this.tournaments.values()].filter((t) => !t.deletedAt);
+    }
+    const orgIds = new Set((await this.listUserOrganizations(ownerId)).map((o) => o.id));
     return [...this.tournaments.values()].filter(
-      (t) => !t.deletedAt && (!ownerId || t.ownerId === ownerId),
+      (t) =>
+        !t.deletedAt &&
+        (t.ownerId === ownerId || Boolean(t.organizationId && orgIds.has(t.organizationId))),
     );
   }
 
@@ -156,12 +330,22 @@ export class MemoryStore implements Store {
 
   async isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean> {
     const t = this.tournaments.get(tournamentId);
-    return Boolean(t && !t.deletedAt && t.ownerId === ownerId);
+    if (!t || t.deletedAt) return false;
+    if (t.ownerId === ownerId) return true;
+    if (t.organizationId) {
+      return this.isOrganizationMember(t.organizationId, ownerId, ['owner', 'admin', 'director']);
+    }
+    return false;
   }
 
   async createTournament(t: Tournament): Promise<Tournament> {
-    this.tournaments.set(t.id, t);
-    return t;
+    const org = await this.assertTournamentCreationQuota(t);
+    const created: Tournament = {
+      ...t,
+      organizationId: t.organizationId ?? org?.id ?? null,
+    };
+    this.tournaments.set(created.id, created);
+    return created;
   }
 
   async updateTournament(
@@ -216,18 +400,31 @@ export class MemoryStore implements Store {
   }
 
   async createParticipant(p: Participant): Promise<Participant> {
+    await this.assertParticipantQuota(p.tournamentId, [p]);
     this.participants.set(p.id, p);
     return p;
   }
 
   async upsertParticipants(participants: Participant[]): Promise<Participant[]> {
+    const byTournament = new Map<string, Participant[]>();
+    for (const p of participants) {
+      const list = byTournament.get(p.tournamentId) ?? [];
+      list.push(p);
+      byTournament.set(p.tournamentId, list);
+    }
+    for (const [tid, list] of byTournament) {
+      await this.assertParticipantQuota(tid, list);
+    }
     for (const p of participants) {
       const existing = this.participants.get(p.id);
       if (
         !existing ||
         (existing.tournamentId === p.tournamentId && p.updatedAt > existing.updatedAt)
       ) {
-        this.participants.set(p.id, p);
+        this.participants.set(p.id, {
+          ...p,
+          playerProfileId: p.playerProfileId ?? existing?.playerProfileId ?? null,
+        });
       }
     }
     return participants;
@@ -508,7 +705,9 @@ export class MemoryStore implements Store {
   }
 
   async pushSync(items: SyncPushItem[], ownerId?: string | null): Promise<void> {
-    for (const item of items) {
+    const order = { tournament: 0, category: 1, participant: 2, game: 3 } as const;
+    const sorted = [...items].sort((a, b) => (order[a.entity] ?? 9) - (order[b.entity] ?? 9));
+    for (const item of sorted) {
       if (ownerId) {
         const tid =
           item.entity === 'tournament' ? item.id : String(item.payload['tournamentId'] ?? '');
@@ -518,13 +717,39 @@ export class MemoryStore implements Store {
           existing &&
           !existing.deletedAt &&
           existing.ownerId &&
-          existing.ownerId !== ownerId
+          !(await this.isTournamentOwnedBy(tid, ownerId))
         ) {
           throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
         }
         if (item.entity === 'tournament') {
           item.payload = { ...item.payload, ownerId };
         }
+      }
+      if (item.entity === 'tournament' && !item.deletedAt) {
+        const existing = this.tournaments.get(item.id);
+        if (!existing || existing.deletedAt) {
+          await this.assertTournamentCreationQuota({
+            id: item.id,
+            name: String(item.payload['name'] ?? ''),
+            style: 'swiss',
+            rounds: 1,
+            status: 'draft',
+            currentRound: 0,
+            confirmedRounds: 0,
+            mixCategories: false,
+            prizePlaces: 3,
+            awardScope: 'per_category',
+            sharedPlaces: true,
+            tableCount: 0,
+            publicEnabled: false,
+            ownerId: (item.payload['ownerId'] as string | null) ?? ownerId ?? null,
+            organizationId: (item.payload['organizationId'] as string | null) ?? null,
+            updatedAt: item.updatedAt,
+          });
+        }
+      } else if (item.entity === 'participant') {
+        const tid = String(item.payload['tournamentId'] ?? '');
+        await this.assertParticipantQuota(tid, [{ id: item.id, deletedAt: item.deletedAt }]);
       }
       this.applySyncItem(item);
     }
@@ -565,6 +790,7 @@ export class MemoryStore implements Store {
           : null,
         sharedPlaces: payload['sharedPlaces'] == null ? true : Boolean(payload['sharedPlaces']),
         ownerId: (payload['ownerId'] as string | null | undefined) ?? null,
+        organizationId: (payload['organizationId'] as string | null | undefined) ?? null,
         arbiterPinRound:
           payload['arbiterPinRound'] == null ? null : Number(payload['arbiterPinRound']),
         tableCount: Number(payload['tableCount'] ?? 0),
@@ -592,6 +818,7 @@ export class MemoryStore implements Store {
           return;
         }
         t.ownerId = prev.ownerId ?? t.ownerId ?? null;
+        t.organizationId = t.organizationId ?? prev.organizationId ?? null;
         t.arbiterPinRound = t.arbiterPinRound ?? prev.arbiterPinRound ?? null;
         t.tableCount = Math.max(prev.tableCount ?? 0, t.tableCount ?? 0);
         t.publicToken = prev.publicToken ?? null;
@@ -639,6 +866,10 @@ export class MemoryStore implements Store {
           payload['withdrawnFromRound'] != null
             ? Number(payload['withdrawnFromRound'])
             : null,
+        playerProfileId:
+          (payload['playerProfileId'] as string | null | undefined) ??
+          this.participants.get(id)?.playerProfileId ??
+          null,
         updatedAt,
         deletedAt: deletedAt ?? undefined,
       };
@@ -666,6 +897,573 @@ export class MemoryStore implements Store {
       applyIfNewer(this.games, g);
     }
   }
+
+  // ---- Organizations (B2B) ----
+
+  async listUserOrganizations(
+    userId: string,
+  ): Promise<Array<Organization & { memberRole: OrganizationMemberRole }>> {
+    const out: Array<Organization & { memberRole: OrganizationMemberRole }> = [];
+    for (const org of this.organizations.values()) {
+      const mem = this.organizationMembers.get(`${org.id}:${userId}`);
+      if (mem) {
+        out.push({ ...org, memberRole: mem.role });
+      } else if (org.createdBy === userId) {
+        out.push({ ...org, memberRole: 'owner' });
+      }
+    }
+    return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async getOrganization(id: string): Promise<Organization | null> {
+    return this.organizations.get(id) ?? null;
+  }
+
+  async getOrganizationBySlug(slug: string): Promise<Organization | null> {
+    const norm = slug.trim().toLowerCase();
+    return (
+      [...this.organizations.values()].find((o) => o.slug.toLowerCase() === norm) ?? null
+    );
+  }
+
+  async isOrganizationMember(
+    organizationId: string,
+    userId: string,
+    roles?: OrganizationMemberRole[],
+  ): Promise<boolean> {
+    const org = this.organizations.get(organizationId);
+    if (!org) return false;
+    const mem = this.organizationMembers.get(`${organizationId}:${userId}`);
+    const effectiveRole: OrganizationMemberRole | null =
+      mem?.role ?? (org.createdBy === userId ? 'owner' : null);
+    if (!effectiveRole) return false;
+    if (!roles || roles.length === 0) return true;
+    return roles.includes(effectiveRole);
+  }
+
+  async createOrganization(org: Organization, ownerUserId: string): Promise<Organization> {
+    const existingSlug = await this.getOrganizationBySlug(org.slug);
+    if (existingSlug && existingSlug.id !== org.id) {
+      throw Object.assign(new Error(`Organization slug "${org.slug}" is already taken.`), {
+        statusCode: 409,
+      });
+    }
+    const created: Organization = {
+      ...org,
+      createdBy: org.createdBy ?? ownerUserId,
+    };
+    this.organizations.set(created.id, created);
+    this.organizationMembers.set(`${created.id}:${ownerUserId}`, {
+      organizationId: created.id,
+      userId: ownerUserId,
+      role: 'owner',
+      createdAt: created.createdAt,
+    });
+    return created;
+  }
+
+  async updateOrganization(
+    id: string,
+    patch: Partial<
+      Pick<
+        Organization,
+        | 'name'
+        | 'slug'
+        | 'logoUrl'
+        | 'description'
+        | 'website'
+        | 'contactEmail'
+        | 'contactPhone'
+        | 'city'
+        | 'state'
+        | 'country'
+        | 'paymentInstructions'
+        | 'paymentQrStoragePath'
+      >
+    >,
+  ): Promise<Organization | null> {
+    const existing = this.organizations.get(id);
+    if (!existing) return null;
+    if (patch.slug && patch.slug.toLowerCase() !== existing.slug.toLowerCase()) {
+      const clash = await this.getOrganizationBySlug(patch.slug);
+      if (clash && clash.id !== id) {
+        throw Object.assign(new Error(`Organization slug "${patch.slug}" is already taken.`), {
+          statusCode: 409,
+        });
+      }
+    }
+    const updated: Organization = {
+      ...existing,
+      ...patch,
+      id,
+      updatedAt: new Date().toISOString(),
+    };
+    this.organizations.set(id, updated);
+    return updated;
+  }
+
+  async listAllOrganizationsForAdmin(): Promise<AdminOrganizationRow[]> {
+    const rows: AdminOrganizationRow[] = [];
+    for (const org of this.organizations.values()) {
+      const memberIds = new Set<string>();
+      if (org.createdBy) memberIds.add(org.createdBy);
+      for (const m of this.organizationMembers.values()) {
+        if (m.organizationId === org.id) memberIds.add(m.userId);
+      }
+      const tournamentCount = [...this.tournaments.values()].filter(
+        (t) =>
+          !t.deletedAt &&
+          (t.organizationId === org.id || (!t.organizationId && t.ownerId && t.ownerId === org.createdBy)),
+      ).length;
+      rows.push({
+        ...org,
+        memberCount: memberIds.size,
+        tournamentCount,
+        ownerEmail: org.contactEmail ?? null,
+      });
+    }
+    return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async adminUpdateOrganization(
+    id: string,
+    patch: Partial<
+      Pick<
+        Organization,
+        | 'verificationStatus'
+        | 'planTier'
+        | 'trialEndsAt'
+        | 'maxTournamentsQuota'
+        | 'maxPlayersPerTournament'
+        | 'eventCreditsRemaining'
+        | 'canPublishGlobal'
+        | 'canAcceptPaidRegistrations'
+        | 'verifiedAt'
+        | 'verifiedBy'
+      >
+    >,
+  ): Promise<Organization | null> {
+    const existing = this.organizations.get(id);
+    if (!existing) return null;
+    const updated: Organization = {
+      ...existing,
+      ...patch,
+      id,
+      updatedAt: new Date().toISOString(),
+    };
+    this.organizations.set(id, updated);
+    return updated;
+  }
+
+  // ---- Player Profiles (B2C) ----
+
+  async listPlayerProfiles(accountUserId: string): Promise<PlayerProfile[]> {
+    return [...this.playerProfiles.values()]
+      .filter((p) => p.accountUserId === accountUserId)
+      .sort((a, b) => {
+        if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+  }
+
+  async getPlayerProfile(id: string): Promise<PlayerProfile | null> {
+    return this.playerProfiles.get(id) ?? null;
+  }
+
+  async createPlayerProfile(profile: PlayerProfile): Promise<PlayerProfile> {
+    if (profile.username) {
+      const norm = profile.username.trim().toLowerCase();
+      const clash = [...this.playerProfiles.values()].find(
+        (p) => p.username && p.username.toLowerCase() === norm && p.id !== profile.id,
+      );
+      if (clash) {
+        throw Object.assign(new Error(`Username "@${profile.username}" is already taken.`), {
+          statusCode: 409,
+        });
+      }
+    }
+    const existing = await this.listPlayerProfiles(profile.accountUserId);
+    const shouldBePrimary = profile.isPrimary || existing.length === 0;
+    if (shouldBePrimary) {
+      for (const prev of existing) {
+        if (prev.isPrimary) {
+          this.playerProfiles.set(prev.id, { ...prev, isPrimary: false });
+        }
+      }
+    }
+    const created: PlayerProfile = {
+      ...profile,
+      isPrimary: shouldBePrimary,
+    };
+    this.playerProfiles.set(created.id, created);
+    return created;
+  }
+
+  async updatePlayerProfile(
+    id: string,
+    accountUserId: string,
+    patch: Partial<Omit<PlayerProfile, 'id' | 'accountUserId' | 'createdAt'>>,
+  ): Promise<PlayerProfile | null> {
+    const existing = this.playerProfiles.get(id);
+    if (!existing || existing.accountUserId !== accountUserId) return null;
+    if (patch.username) {
+      const norm = patch.username.trim().toLowerCase();
+      const clash = [...this.playerProfiles.values()].find(
+        (p) => p.username && p.username.toLowerCase() === norm && p.id !== id,
+      );
+      if (clash) {
+        throw Object.assign(new Error(`Username "@${patch.username}" is already taken.`), {
+          statusCode: 409,
+        });
+      }
+    }
+    if (patch.isPrimary) {
+      for (const p of this.playerProfiles.values()) {
+        if (p.accountUserId === accountUserId && p.id !== id && p.isPrimary) {
+          this.playerProfiles.set(p.id, { ...p, isPrimary: false });
+        }
+      }
+    }
+    const updated: PlayerProfile = {
+      ...existing,
+      ...patch,
+      id,
+      accountUserId,
+      updatedAt: new Date().toISOString(),
+    };
+    this.playerProfiles.set(id, updated);
+    return updated;
+  }
+
+  async deletePlayerProfile(id: string, accountUserId: string): Promise<boolean> {
+    const existing = this.playerProfiles.get(id);
+    if (!existing || existing.accountUserId !== accountUserId) return false;
+    this.playerProfiles.delete(id);
+    for (const [pid, part] of this.participants.entries()) {
+      if (part.playerProfileId === id) {
+        this.participants.set(pid, { ...part, playerProfileId: null });
+      }
+    }
+    return true;
+  }
+
+  async claimPastParticipations(
+    accountUserId: string,
+    profileId: string,
+    match?: { email?: string | null; fideId?: number | null; fullName?: string | null },
+  ): Promise<{ claimedCount: number; participantIds: string[] }> {
+    const profile = this.playerProfiles.get(profileId);
+    if (!profile || profile.accountUserId !== accountUserId) {
+      throw Object.assign(new Error('Player profile not found'), { statusCode: 404 });
+    }
+    const targetEmail = (match?.email ?? profile.email ?? '').trim().toLowerCase();
+    const targetFideId = match?.fideId ?? profile.fideId ?? null;
+    const targetName = (match?.fullName ?? '').trim().toLowerCase();
+
+    const claimedIds: string[] = [];
+    const now = new Date().toISOString();
+    for (const [pid, part] of this.participants.entries()) {
+      if (part.deletedAt) continue;
+      if (part.playerProfileId && part.playerProfileId !== profileId) continue;
+
+      const fideMatch =
+        targetFideId != null && part.fideId != null && Number(part.fideId) === Number(targetFideId);
+      const emailMatch =
+        Boolean(targetEmail) &&
+        Boolean(part.email) &&
+        part.email!.trim().toLowerCase() === targetEmail;
+      const nameMatch =
+        Boolean(targetName) && part.name.trim().toLowerCase() === targetName;
+
+      if (fideMatch || emailMatch || nameMatch) {
+        if (part.playerProfileId !== profileId) {
+          this.participants.set(pid, {
+            ...part,
+            playerProfileId: profileId,
+            updatedAt: now,
+          });
+        }
+        claimedIds.push(pid);
+      }
+    }
+    return { claimedCount: claimedIds.length, participantIds: claimedIds };
+  }
+
+  async getPlayerCareerDashboard(
+    accountUserId: string,
+    profileId?: string | null,
+  ): Promise<PlayerCareerDashboard> {
+    const profiles = await this.listPlayerProfiles(accountUserId);
+    const selectedProfile =
+      (profileId ? profiles.find((p) => p.id === profileId) : null) ??
+      profiles.find((p) => p.isPrimary) ??
+      profiles[0] ??
+      null;
+
+    if (!selectedProfile) {
+      return {
+        profiles,
+        selectedProfile: null,
+        liveMatches: [],
+        stats: {
+          tournamentsCount: 0,
+          gamesPlayed: 0,
+          wins: 0,
+          draws: 0,
+          losses: 0,
+          totalPoints: 0,
+        },
+        tournaments: [],
+        certificates: [],
+      };
+    }
+
+    const matchedParticipants = [...this.participants.values()].filter(
+      (p) => !p.deletedAt && p.playerProfileId === selectedProfile.id,
+    );
+    const participations: Array<{ participant: Participant; tournament: Tournament }> = [];
+    const gamesByTournament = new Map<string, Game[]>();
+    const participantsById = new Map<string, Participant>();
+
+    for (const part of matchedParticipants) {
+      const tournament = this.tournaments.get(part.tournamentId);
+      if (!tournament || tournament.deletedAt) continue;
+      participations.push({ participant: part, tournament });
+      if (!gamesByTournament.has(tournament.id)) {
+        const tGames = [...this.games.values()].filter(
+          (g) => g.tournamentId === tournament.id && !g.deletedAt,
+        );
+        gamesByTournament.set(tournament.id, tGames);
+      }
+      for (const tp of this.participants.values()) {
+        if (tp.tournamentId === tournament.id && !tp.deletedAt) {
+          participantsById.set(tp.id, tp);
+        }
+      }
+    }
+
+    const participantIdSet = new Set(matchedParticipants.map((p) => p.id));
+    const profileEmailLower = selectedProfile.email?.trim().toLowerCase() || null;
+    const certItems: PlayerCertificateItem[] = [...this.certificateIssues.values()]
+      .filter((issue) => {
+        if (issue.participantId && participantIdSet.has(issue.participantId)) return true;
+        if (
+          profileEmailLower &&
+          issue.recipientEmail &&
+          issue.recipientEmail.trim().toLowerCase() === profileEmailLower
+        ) {
+          return true;
+        }
+        return false;
+      })
+      .map((issue) => {
+        const t = this.tournaments.get(issue.tournamentId);
+        return {
+          id: issue.id,
+          tournamentId: issue.tournamentId,
+          tournamentName: t?.name ?? 'Tournament',
+          tournamentDate: t?.date ?? null,
+          participantId: issue.participantId ?? null,
+          recipientName: issue.recipientName,
+          type: issue.type,
+          rank: issue.rank ?? null,
+          serial: issue.serial ?? null,
+          createdAt: issue.createdAt,
+        };
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    return buildCareerDashboard({
+      profiles,
+      selectedProfile,
+      participations,
+      gamesByTournament,
+      participantsById,
+      certificates: certItems,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared career dashboard builder (used by both MemoryStore and PostgresStore)
+// ---------------------------------------------------------------------------
+
+function buildCareerDashboard(args: {
+  profiles: PlayerProfile[];
+  selectedProfile: PlayerProfile;
+  participations: Array<{ participant: Participant; tournament: Tournament }>;
+  gamesByTournament: Map<string, Game[]>;
+  participantsById: Map<string, Participant>;
+  certificates: PlayerCertificateItem[];
+}): PlayerCareerDashboard {
+  const {
+    profiles,
+    selectedProfile,
+    participations,
+    gamesByTournament,
+    participantsById,
+    certificates,
+  } = args;
+
+  const liveMatches: PlayerLiveMatchCard[] = [];
+  const tournaments: PlayerTournamentHistoryItem[] = [];
+  let totalGamesPlayed = 0;
+  let totalWins = 0;
+  let totalDraws = 0;
+  let totalLosses = 0;
+  let totalPoints = 0;
+
+  for (const { participant, tournament } of participations) {
+    const allTournamentGames = gamesByTournament.get(tournament.id) ?? [];
+    const myGames = allTournamentGames
+      .filter((g) => g.whiteId === participant.id || g.blackId === participant.id)
+      .sort((a, b) => a.round - b.round);
+
+    let score = 0;
+    let gamesPlayed = 0;
+    let wins = 0;
+    let draws = 0;
+    let losses = 0;
+
+    for (const g of myGames) {
+      if (g.isBye || g.result === 'bye') {
+        score += 1;
+        continue;
+      }
+      if (g.result === 'pending') {
+        continue;
+      }
+      gamesPlayed += 1;
+      if (g.result === '1/2-1/2') {
+        draws += 1;
+        score += 0.5;
+      } else if (g.result === '1-0' || g.result === '1-0F') {
+        if (g.whiteId === participant.id) {
+          wins += 1;
+          score += 1;
+        } else {
+          losses += 1;
+        }
+      } else if (g.result === '0-1' || g.result === '0-1F') {
+        if (g.blackId === participant.id) {
+          wins += 1;
+          score += 1;
+        } else {
+          losses += 1;
+        }
+      } else if (g.result === '0-0') {
+        losses += 1;
+      }
+    }
+
+    totalGamesPlayed += gamesPlayed;
+    totalWins += wins;
+    totalDraws += draws;
+    totalLosses += losses;
+    totalPoints += score;
+
+    const publicToken = tournament.publicEnabled ? (tournament.publicToken ?? null) : null;
+
+    tournaments.push({
+      tournamentId: tournament.id,
+      tournamentName: tournament.name,
+      tournamentDate: tournament.date ?? null,
+      tournamentStatus: tournament.status,
+      style: tournament.style,
+      rounds: tournament.rounds,
+      currentRound: tournament.currentRound,
+      participantId: participant.id,
+      playerName: participant.name,
+      rating: participant.rating ?? null,
+      score,
+      gamesPlayed,
+      wins,
+      draws,
+      losses,
+      publicToken,
+    });
+
+    if (tournament.status === 'in_progress' || tournament.status === 'ready') {
+      const targetRound =
+        tournament.currentRound > 0
+          ? tournament.currentRound
+          : myGames.length > 0
+            ? myGames[myGames.length - 1]!.round
+            : 1;
+      const activeGame =
+        myGames.find((g) => g.round === targetRound) ??
+        myGames[myGames.length - 1] ??
+        null;
+
+      if (activeGame) {
+        const isBye = Boolean(activeGame.isBye || activeGame.result === 'bye');
+        const color: 'white' | 'black' | 'bye' = isBye
+          ? 'bye'
+          : activeGame.whiteId === participant.id
+            ? 'white'
+            : 'black';
+        const opponentId =
+          color === 'bye'
+            ? null
+            : color === 'white'
+              ? activeGame.blackId
+              : activeGame.whiteId;
+        const opponent = opponentId ? (participantsById.get(opponentId) ?? null) : null;
+
+        liveMatches.push({
+          tournamentId: tournament.id,
+          tournamentName: tournament.name,
+          tournamentStatus: tournament.status,
+          publicToken,
+          participantId: participant.id,
+          round: activeGame.round,
+          board: activeGame.board,
+          color,
+          opponentId: opponentId ?? null,
+          opponentName: opponent?.name ?? null,
+          opponentRating: opponent?.rating ?? null,
+          result: activeGame.result,
+          isBye,
+          currentScore: score,
+        });
+      } else {
+        liveMatches.push({
+          tournamentId: tournament.id,
+          tournamentName: tournament.name,
+          tournamentStatus: tournament.status,
+          publicToken,
+          participantId: participant.id,
+          round: tournament.currentRound || 1,
+          board: 0,
+          color: 'bye',
+          opponentId: null,
+          opponentName: null,
+          opponentRating: null,
+          result: 'pending',
+          isBye: false,
+          currentScore: score,
+        });
+      }
+    }
+  }
+
+  tournaments.sort((a, b) => (b.tournamentDate ?? '').localeCompare(a.tournamentDate ?? ''));
+
+  return {
+    profiles,
+    selectedProfile,
+    liveMatches,
+    stats: {
+      tournamentsCount: tournaments.length,
+      gamesPlayed: totalGamesPlayed,
+      wins: totalWins,
+      draws: totalDraws,
+      losses: totalLosses,
+      totalPoints,
+    },
+    tournaments,
+    certificates,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -687,6 +1485,7 @@ interface TournamentRow {
   tiebreak_order: unknown | null;
   shared_places: boolean | null;
   owner_id: string | null;
+  organization_id?: string | null;
   arbiter_pin_hash: string | null;
   arbiter_pin_round: number | null;
   table_count: number | null;
@@ -700,6 +1499,62 @@ interface TournamentRow {
   client_id: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
+}
+
+interface OrganizationRow {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url: string | null;
+  description: string | null;
+  website: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  verification_status: string;
+  plan_tier: string;
+  trial_ends_at: Date | string | null;
+  max_tournaments_quota: number | null;
+  max_players_per_tournament: number | null;
+  event_credits_remaining: number;
+  can_publish_global: boolean;
+  can_accept_paid_registrations: boolean;
+  payment_instructions: string | null;
+  payment_qr_storage_path: string | null;
+  created_by: string | null;
+  verified_at: Date | string | null;
+  verified_by: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface PlayerProfileRow {
+  id: string;
+  account_user_id: string;
+  is_primary: boolean;
+  relationship: string;
+  username: string | null;
+  full_name: string;
+  date_of_birth: Date | string | null;
+  year_of_birth: number | null;
+  gender: string | null;
+  national_id: string | null;
+  fide_id: number | null;
+  fide_standard: number | null;
+  fide_rapid: number | null;
+  fide_blitz: number | null;
+  alokas_rating: number;
+  school: string | null;
+  club: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  email: string | null;
+  phone: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
 }
 
 interface TournamentTableRow {
@@ -741,6 +1596,7 @@ interface ParticipantRow {
   seed: number | null;
   excluded_rounds: number[] | null;
   withdrawn_from_round: number | null;
+  player_profile_id?: string | null;
   updated_at: Date | string;
   deleted_at: Date | string | null;
 }
@@ -804,6 +1660,7 @@ function rowToTournament(row: TournamentRow): Tournament {
       : null,
     sharedPlaces: row.shared_places ?? true,
     ownerId: row.owner_id ?? null,
+    organizationId: row.organization_id ?? null,
     arbiterPinRound: row.arbiter_pin_round ?? null,
     tableCount: row.table_count ?? 0,
     publicToken: row.public_token ?? null,
@@ -866,8 +1723,77 @@ function rowToParticipant(row: ParticipantRow): Participant {
     seed: row.seed ?? undefined,
     excludedRounds: row.excluded_rounds ?? [],
     withdrawnFromRound: row.withdrawn_from_round ?? null,
+    playerProfileId: row.player_profile_id ?? null,
     updatedAt: toIso(row.updated_at)!,
     deletedAt: toIso(row.deleted_at) ?? undefined,
+  };
+}
+
+function rowToOrganization(row: OrganizationRow): Organization {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    logoUrl: row.logo_url ?? null,
+    description: row.description ?? null,
+    website: row.website ?? null,
+    contactEmail: row.contact_email ?? null,
+    contactPhone: row.contact_phone ?? null,
+    city: row.city ?? null,
+    state: row.state ?? null,
+    country: row.country ?? null,
+    verificationStatus: row.verification_status as OrganizationVerificationStatus,
+    planTier: row.plan_tier as OrganizationPlanTier,
+    trialEndsAt: toIso(row.trial_ends_at) ?? null,
+    maxTournamentsQuota:
+      row.max_tournaments_quota != null ? Number(row.max_tournaments_quota) : null,
+    maxPlayersPerTournament:
+      row.max_players_per_tournament != null ? Number(row.max_players_per_tournament) : null,
+    eventCreditsRemaining: Number(row.event_credits_remaining ?? 0),
+    canPublishGlobal: Boolean(row.can_publish_global),
+    canAcceptPaidRegistrations: Boolean(row.can_accept_paid_registrations),
+    paymentInstructions: row.payment_instructions ?? null,
+    paymentQrStoragePath: row.payment_qr_storage_path ?? null,
+    createdBy: row.created_by ?? null,
+    verifiedAt: toIso(row.verified_at) ?? null,
+    verifiedBy: row.verified_by ?? null,
+    createdAt: toIso(row.created_at)!,
+    updatedAt: toIso(row.updated_at)!,
+  };
+}
+
+function rowToPlayerProfile(row: PlayerProfileRow): PlayerProfile {
+  const dob =
+    row.date_of_birth instanceof Date
+      ? row.date_of_birth.toISOString().slice(0, 10)
+      : row.date_of_birth
+        ? String(row.date_of_birth).slice(0, 10)
+        : null;
+  return {
+    id: row.id,
+    accountUserId: row.account_user_id,
+    isPrimary: Boolean(row.is_primary),
+    relationship: (row.relationship as PlayerRelationship) ?? 'self',
+    username: row.username ?? null,
+    fullName: row.full_name,
+    dateOfBirth: dob,
+    yearOfBirth: row.year_of_birth != null ? Number(row.year_of_birth) : null,
+    gender: row.gender ?? null,
+    nationalId: row.national_id ?? null,
+    fideId: row.fide_id != null ? Number(row.fide_id) : null,
+    fideStandard: row.fide_standard != null ? Number(row.fide_standard) : null,
+    fideRapid: row.fide_rapid != null ? Number(row.fide_rapid) : null,
+    fideBlitz: row.fide_blitz != null ? Number(row.fide_blitz) : null,
+    alokasRating: Number(row.alokas_rating ?? 1000),
+    school: row.school ?? null,
+    club: row.club ?? null,
+    city: row.city ?? null,
+    state: row.state ?? null,
+    country: row.country ?? null,
+    email: row.email ?? null,
+    phone: row.phone ?? null,
+    createdAt: toIso(row.created_at)!,
+    updatedAt: toIso(row.updated_at)!,
   };
 }
 
@@ -942,11 +1868,96 @@ export class PostgresStore implements Store {
 
   // ---- Tournaments ----
 
+  private async resolveTournamentOrganization(t: {
+    organizationId?: string | null;
+    ownerId?: string | null;
+  }): Promise<Organization | null> {
+    if (t.organizationId) {
+      return this.getOrganization(t.organizationId);
+    }
+    if (t.ownerId) {
+      const orgs = await this.listUserOrganizations(t.ownerId);
+      return orgs[0] ?? null;
+    }
+    return null;
+  }
+
+  private async assertTournamentCreationQuota(t: Tournament): Promise<Organization | null> {
+    const org = await this.resolveTournamentOrganization(t);
+    if (!org) return null;
+    if (org.verificationStatus === 'suspended' || org.verificationStatus === 'rejected') {
+      throw Object.assign(
+        new Error('Organization is suspended or rejected and cannot create tournaments.'),
+        { statusCode: 403 },
+      );
+    }
+    if (org.planTier === 'trial' && org.maxTournamentsQuota != null) {
+      const [row] = await this.sql<{ count: string }[]>`
+        SELECT COUNT(*)::text AS count
+        FROM tournaments
+        WHERE deleted_at IS NULL
+          AND id <> ${t.id}
+          AND (
+            organization_id = ${org.id}
+            OR (organization_id IS NULL AND owner_id IS NOT NULL AND owner_id = ${org.createdBy ?? null})
+          )
+      `;
+      const activeCount = Number(row?.count ?? 0);
+      if (activeCount >= org.maxTournamentsQuota) {
+        throw Object.assign(
+          new Error(
+            `Sandbox Trial quota reached: maximum ${org.maxTournamentsQuota} active tournament(s) allowed in trial mode.`,
+          ),
+          { statusCode: 403 },
+        );
+      }
+    }
+    return org;
+  }
+
+  private async assertParticipantQuota(
+    tournamentId: string,
+    incomingParticipants: Array<{ id: string; deletedAt?: string | null }>,
+  ): Promise<void> {
+    const t = await this.getTournament(tournamentId);
+    if (!t || t.deletedAt) return;
+    const org = await this.resolveTournamentOrganization(t);
+    if (!org) return;
+    if (org.planTier === 'trial' && org.maxPlayersPerTournament != null) {
+      const existingRows = await this.sql<{ id: string }[]>`
+        SELECT id::text AS id
+        FROM participants
+        WHERE tournament_id = ${tournamentId} AND deleted_at IS NULL
+      `;
+      const activeIds = new Set(existingRows.map((r) => r.id));
+      for (const inc of incomingParticipants) {
+        if (inc.deletedAt) activeIds.delete(inc.id);
+        else activeIds.add(inc.id);
+      }
+      if (activeIds.size > org.maxPlayersPerTournament) {
+        throw Object.assign(
+          new Error(
+            `Sandbox Trial quota reached: maximum ${org.maxPlayersPerTournament} players per tournament allowed in trial mode.`,
+          ),
+          { statusCode: 403 },
+        );
+      }
+    }
+  }
+
   async listTournaments(ownerId?: string | null): Promise<Tournament[]> {
     const rows = ownerId
       ? await this.sql<TournamentRow[]>`
           SELECT * FROM tournaments
-          WHERE deleted_at IS NULL AND owner_id = ${ownerId}
+          WHERE deleted_at IS NULL
+            AND (
+              owner_id = ${ownerId}
+              OR organization_id IN (
+                SELECT organization_id FROM organization_members WHERE user_id = ${ownerId}
+                UNION
+                SELECT id FROM organizations WHERE created_by = ${ownerId}
+              )
+            )
           ORDER BY updated_at DESC
         `
       : await this.sql<TournamentRow[]>`
@@ -975,20 +1986,42 @@ export class PostgresStore implements Store {
 
   async isTournamentOwnedBy(tournamentId: string, ownerId: string): Promise<boolean> {
     const rows = await this.sql<{ ok: boolean }[]>`
-      SELECT true AS ok FROM tournaments
-      WHERE id = ${tournamentId} AND owner_id = ${ownerId} AND deleted_at IS NULL
+      SELECT true AS ok FROM tournaments t
+      WHERE t.id = ${tournamentId}
+        AND t.deleted_at IS NULL
+        AND (
+          t.owner_id = ${ownerId}
+          OR (
+            t.organization_id IS NOT NULL
+            AND (
+              EXISTS (
+                SELECT 1 FROM organization_members m
+                WHERE m.organization_id = t.organization_id
+                  AND m.user_id = ${ownerId}
+                  AND m.role IN ('owner', 'admin', 'director')
+              )
+              OR EXISTS (
+                SELECT 1 FROM organizations o
+                WHERE o.id = t.organization_id
+                  AND o.created_by = ${ownerId}
+              )
+            )
+          )
+        )
       LIMIT 1
     `;
     return Boolean(rows[0]);
   }
 
   async createTournament(t: Tournament): Promise<Tournament> {
+    const org = await this.assertTournamentCreationQuota(t);
+    const organizationId = t.organizationId ?? org?.id ?? null;
     const rows = await this.sql<TournamentRow[]>`
-      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, arbiter_pin_round, table_count, public_token, public_enabled, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
+      INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, organization_id, arbiter_pin_round, table_count, public_token, public_enabled, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
       VALUES (${t.id}, ${t.name}, ${t.date ?? null}, ${t.style}, ${t.rounds},
               ${t.status}, ${t.currentRound}, ${t.confirmedRounds ?? 0}, ${t.mixCategories ?? false}, ${t.prizePlaces ?? 3}, ${t.awardScope ?? 'per_category'},
               ${t.tiebreakOrder ? this.j(t.tiebreakOrder) : null}, ${t.sharedPlaces ?? true},
-              ${t.ownerId ?? null}, ${t.arbiterPinRound ?? null}, ${Math.max(0, t.tableCount ?? 0)},
+              ${t.ownerId ?? null}, ${organizationId}, ${t.arbiterPinRound ?? null}, ${Math.max(0, t.tableCount ?? 0)},
               ${t.publicToken ?? null}, ${t.publicEnabled ?? false},
               ${t.certEmailSubject ?? null}, ${t.certEmailBody ?? null},
               ${t.certSerialPrefix?.trim() || DEFAULT_CERT_SERIAL_PREFIX},
@@ -1019,6 +2052,7 @@ export class PostgresStore implements Store {
         tiebreak_order = ${m.tiebreakOrder ? this.j(m.tiebreakOrder) : null},
         shared_places = ${m.sharedPlaces ?? true},
         owner_id = ${m.ownerId ?? null},
+        organization_id = ${m.organizationId ?? null},
         arbiter_pin_round = ${m.arbiterPinRound ?? null},
         table_count = GREATEST(COALESCE(tournaments.table_count, 0), ${Math.max(0, m.tableCount ?? 0)}),
         public_token = ${m.publicToken ?? null},
@@ -1105,18 +2139,20 @@ export class PostgresStore implements Store {
   }
 
   async createParticipant(p: Participant): Promise<Participant> {
+    await this.assertParticipantQuota(p.tournamentId, [p]);
     const { excluded, withdrawn } = exclusionFields(p);
     const rows = await this.sql<ParticipantRow[]>`
       INSERT INTO participants
         (id, tournament_id, name, age, gender, rating, fide_id, club, school, city, state, country,
          year_of_birth, email, custom_fields, category_ids, seed, excluded_rounds, withdrawn_from_round,
-         updated_at, deleted_at)
+         player_profile_id, updated_at, deleted_at)
       VALUES
         (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
          ${p.rating ?? null}, ${p.fideId ?? null}, ${p.club ?? null}, ${p.school ?? null}, ${p.city ?? null},
          ${p.state ?? null}, ${p.country ?? null}, ${p.yearOfBirth ?? null},
          ${p.email ?? null}, ${this.j(p.customFields)},
            ${p.categoryIds}, ${p.seed ?? null}, ${excluded}, ${withdrawn},
+           ${p.playerProfileId ?? null},
            ${p.updatedAt}, ${p.deletedAt ?? null})
       RETURNING *
     `;
@@ -1125,6 +2161,15 @@ export class PostgresStore implements Store {
 
   async upsertParticipants(participants: Participant[]): Promise<Participant[]> {
     if (participants.length === 0) return [];
+    const byTournament = new Map<string, Participant[]>();
+    for (const p of participants) {
+      const list = byTournament.get(p.tournamentId) ?? [];
+      list.push(p);
+      byTournament.set(p.tournamentId, list);
+    }
+    for (const [tid, list] of byTournament) {
+      await this.assertParticipantQuota(tid, list);
+    }
     const results: Participant[] = [];
     for (const p of participants) {
       const { excluded, withdrawn } = exclusionFields(p);
@@ -1132,13 +2177,14 @@ export class PostgresStore implements Store {
         INSERT INTO participants
           (id, tournament_id, name, age, gender, rating, fide_id, club, school, city, state, country,
            year_of_birth, email, custom_fields, category_ids, seed, excluded_rounds, withdrawn_from_round,
-           updated_at, deleted_at)
+           player_profile_id, updated_at, deleted_at)
         VALUES
           (${p.id}, ${p.tournamentId}, ${p.name}, ${p.age}, ${p.gender ?? null},
            ${p.rating ?? null}, ${p.fideId ?? null}, ${p.club ?? null}, ${p.school ?? null}, ${p.city ?? null},
            ${p.state ?? null}, ${p.country ?? null}, ${p.yearOfBirth ?? null},
            ${p.email ?? null}, ${this.j(p.customFields)},
            ${p.categoryIds}, ${p.seed ?? null}, ${excluded}, ${withdrawn},
+           ${p.playerProfileId ?? null},
            ${p.updatedAt}, ${p.deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name, age = EXCLUDED.age, gender = EXCLUDED.gender,
@@ -1148,6 +2194,7 @@ export class PostgresStore implements Store {
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
           seed = EXCLUDED.seed, excluded_rounds = EXCLUDED.excluded_rounds,
           withdrawn_from_round = EXCLUDED.withdrawn_from_round,
+          player_profile_id = COALESCE(EXCLUDED.player_profile_id, participants.player_profile_id),
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
           AND participants.tournament_id = EXCLUDED.tournament_id
@@ -1548,13 +2595,46 @@ export class PostgresStore implements Store {
           existing &&
           !existing.deletedAt &&
           existing.ownerId &&
-          existing.ownerId !== ownerId
+          !(await this.isTournamentOwnedBy(tid, ownerId))
         ) {
           throw Object.assign(new Error('Forbidden tournament'), { statusCode: 403 });
         }
         if (item.entity === 'tournament') {
           item.payload = { ...item.payload, ownerId };
         }
+      }
+      if (item.entity === 'tournament' && !item.deletedAt) {
+        let existing = tournamentCache.get(item.id);
+        if (existing === undefined) {
+          existing = await this.getTournament(item.id);
+          tournamentCache.set(item.id, existing);
+        }
+        if (!existing || existing.deletedAt) {
+          const org = await this.assertTournamentCreationQuota({
+            id: item.id,
+            name: String(item.payload['name'] ?? ''),
+            style: 'swiss',
+            rounds: 1,
+            status: 'draft',
+            currentRound: 0,
+            confirmedRounds: 0,
+            mixCategories: false,
+            prizePlaces: 3,
+            awardScope: 'per_category',
+            sharedPlaces: true,
+            tableCount: 0,
+            publicEnabled: false,
+            ownerId: (item.payload['ownerId'] as string | null) ?? ownerId ?? null,
+            organizationId: (item.payload['organizationId'] as string | null) ?? null,
+            updatedAt: item.updatedAt,
+          });
+          if (org && !item.payload['organizationId']) {
+            item.payload = { ...item.payload, organizationId: org.id };
+          }
+        }
+      } else if (item.entity === 'participant') {
+        const tid = String(item.payload['tournamentId'] ?? '');
+        await this.assertParticipantQuota(tid, [{ id: item.id, deletedAt: item.deletedAt }]);
       }
       await this.applySyncItem(item);
       if (item.entity === 'tournament') {
@@ -1592,7 +2672,7 @@ export class PostgresStore implements Store {
         p['arbiterPinRound'] == null ? null : Number(p['arbiterPinRound']);
       const tableCount = Math.max(0, Number(p['tableCount'] ?? 0) || 0);
       await this.sql`
-        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, arbiter_pin_round, table_count, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
+        INSERT INTO tournaments (id, name, date, style, rounds, status, current_round, confirmed_rounds, mix_categories, prize_places, award_scope, tiebreak_order, shared_places, owner_id, organization_id, arbiter_pin_round, table_count, cert_email_subject, cert_email_body, cert_serial_prefix, cert_serial_pad, cert_serial_next, client_id, updated_at, deleted_at)
         VALUES (${id}, ${String(p['name'] ?? '')}, ${(p['date'] as string) ?? null},
                 ${String(p['style'] ?? 'swiss')}, ${Number(p['rounds'] ?? 1)},
                 ${String(p['status'] ?? 'draft')}, ${Number(p['currentRound'] ?? 0)},
@@ -1603,6 +2683,7 @@ export class PostgresStore implements Store {
                 ${p['tiebreakOrder'] ? this.j(p['tiebreakOrder']) : null},
                 ${p['sharedPlaces'] == null ? true : Boolean(p['sharedPlaces'])},
                 ${(p['ownerId'] as string) ?? null},
+                ${(p['organizationId'] as string) ?? null},
                 ${arbiterPinRound},
                 ${tableCount},
                 ${(p['certEmailSubject'] as string) ?? null},
@@ -1620,6 +2701,7 @@ export class PostgresStore implements Store {
           tiebreak_order = EXCLUDED.tiebreak_order,
           shared_places = EXCLUDED.shared_places,
           owner_id = COALESCE(tournaments.owner_id, EXCLUDED.owner_id),
+          organization_id = COALESCE(EXCLUDED.organization_id, tournaments.organization_id),
           arbiter_pin_round = COALESCE(EXCLUDED.arbiter_pin_round, tournaments.arbiter_pin_round),
           table_count = GREATEST(COALESCE(tournaments.table_count, 0), EXCLUDED.table_count),
           cert_email_subject = EXCLUDED.cert_email_subject,
@@ -1665,7 +2747,7 @@ export class PostgresStore implements Store {
         INSERT INTO participants
           (id, tournament_id, name, age, gender, rating, fide_id, club, school, city, state, country,
            year_of_birth, email, custom_fields, category_ids, seed, excluded_rounds, withdrawn_from_round,
-           updated_at, deleted_at)
+           player_profile_id, updated_at, deleted_at)
         VALUES
           (${id}, ${String(p['tournamentId'] ?? '')}, ${String(p['name'] ?? '')},
            ${Number(p['age'] ?? 0)}, ${(p['gender'] as string) ?? null},
@@ -1678,6 +2760,7 @@ export class PostgresStore implements Store {
            ${(p['email'] as string) ?? null}, ${this.j(customFields)},
            ${categoryIds}, ${p['seed'] != null ? Number(p['seed']) : null},
            ${excluded}, ${withdrawn},
+           ${(p['playerProfileId'] as string) ?? null},
            ${updatedAt}, ${deletedAt ?? null})
         ON CONFLICT (id) DO UPDATE SET
           tournament_id = EXCLUDED.tournament_id, name = EXCLUDED.name, age = EXCLUDED.age,
@@ -1689,6 +2772,7 @@ export class PostgresStore implements Store {
           custom_fields = EXCLUDED.custom_fields, category_ids = EXCLUDED.category_ids,
           seed = EXCLUDED.seed, excluded_rounds = EXCLUDED.excluded_rounds,
           withdrawn_from_round = EXCLUDED.withdrawn_from_round,
+          player_profile_id = COALESCE(EXCLUDED.player_profile_id, participants.player_profile_id),
           updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
         WHERE EXCLUDED.updated_at > participants.updated_at
           AND participants.tournament_id = EXCLUDED.tournament_id
@@ -1725,6 +2809,545 @@ export class PostgresStore implements Store {
           AND games.tournament_id = EXCLUDED.tournament_id
       `;
     }
+  }
+
+  // ---- Organizations (B2B) ----
+
+  async listUserOrganizations(
+    userId: string,
+  ): Promise<Array<Organization & { memberRole: OrganizationMemberRole }>> {
+    const rows = await this.sql<(OrganizationRow & { member_role: string })[]>`
+      SELECT o.*, COALESCE(m.role, 'owner') AS member_role
+      FROM organizations o
+      LEFT JOIN organization_members m
+        ON m.organization_id = o.id AND m.user_id = ${userId}
+      WHERE m.user_id = ${userId} OR o.created_by = ${userId}
+      ORDER BY o.created_at ASC
+    `;
+    return rows.map((r) => ({
+      ...rowToOrganization(r),
+      memberRole: (r.member_role as OrganizationMemberRole) || 'owner',
+    }));
+  }
+
+  async getOrganization(id: string): Promise<Organization | null> {
+    const rows = await this.sql<OrganizationRow[]>`
+      SELECT * FROM organizations WHERE id = ${id} LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? rowToOrganization(row) : null;
+  }
+
+  async getOrganizationBySlug(slug: string): Promise<Organization | null> {
+    const norm = slug.trim().toLowerCase();
+    const rows = await this.sql<OrganizationRow[]>`
+      SELECT * FROM organizations WHERE lower(slug) = ${norm} LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? rowToOrganization(row) : null;
+  }
+
+  async isOrganizationMember(
+    organizationId: string,
+    userId: string,
+    roles?: OrganizationMemberRole[],
+  ): Promise<boolean> {
+    const rows = await this.sql<{ role: string }[]>`
+      SELECT COALESCE(m.role, CASE WHEN o.created_by = ${userId} THEN 'owner' ELSE NULL END) AS role
+      FROM organizations o
+      LEFT JOIN organization_members m
+        ON m.organization_id = o.id AND m.user_id = ${userId}
+      WHERE o.id = ${organizationId}
+      LIMIT 1
+    `;
+    const effectiveRole = rows[0]?.role as OrganizationMemberRole | undefined;
+    if (!effectiveRole) return false;
+    if (!roles || roles.length === 0) return true;
+    return roles.includes(effectiveRole);
+  }
+
+  async createOrganization(org: Organization, ownerUserId: string): Promise<Organization> {
+    const existingSlug = await this.getOrganizationBySlug(org.slug);
+    if (existingSlug && existingSlug.id !== org.id) {
+      throw Object.assign(new Error(`Organization slug "${org.slug}" is already taken.`), {
+        statusCode: 409,
+      });
+    }
+    const rows = await this.sql<OrganizationRow[]>`
+      INSERT INTO organizations (
+        id, name, slug, logo_url, description, website, contact_email, contact_phone,
+        city, state, country, verification_status, plan_tier, trial_ends_at,
+        max_tournaments_quota, max_players_per_tournament, event_credits_remaining,
+        can_publish_global, can_accept_paid_registrations, payment_instructions,
+        payment_qr_storage_path, created_by, verified_at, verified_by, created_at, updated_at
+      )
+      VALUES (
+        ${org.id}, ${org.name}, ${org.slug}, ${org.logoUrl ?? null}, ${org.description ?? null},
+        ${org.website ?? null}, ${org.contactEmail ?? null}, ${org.contactPhone ?? null},
+        ${org.city ?? null}, ${org.state ?? null}, ${org.country ?? 'Malaysia'},
+        ${org.verificationStatus}, ${org.planTier}, ${org.trialEndsAt ?? null},
+        ${org.maxTournamentsQuota ?? 1}, ${org.maxPlayersPerTournament ?? 24},
+        ${org.eventCreditsRemaining ?? 0}, ${org.canPublishGlobal ?? false},
+        ${org.canAcceptPaidRegistrations ?? false}, ${org.paymentInstructions ?? null},
+        ${org.paymentQrStoragePath ?? null}, ${org.createdBy ?? ownerUserId},
+        ${org.verifiedAt ?? null}, ${org.verifiedBy ?? null},
+        ${org.createdAt}, ${org.updatedAt}
+      )
+      RETURNING *
+    `;
+    await this.sql`
+      INSERT INTO organization_members (organization_id, user_id, role, created_at)
+      VALUES (${org.id}, ${ownerUserId}, 'owner', ${org.createdAt})
+      ON CONFLICT (organization_id, user_id) DO NOTHING
+    `;
+    await this.sql`
+      UPDATE profiles
+      SET account_role = CASE WHEN account_role = 'participant' THEN 'both' ELSE 'organizer' END,
+          default_organization_id = COALESCE(default_organization_id, ${org.id}),
+          updated_at = ${org.updatedAt}
+      WHERE id = ${ownerUserId}
+    `;
+    return rowToOrganization(rows[0]!);
+  }
+
+  async updateOrganization(
+    id: string,
+    patch: Partial<
+      Pick<
+        Organization,
+        | 'name'
+        | 'slug'
+        | 'logoUrl'
+        | 'description'
+        | 'website'
+        | 'contactEmail'
+        | 'contactPhone'
+        | 'city'
+        | 'state'
+        | 'country'
+        | 'paymentInstructions'
+        | 'paymentQrStoragePath'
+      >
+    >,
+  ): Promise<Organization | null> {
+    const existing = await this.getOrganization(id);
+    if (!existing) return null;
+    if (patch.slug && patch.slug.toLowerCase() !== existing.slug.toLowerCase()) {
+      const clash = await this.getOrganizationBySlug(patch.slug);
+      if (clash && clash.id !== id) {
+        throw Object.assign(new Error(`Organization slug "${patch.slug}" is already taken.`), {
+          statusCode: 409,
+        });
+      }
+    }
+    const m = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    const rows = await this.sql<OrganizationRow[]>`
+      UPDATE organizations SET
+        name = ${m.name},
+        slug = ${m.slug},
+        logo_url = ${m.logoUrl ?? null},
+        description = ${m.description ?? null},
+        website = ${m.website ?? null},
+        contact_email = ${m.contactEmail ?? null},
+        contact_phone = ${m.contactPhone ?? null},
+        city = ${m.city ?? null},
+        state = ${m.state ?? null},
+        country = ${m.country ?? null},
+        payment_instructions = ${m.paymentInstructions ?? null},
+        payment_qr_storage_path = ${m.paymentQrStoragePath ?? null},
+        updated_at = ${m.updatedAt}
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    const row = rows[0];
+    return row ? rowToOrganization(row) : null;
+  }
+
+  async listAllOrganizationsForAdmin(): Promise<AdminOrganizationRow[]> {
+    const rows = await this.sql<
+      (OrganizationRow & {
+        member_count: string;
+        tournament_count: string;
+        owner_email: string | null;
+      })[]
+    >`
+      SELECT
+        o.*,
+        (
+          SELECT COUNT(*)::text
+          FROM organization_members m
+          WHERE m.organization_id = o.id
+        ) AS member_count,
+        (
+          SELECT COUNT(*)::text
+          FROM tournaments t
+          WHERE t.deleted_at IS NULL
+            AND (
+              t.organization_id = o.id
+              OR (t.organization_id IS NULL AND t.owner_id IS NOT NULL AND t.owner_id = o.created_by)
+            )
+        ) AS tournament_count,
+        u.email AS owner_email
+      FROM organizations o
+      LEFT JOIN auth.users u ON u.id = o.created_by
+      ORDER BY o.created_at DESC
+    `;
+    return rows.map((r) => ({
+      ...rowToOrganization(r),
+      memberCount: Math.max(1, Number(r.member_count ?? 1)),
+      tournamentCount: Number(r.tournament_count ?? 0),
+      ownerEmail: r.owner_email ?? r.contact_email ?? null,
+    }));
+  }
+
+  async adminUpdateOrganization(
+    id: string,
+    patch: Partial<
+      Pick<
+        Organization,
+        | 'verificationStatus'
+        | 'planTier'
+        | 'trialEndsAt'
+        | 'maxTournamentsQuota'
+        | 'maxPlayersPerTournament'
+        | 'eventCreditsRemaining'
+        | 'canPublishGlobal'
+        | 'canAcceptPaidRegistrations'
+        | 'verifiedAt'
+        | 'verifiedBy'
+      >
+    >,
+  ): Promise<Organization | null> {
+    const existing = await this.getOrganization(id);
+    if (!existing) return null;
+    const m = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    const rows = await this.sql<OrganizationRow[]>`
+      UPDATE organizations SET
+        verification_status = ${m.verificationStatus},
+        plan_tier = ${m.planTier},
+        trial_ends_at = ${m.trialEndsAt ?? null},
+        max_tournaments_quota = ${m.maxTournamentsQuota ?? null},
+        max_players_per_tournament = ${m.maxPlayersPerTournament ?? null},
+        event_credits_remaining = ${m.eventCreditsRemaining ?? 0},
+        can_publish_global = ${m.canPublishGlobal ?? false},
+        can_accept_paid_registrations = ${m.canAcceptPaidRegistrations ?? false},
+        verified_at = ${m.verifiedAt ?? null},
+        verified_by = ${m.verifiedBy ?? null},
+        updated_at = ${m.updatedAt}
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    const row = rows[0];
+    return row ? rowToOrganization(row) : null;
+  }
+
+  // ---- Player Profiles (B2C) ----
+
+  async listPlayerProfiles(accountUserId: string): Promise<PlayerProfile[]> {
+    const rows = await this.sql<PlayerProfileRow[]>`
+      SELECT * FROM player_profiles
+      WHERE account_user_id = ${accountUserId}
+      ORDER BY is_primary DESC, created_at ASC
+    `;
+    return rows.map(rowToPlayerProfile);
+  }
+
+  async getPlayerProfile(id: string): Promise<PlayerProfile | null> {
+    const rows = await this.sql<PlayerProfileRow[]>`
+      SELECT * FROM player_profiles WHERE id = ${id} LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? rowToPlayerProfile(row) : null;
+  }
+
+  async createPlayerProfile(profile: PlayerProfile): Promise<PlayerProfile> {
+    if (profile.username) {
+      const norm = profile.username.trim().toLowerCase();
+      const clash = await this.sql<{ id: string }[]>`
+        SELECT id::text AS id FROM player_profiles
+        WHERE lower(username) = ${norm} AND id <> ${profile.id}
+        LIMIT 1
+      `;
+      if (clash[0]) {
+        throw Object.assign(new Error(`Username "@${profile.username}" is already taken.`), {
+          statusCode: 409,
+        });
+      }
+    }
+    const existing = await this.listPlayerProfiles(profile.accountUserId);
+    const shouldBePrimary = profile.isPrimary || existing.length === 0;
+    if (shouldBePrimary && existing.some((p) => p.isPrimary)) {
+      await this.sql`
+        UPDATE player_profiles
+        SET is_primary = false
+        WHERE account_user_id = ${profile.accountUserId} AND is_primary = true
+      `;
+    }
+    const rows = await this.sql<PlayerProfileRow[]>`
+      INSERT INTO player_profiles (
+        id, account_user_id, is_primary, relationship, username, full_name,
+        date_of_birth, year_of_birth, gender, national_id, fide_id,
+        fide_standard, fide_rapid, fide_blitz, alokas_rating,
+        school, club, city, state, country, email, phone, created_at, updated_at
+      )
+      VALUES (
+        ${profile.id}, ${profile.accountUserId}, ${shouldBePrimary}, ${profile.relationship},
+        ${profile.username ?? null}, ${profile.fullName},
+        ${profile.dateOfBirth ?? null}, ${profile.yearOfBirth ?? null},
+        ${profile.gender ?? null}, ${profile.nationalId ?? null}, ${profile.fideId ?? null},
+        ${profile.fideStandard ?? null}, ${profile.fideRapid ?? null}, ${profile.fideBlitz ?? null},
+        ${profile.alokasRating ?? 1000},
+        ${profile.school ?? null}, ${profile.club ?? null}, ${profile.city ?? null},
+        ${profile.state ?? null}, ${profile.country ?? 'Malaysia'},
+        ${profile.email ?? null}, ${profile.phone ?? null},
+        ${profile.createdAt}, ${profile.updatedAt}
+      )
+      RETURNING *
+    `;
+    return rowToPlayerProfile(rows[0]!);
+  }
+
+  async updatePlayerProfile(
+    id: string,
+    accountUserId: string,
+    patch: Partial<Omit<PlayerProfile, 'id' | 'accountUserId' | 'createdAt'>>,
+  ): Promise<PlayerProfile | null> {
+    const existing = await this.getPlayerProfile(id);
+    if (!existing || existing.accountUserId !== accountUserId) return null;
+    if (patch.username) {
+      const norm = patch.username.trim().toLowerCase();
+      const clash = await this.sql<{ id: string }[]>`
+        SELECT id::text AS id FROM player_profiles
+        WHERE lower(username) = ${norm} AND id <> ${id}
+        LIMIT 1
+      `;
+      if (clash[0]) {
+        throw Object.assign(new Error(`Username "@${patch.username}" is already taken.`), {
+          statusCode: 409,
+        });
+      }
+    }
+    if (patch.isPrimary) {
+      await this.sql`
+        UPDATE player_profiles
+        SET is_primary = false
+        WHERE account_user_id = ${accountUserId} AND id <> ${id} AND is_primary = true
+      `;
+    }
+    const m = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    const rows = await this.sql<PlayerProfileRow[]>`
+      UPDATE player_profiles SET
+        is_primary = ${m.isPrimary},
+        relationship = ${m.relationship},
+        username = ${m.username ?? null},
+        full_name = ${m.fullName},
+        date_of_birth = ${m.dateOfBirth ?? null},
+        year_of_birth = ${m.yearOfBirth ?? null},
+        gender = ${m.gender ?? null},
+        national_id = ${m.nationalId ?? null},
+        fide_id = ${m.fideId ?? null},
+        fide_standard = ${m.fideStandard ?? null},
+        fide_rapid = ${m.fideRapid ?? null},
+        fide_blitz = ${m.fideBlitz ?? null},
+        alokas_rating = ${m.alokasRating ?? 1000},
+        school = ${m.school ?? null},
+        club = ${m.club ?? null},
+        city = ${m.city ?? null},
+        state = ${m.state ?? null},
+        country = ${m.country ?? null},
+        email = ${m.email ?? null},
+        phone = ${m.phone ?? null},
+        updated_at = ${m.updatedAt}
+      WHERE id = ${id} AND account_user_id = ${accountUserId}
+      RETURNING *
+    `;
+    const row = rows[0];
+    return row ? rowToPlayerProfile(row) : null;
+  }
+
+  async deletePlayerProfile(id: string, accountUserId: string): Promise<boolean> {
+    const deleted = await this.sql<{ id: string }[]>`
+      DELETE FROM player_profiles
+      WHERE id = ${id} AND account_user_id = ${accountUserId}
+      RETURNING id::text AS id
+    `;
+    return deleted.length > 0;
+  }
+
+  async claimPastParticipations(
+    accountUserId: string,
+    profileId: string,
+    match?: { email?: string | null; fideId?: number | null; fullName?: string | null },
+  ): Promise<{ claimedCount: number; participantIds: string[] }> {
+    const profile = await this.getPlayerProfile(profileId);
+    if (!profile || profile.accountUserId !== accountUserId) {
+      throw Object.assign(new Error('Player profile not found'), { statusCode: 404 });
+    }
+    const targetEmail = (match?.email ?? profile.email ?? '').trim().toLowerCase() || null;
+    const targetFideId = match?.fideId ?? profile.fideId ?? null;
+    const targetName = (match?.fullName ?? '').trim().toLowerCase() || null;
+
+    if (!targetEmail && targetFideId == null && !targetName) {
+      return { claimedCount: 0, participantIds: [] };
+    }
+
+    const now = new Date().toISOString();
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE participants
+      SET player_profile_id = ${profileId}, updated_at = ${now}
+      WHERE deleted_at IS NULL
+        AND (player_profile_id IS NULL OR player_profile_id = ${profileId})
+        AND (
+          (${targetFideId}::integer IS NOT NULL AND fide_id = ${targetFideId}::integer)
+          OR (${targetEmail}::text IS NOT NULL AND email IS NOT NULL AND lower(trim(email)) = ${targetEmail}::text)
+          OR (${targetName}::text IS NOT NULL AND lower(trim(name)) = ${targetName}::text)
+        )
+      RETURNING id::text AS id
+    `;
+    const ids = rows.map((r) => r.id);
+    return { claimedCount: ids.length, participantIds: ids };
+  }
+
+  async getPlayerCareerDashboard(
+    accountUserId: string,
+    profileId?: string | null,
+  ): Promise<PlayerCareerDashboard> {
+    const profiles = await this.listPlayerProfiles(accountUserId);
+    const selectedProfile =
+      (profileId ? profiles.find((p) => p.id === profileId) : null) ??
+      profiles.find((p) => p.isPrimary) ??
+      profiles[0] ??
+      null;
+
+    if (!selectedProfile) {
+      return {
+        profiles,
+        selectedProfile: null,
+        liveMatches: [],
+        stats: {
+          tournamentsCount: 0,
+          gamesPlayed: 0,
+          wins: 0,
+          draws: 0,
+          losses: 0,
+          totalPoints: 0,
+        },
+        tournaments: [],
+        certificates: [],
+      };
+    }
+
+    const partRows = await this.sql<ParticipantRow[]>`
+      SELECT p.*
+      FROM participants p
+      INNER JOIN tournaments t ON t.id = p.tournament_id
+      WHERE p.deleted_at IS NULL
+        AND t.deleted_at IS NULL
+        AND p.player_profile_id = ${selectedProfile.id}
+    `;
+    const matchedParticipants = partRows.map(rowToParticipant);
+    const tournamentIds = [...new Set(matchedParticipants.map((p) => p.tournamentId))];
+
+    const participations: Array<{ participant: Participant; tournament: Tournament }> = [];
+    const gamesByTournament = new Map<string, Game[]>();
+    const participantsById = new Map<string, Participant>();
+
+    if (tournamentIds.length > 0) {
+      const [tRows, gRows, allPartRows] = await Promise.all([
+        this.sql<TournamentRow[]>`
+          SELECT * FROM tournaments
+          WHERE id IN ${this.sql(tournamentIds)} AND deleted_at IS NULL
+        `,
+        this.sql<GameRow[]>`
+          SELECT * FROM games
+          WHERE tournament_id IN ${this.sql(tournamentIds)} AND deleted_at IS NULL
+        `,
+        this.sql<ParticipantRow[]>`
+          SELECT * FROM participants
+          WHERE tournament_id IN ${this.sql(tournamentIds)} AND deleted_at IS NULL
+        `,
+      ]);
+      const tById = new Map(tRows.map((r) => [r.id, rowToTournament(r)]));
+      for (const part of matchedParticipants) {
+        const t = tById.get(part.tournamentId);
+        if (t) participations.push({ participant: part, tournament: t });
+      }
+      for (const gRow of gRows) {
+        const g = rowToGame(gRow);
+        const list = gamesByTournament.get(g.tournamentId) ?? [];
+        list.push(g);
+        gamesByTournament.set(g.tournamentId, list);
+      }
+      for (const pRow of allPartRows) {
+        const p = rowToParticipant(pRow);
+        participantsById.set(p.id, p);
+      }
+    }
+
+    const participantIds = matchedParticipants.map((p) => p.id);
+    const profileEmailLower = selectedProfile.email?.trim().toLowerCase() || null;
+
+    let certItems: PlayerCertificateItem[] = [];
+    if (participantIds.length > 0 || profileEmailLower) {
+      const certRows = await this.sql<
+        {
+          id: string;
+          tournament_id: string;
+          tournament_name: string;
+          tournament_date: string | null;
+          participant_id: string | null;
+          recipient_name: string;
+          type: string;
+          rank: number | null;
+          serial: string | null;
+          created_at: Date | string;
+        }[]
+      >`
+        SELECT
+          c.id::text AS id,
+          c.tournament_id::text AS tournament_id,
+          t.name AS tournament_name,
+          t.date AS tournament_date,
+          c.participant_id::text AS participant_id,
+          c.recipient_name,
+          c.type,
+          c.rank,
+          c.serial,
+          c.created_at
+        FROM certificate_issues c
+        INNER JOIN tournaments t ON t.id = c.tournament_id
+        WHERE (
+          ${participantIds.length > 0 ? this.sql`c.participant_id IN ${this.sql(participantIds)}` : this.sql`false`}
+          OR (
+            ${profileEmailLower}::text IS NOT NULL
+            AND c.recipient_email IS NOT NULL
+            AND lower(trim(c.recipient_email)) = ${profileEmailLower}::text
+          )
+        )
+        ORDER BY c.created_at DESC
+      `;
+      certItems = certRows.map((r) => ({
+        id: r.id,
+        tournamentId: r.tournament_id,
+        tournamentName: r.tournament_name,
+        tournamentDate: r.tournament_date ?? null,
+        participantId: r.participant_id ?? null,
+        recipientName: r.recipient_name,
+        type: r.type as CertificateIssueType,
+        rank: r.rank != null ? Number(r.rank) : null,
+        serial: r.serial ?? null,
+        createdAt: toIso(r.created_at)!,
+      }));
+    }
+
+    return buildCareerDashboard({
+      profiles,
+      selectedProfile,
+      participations,
+      gamesByTournament,
+      participantsById,
+      certificates: certItems,
+    });
   }
 }
 

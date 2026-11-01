@@ -11,7 +11,8 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - **Tournament styles** — Swiss implemented; Round Robin selectable as “coming soon”
 - **CSV / Excel import** — map columns, auto-assign categories
 - **Offline-first** — Dexie (IndexedDB) local store; **Sync online** push/pull (last-write-wins)
-- **Auth** — email/password, OTP/magic link, Google & GitHub; per-manager tournament ownership
+- **Auth & Multi-Tenant B2B Organizations** — email/password, OTP/magic link, Google & GitHub; role-based signup (`Player / Parent` vs `Organizer / Academy`), Sandbox Trial quotas (1 tournament / 24 players), and Platform Admin B2B verification
+- **Global Player & Family Portal (`/player`)** — manage `Self` + `Child / Student` sub-profiles under one parent account, claim past tournaments, Live Matchday Companion card (board, color, opponent, score), career W/D/L stats, and Digital Certificate Vault
 - **Certificates** — PDF designer, print pack, Issue digital → Supabase Storage (or local disk)
 - **Desktop app** — Electron shell; production builds use cloud API (no user secrets)
 - **Simulator** — generate players, auto-play rounds, visualize boards/standings/diagnostics
@@ -23,6 +24,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - Dokploy one-time setup: [`deploy/DOKPLOY.md`](deploy/DOKPLOY.md)
 - Self-hosted Supabase migration guide: [`deploy/SUPABASE_MIGRATION.md`](deploy/SUPABASE_MIGRATION.md)
 - Engineering & agent rules handbook: [`docs/ENGINEERING_AND_AGENT_RULES.md`](docs/ENGINEERING_AND_AGENT_RULES.md)
+- Organizations & Player Portal feature guide: [`docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md`](docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md)
 - Agent handoff: [`docs/AGENT_HANDOFF.md`](docs/AGENT_HANDOFF.md)
 
 ## Monorepo
@@ -146,7 +148,13 @@ pnpm --filter @chess-alokas/pairing-engine test
 | POST | `/sync/push` | Push LWW sync |
 | POST | `/tournaments/:id/certificates/issue` | Store digital PDFs |
 | POST | `/tournaments/:id/certificates/email` | Email issued PDFs |
-| GET | `/certificates/:issueId/download` | Download issued PDF |
+| GET | `/certificates/:issueId/download` | Download issued PDF (organizer or linked player) |
+| GET/POST | `/organizations` | List / create B2B organization (Sandbox Trial) |
+| PATCH | `/organizations/:id` | Update organization contact & payment info |
+| GET/PATCH | `/admin/organizations` | Platform admin B2B organization review & tier upgrades |
+| GET/POST/PATCH/DELETE | `/player/profiles` | Manage global `Self` + `Child / Student` player profiles |
+| POST | `/player/profiles/:id/claim` | Claim past/live tournament participations |
+| GET | `/player/dashboard` | Player career stats, live matchday card, and certificate vault |
 
 ## Typical flow
 

@@ -4,6 +4,14 @@ import type {
   Participant,
   Game,
   SyncPushRequest,
+  Organization,
+  OrganizationMemberRole,
+  OrganizationVerificationStatus,
+  OrganizationPlanTier,
+  AdminOrganizationRow,
+  PlayerProfile,
+  PlayerRelationship,
+  PlayerCareerDashboard,
 } from '@chess-alokas/shared';
 import { supabase } from '../lib/supabase';
 
@@ -683,4 +691,206 @@ export async function apiDirectorSetGameResult(
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+// ── Organizations (B2B multi-tenant & Sandbox Trial) ─────────────────────────
+
+export type UserOrganization = Organization & { memberRole: OrganizationMemberRole };
+
+export async function apiListOrganizations() {
+  return req<{ organizations: UserOrganization[] }>('/organizations');
+}
+
+export async function apiCreateOrganization(body: {
+  name: string;
+  slug?: string;
+  logoUrl?: string | null;
+  description?: string | null;
+  website?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  paymentInstructions?: string | null;
+}) {
+  return req<{ organization: Organization }>('/organizations', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiUpdateOrganization(
+  id: string,
+  body: {
+    name?: string;
+    slug?: string;
+    logoUrl?: string | null;
+    description?: string | null;
+    website?: string | null;
+    contactEmail?: string | null;
+    contactPhone?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    paymentInstructions?: string | null;
+    paymentQrStoragePath?: string | null;
+  },
+) {
+  return req<{ organization: Organization }>(`/organizations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiAdminListOrganizations() {
+  return req<{ organizations: AdminOrganizationRow[] }>('/admin/organizations', {
+    timeoutMs: 15_000,
+  });
+}
+
+export async function apiAdminUpdateOrganization(
+  id: string,
+  body: {
+    verificationStatus?: OrganizationVerificationStatus;
+    planTier?: OrganizationPlanTier;
+    trialEndsAt?: string | null;
+    maxTournamentsQuota?: number | null;
+    maxPlayersPerTournament?: number | null;
+    eventCreditsRemaining?: number;
+    canPublishGlobal?: boolean;
+    canAcceptPaidRegistrations?: boolean;
+  },
+) {
+  return req<{ organization: Organization }>(`/admin/organizations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Player & Family Profiles (B2C Participant Portal) ────────────────────────
+
+export async function apiListPlayerProfiles() {
+  return req<{ profiles: PlayerProfile[] }>('/player/profiles');
+}
+
+export async function apiCreatePlayerProfile(body: {
+  fullName: string;
+  username?: string | null;
+  isPrimary?: boolean;
+  relationship?: PlayerRelationship;
+  dateOfBirth?: string | null;
+  yearOfBirth?: number | null;
+  gender?: string | null;
+  nationalId?: string | null;
+  fideId?: number | null;
+  fideStandard?: number | null;
+  fideRapid?: number | null;
+  fideBlitz?: number | null;
+  school?: string | null;
+  club?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}) {
+  return req<{ profile: PlayerProfile }>('/player/profiles', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiUpdatePlayerProfile(
+  id: string,
+  body: Partial<{
+    fullName: string;
+    username: string | null;
+    isPrimary: boolean;
+    relationship: PlayerRelationship;
+    dateOfBirth: string | null;
+    yearOfBirth: number | null;
+    gender: string | null;
+    nationalId: string | null;
+    fideId: number | null;
+    fideStandard: number | null;
+    fideRapid: number | null;
+    fideBlitz: number | null;
+    school: string | null;
+    club: string | null;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    email: string | null;
+    phone: string | null;
+  }>,
+) {
+  return req<{ profile: PlayerProfile }>(`/player/profiles/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiDeletePlayerProfile(id: string) {
+  return req<void>(`/player/profiles/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function apiClaimPlayerParticipations(
+  profileId: string,
+  body?: { email?: string | null; fideId?: number | null; fullName?: string | null },
+) {
+  return req<{ claimedCount: number; participantIds: string[] }>(
+    `/player/profiles/${encodeURIComponent(profileId)}/claim`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    },
+  );
+}
+
+export async function apiGetPlayerDashboard(profileId?: string | null) {
+  const qs = profileId ? `?profileId=${encodeURIComponent(profileId)}` : '';
+  return req<PlayerCareerDashboard>(`/player/dashboard${qs}`);
+}
+
+export async function apiDownloadCertificatePdf(
+  issueId: string,
+  filename = 'certificate.pdf',
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const BASE_URL = resolveApiBaseUrl();
+  try {
+    const authHeaders = await getAuthHeaders();
+    const res = await fetch(`${BASE_URL}/certificates/${encodeURIComponent(issueId)}/download`, {
+      headers: {
+        ...authHeaders,
+      },
+    });
+    if (!res.ok) {
+      let error = `Download failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { message?: string; error?: string };
+        error = body.message ?? body.error ?? error;
+      } catch {
+        /* ignore */
+      }
+      return { ok: false, error };
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Download failed',
+    };
+  }
 }

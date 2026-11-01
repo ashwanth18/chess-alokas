@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as Sentry from '@sentry/react';
 import { useAuth } from '../auth/AuthContext';
-import { apiAdminOverview, type AdminOverview } from '../api/client';
+import {
+  apiAdminOverview,
+  apiAdminListOrganizations,
+  apiAdminUpdateOrganization,
+  type AdminOverview,
+} from '../api/client';
+import type { AdminOrganizationRow } from '@chess-alokas/shared';
 import { sentryEnabled } from '../instrument';
 
 /** Format UTC ISO for display in the viewer's local timezone, with TZ abbreviation. */
@@ -132,22 +138,87 @@ function HBars({ entries }: { entries: Array<[string, number]> }) {
 export default function AdminPage() {
   const auth = useAuth();
   const [data, setData] = useState<AdminOverview | null>(null);
+  const [organizations, setOrganizations] = useState<AdminOrganizationRow[]>([]);
+  const [orgBusyId, setOrgBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const res = await apiAdminOverview();
+    const [res, orgsRes] = await Promise.all([
+      apiAdminOverview(),
+      apiAdminListOrganizations(),
+    ]);
+    if (orgsRes.ok) {
+      setOrganizations(orgsRes.data.organizations);
+    }
     if (!res.ok) {
       setData(null);
-      setError(res.error);
+      if (!orgsRes.ok) {
+        setError(res.error);
+      }
       setLoading(false);
       return;
     }
     setData(res.data);
     setLoading(false);
   }, []);
+
+  async function handleOrgAction(
+    orgId: string,
+    action: 'event_pass' | 'pro' | 'trial' | 'suspend',
+  ) {
+    setOrgBusyId(orgId);
+    setError(null);
+    let patch: Parameters<typeof apiAdminUpdateOrganization>[1];
+    if (action === 'event_pass') {
+      patch = {
+        verificationStatus: 'verified',
+        planTier: 'event_pass',
+        maxTournamentsQuota: 3,
+        maxPlayersPerTournament: 250,
+        eventCreditsRemaining: 1,
+        canPublishGlobal: true,
+        canAcceptPaidRegistrations: true,
+      };
+    } else if (action === 'pro') {
+      patch = {
+        verificationStatus: 'verified',
+        planTier: 'pro',
+        maxTournamentsQuota: null,
+        maxPlayersPerTournament: null,
+        canPublishGlobal: true,
+        canAcceptPaidRegistrations: true,
+      };
+    } else if (action === 'trial') {
+      patch = {
+        verificationStatus: 'pending_review',
+        planTier: 'trial',
+        maxTournamentsQuota: 1,
+        maxPlayersPerTournament: 24,
+        eventCreditsRemaining: 0,
+        canPublishGlobal: false,
+        canAcceptPaidRegistrations: false,
+      };
+    } else {
+      patch = {
+        verificationStatus: 'suspended',
+        canPublishGlobal: false,
+        canAcceptPaidRegistrations: false,
+      };
+    }
+    const res = await apiAdminUpdateOrganization(orgId, patch);
+    setOrgBusyId(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    const refreshed = await apiAdminListOrganizations();
+    if (refreshed.ok) {
+      setOrganizations(refreshed.data.organizations);
+    }
+  }
 
   useEffect(() => {
     void load();
@@ -219,6 +290,112 @@ export default function AdminPage() {
           {error}
         </p>
       )}
+
+      <section className="admin-panel" aria-label="Organizations and B2B Approvals">
+        <h3>Organizations &amp; B2B Approvals</h3>
+        <p className="admin-metric-detail">
+          New organizer academies start in <strong>Sandbox Trial</strong> mode (1 tournament · 24
+          players max · private only). Approve verified organizers below to unlock Event Pass or Pro
+          (Unlimited) quotas and global event discovery.
+        </p>
+        {organizations.length === 0 ? (
+          <p className="admin-metric-detail" style={{ marginTop: '0.5rem' }}>
+            {loading ? 'Loading organizations…' : 'No B2B organizations registered yet.'}
+          </p>
+        ) : (
+          <div className="table-scroll" style={{ marginTop: '0.75rem' }}>
+            <table className="data-table admin-table">
+              <thead>
+                <tr>
+                  <th>Organization</th>
+                  <th>Location &amp; Contact</th>
+                  <th>Status</th>
+                  <th>Plan Tier</th>
+                  <th>Quotas (Events / Players)</th>
+                  <th>Usage</th>
+                  <th>1-Click Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {organizations.map((org) => {
+                  const busy = orgBusyId === org.id;
+                  return (
+                    <tr key={org.id}>
+                      <td>
+                        <strong>{org.name}</strong>
+                        <div className="admin-metric-detail">/{org.slug}</div>
+                      </td>
+                      <td>
+                        <div>
+                          {[org.city, org.state, org.country].filter(Boolean).join(', ') || '—'}
+                        </div>
+                        <div className="admin-metric-detail">
+                          {org.contactEmail || org.ownerEmail || '—'}
+                          {org.contactPhone ? ` · ${org.contactPhone}` : ''}
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`org-status-badge is-${org.verificationStatus}`}>
+                          {org.verificationStatus.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td>
+                        <strong>{org.planTier.toUpperCase()}</strong>
+                        {org.canPublishGlobal && (
+                          <div className="admin-metric-detail">Global discovery ✓</div>
+                        )}
+                      </td>
+                      <td>
+                        {org.maxTournamentsQuota ?? '∞'} events ·{' '}
+                        {org.maxPlayersPerTournament ?? '∞'} players
+                      </td>
+                      <td>
+                        {org.tournamentCount} events · {org.memberCount} member(s)
+                      </td>
+                      <td>
+                        <div className="admin-actions-row" style={{ gap: '0.35rem' }}>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            disabled={busy}
+                            onClick={() => void handleOrgAction(org.id, 'event_pass')}
+                          >
+                            Verify + Event Pass
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline"
+                            disabled={busy}
+                            onClick={() => void handleOrgAction(org.id, 'pro')}
+                          >
+                            Verify + Pro (Unlimited)
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            disabled={busy}
+                            onClick={() => void handleOrgAction(org.id, 'trial')}
+                          >
+                            Reset to Trial
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            disabled={busy}
+                            onClick={() => void handleOrgAction(org.id, 'suspend')}
+                          >
+                            Suspend
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="admin-panel" aria-label="FIDE lookups">
         <h3>FIDE lookups</h3>

@@ -216,6 +216,9 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
           serial: item.serial || null,
           createdAt: new Date().toISOString(),
         });
+        if ('registerCertificateIssue' in tournamentStore && typeof tournamentStore.registerCertificateIssue === 'function') {
+          tournamentStore.registerCertificateIssue(issue);
+        }
         created.push(issue);
       }
 
@@ -249,11 +252,34 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
     async (request, reply) => {
       const issue = await certStore.getIssue(request.params.issueId);
       if (!issue) return reply.code(404).send({ error: 'Certificate not found' });
-      if (
-        request.userId &&
-        !(await tournamentStore.isTournamentOwnedBy(issue.tournamentId, request.userId))
-      ) {
-        return reply.code(403).send({ error: 'Forbidden' });
+      if (request.userId) {
+        let allowed = await tournamentStore.isTournamentOwnedBy(
+          issue.tournamentId,
+          request.userId,
+        );
+        if (!allowed) {
+          const profiles = await tournamentStore.listPlayerProfiles(request.userId);
+          const profileIds = new Set(profiles.map((p) => p.id));
+          if (issue.participantId) {
+            const part = await tournamentStore.getParticipant(issue.participantId);
+            if (part?.playerProfileId && profileIds.has(part.playerProfileId)) {
+              allowed = true;
+            }
+          }
+          if (!allowed && issue.recipientEmail) {
+            const targetEmail = issue.recipientEmail.trim().toLowerCase();
+            const userEmail = request.user?.email?.trim().toLowerCase();
+            if (
+              userEmail === targetEmail ||
+              profiles.some((p) => p.email?.trim().toLowerCase() === targetEmail)
+            ) {
+              allowed = true;
+            }
+          }
+        }
+        if (!allowed) {
+          return reply.code(403).send({ error: 'Forbidden' });
+        }
       }
       const pdf = await readCertificatePdf(issue.storagePath);
       if (!pdf) return reply.code(404).send({ error: 'PDF file missing' });

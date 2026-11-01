@@ -15,6 +15,8 @@ import { publicLivePlugin } from './routes/publicLive.js';
 import { floorPlugin } from './routes/floor.js';
 import { adminPlugin } from './routes/admin.js';
 import { publicAnalyticsPlugin } from './routes/publicAnalytics.js';
+import { organizationsPlugin } from './routes/organizations.js';
+import { playerProfilesPlugin } from './routes/playerProfiles.js';
 import { Sentry, sentryEnabled } from './sentry.js';
 
 const PORT = Number(process.env['PORT'] ?? 3001);
@@ -91,6 +93,8 @@ await app.register(certificatesPlugin, { store });
 await app.register(publicTablesPlugin, { store });
 await app.register(publicLivePlugin, { store });
 await app.register(floorPlugin, { store });
+await app.register(organizationsPlugin, { store });
+await app.register(playerProfilesPlugin, { store });
 await app.register(adminPlugin);
 await app.register(publicAnalyticsPlugin);
 

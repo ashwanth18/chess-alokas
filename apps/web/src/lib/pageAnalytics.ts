@@ -13,7 +13,8 @@ export type AnalyticsRouteKey =
   | 'admin'
   | 'landing'
   | 'login'
-  | 'signup';
+  | 'signup'
+  | 'player_portal';
 
 type TrackArgs = {
   routeKey: AnalyticsRouteKey;
@@ -71,6 +72,7 @@ export function trackPageView(args: TrackArgs): void {
 /** Map authenticated app paths to analytics route keys. */
 export function routeKeyFromAppPath(pathname: string): AnalyticsRouteKey | null {
   if (pathname === '/app' || pathname === '/app/') return 'app_home';
+  if (pathname.startsWith('/player')) return 'player_portal';
   if (pathname.startsWith('/tournaments/new')) return null;
   if (/^\/tournaments\/[^/]+\/import/.test(pathname)) return 'tournament_import';
   if (/^\/tournaments\/[^/]+/.test(pathname)) return 'tournament';

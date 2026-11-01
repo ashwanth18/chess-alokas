@@ -17,6 +17,7 @@ const ALLOWED_ROUTE_KEYS = new Set([
   'landing',
   'login',
   'signup',
+  'player_portal',
 ]);
 
 const BodySchema = z.object({

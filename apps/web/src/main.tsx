@@ -27,6 +27,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import AccountPage from './pages/AccountPage';
 import SettingsPage from './pages/SettingsPage';
 import AdminPage from './pages/AdminPage';
+import PlayerPortalPage from './pages/PlayerPortalPage';
 import LandingPage from './pages/LandingPage';
 import TableScoringPage from './pages/TableScoringPage';
 import LivePage from './pages/LivePage';
@@ -176,6 +177,7 @@ function AppRoot() {
             }
           >
             <Route path="/app" element={<HomePage />} />
+            <Route path="/player" element={<PlayerPortalPage />} />
             <Route path="/tournaments/new" element={<CreateTournamentPage />} />
             <Route path="/tournaments/:id" element={<TournamentPage />} />
             <Route path="/tournaments/:id/import" element={<ImportPage />} />

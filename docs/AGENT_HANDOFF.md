@@ -2,7 +2,7 @@
 
 **Read this first** when context is full or starting a new session on this repo.
 
-Last updated: 2026-11-01 (Deep-scan fixes across Web/Desktop/Pairing/API + migration `023` — desktop v0.1.55)
+Last updated: 2026-11-01 (Chess Alokas 2.0 Phase 1: Multi-tenant B2B Organizations, Sandbox Trial quotas, Global Player/Family Profiles, and `/player` Participant Portal — migrations `024` & `025`)
 
 ## What this product is
 
@@ -33,6 +33,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 - [x] Deep-scan security & workflow fixes across Web, Desktop, Pairing Engine, API, and DB (`023_fix_style_check_and_profiles_rls.sql`)
 - [x] Engineering & agent rules handbook (`docs/ENGINEERING_AND_AGENT_RULES.md`, `.cursor/rules/engineering.mdc`) + self-hosted Supabase migration guide (`deploy/SUPABASE_MIGRATION.md`)
 - [x] `scripts/replay-arcc-dutch.mts` — validation tool replaying ARCC 2026 through Dutch/bbp vs. actual results
+- [x] **Chess Alokas 2.0 Phase 1**: Multi-tenant B2B `organizations` & `organization_members` (`024_organizations_and_roles.sql`), Sandbox Trial quota enforcement (`1` tournament / `24` players), Platform Admin B2B approval actions (`/admin`), Global `player_profiles` & family sub-profiles (`025_player_profiles.sql`), and Web Participant Portal (`/player` + Workspace Switcher)
 
 ## Auth model
 
@@ -50,9 +51,12 @@ Offline-first chess tournament manager with **per-manager accounts**:
 | `apps/web/src/pages/AccountPage.tsx` | Profile, security, identities, delete |
 | `apps/web/src/pages/TableScoringPage.tsx` | Floor arbiter PIN/QR result entry |
 | `apps/web/src/pages/LivePage.tsx` | Public live pairings/standings viewer |
-| `apps/web/src/pages/AdminPage.tsx` | Platform admin dashboard |
+| `apps/web/src/pages/AdminPage.tsx` | Platform admin dashboard + B2B organization approvals |
+| `apps/web/src/pages/PlayerPortalPage.tsx` | Participant & Family Portal (`/player`): live matchday card, career stats, certificate vault |
 | `apps/web/src/pages/CertificatesPage.tsx` | Certificate template designer / issue |
 | `apps/api/src/auth.ts` | JWT + `/me` |
+| `apps/api/src/routes/organizations.ts` | B2B organization CRUD, Sandbox Trial, and admin approvals |
+| `apps/api/src/routes/playerProfiles.ts` | Global player/family profiles, past participation claim, and career dashboard |
 | `apps/api/src/floor/` | PIN/QR floor scoring backend |
 | `apps/api/src/routes/publicLive.ts`, `publicAnalytics.ts`, `publicTables.ts` | Unauthenticated public endpoints |
 | `apps/api/src/lib/gameCards.ts` | Yellow/red card + auto-loss logic |
@@ -62,6 +66,7 @@ Offline-first chess tournament manager with **per-manager accounts**:
 | `deploy/DOKPLOY.md` | VPS deploy checklist |
 | `deploy/SUPABASE_MIGRATION.md` | Self-hosted Supabase on Dokploy options & cutover playbook |
 | `docs/ENGINEERING_AND_AGENT_RULES.md` | Mandatory engineering, security, testing, docs & commit rules |
+| `docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md` | Multi-tenant B2B organizations, Sandbox Trial, and `/player` portal docs |
 | `scripts/replay-arcc-dutch.mts` | Replays a real event through Dutch/Swiss engines vs. actual results — validation tool, run with `npx tsx` |
 
 ## How to resume

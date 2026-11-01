@@ -162,6 +162,8 @@ export const ParticipantSchema = z.object({
   excludedRounds: z.array(z.number().int().positive()).optional(),
   /** If set, excluded from this round onward (withdraw). */
   withdrawnFromRound: z.number().int().positive().nullable().optional(),
+  /** Linked global player profile id (when claimed or registered via participant portal). */
+  playerProfileId: z.string().uuid().nullable().optional(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().optional(),
 });
@@ -204,6 +206,8 @@ export const TournamentSchema = z.object({
   sharedPlaces: z.boolean().default(true),
   /** Supabase Auth user id that owns this tournament (manager). */
   ownerId: z.string().uuid().nullable().optional(),
+  /** Multi-tenant B2B organization owning this tournament. */
+  organizationId: z.string().uuid().nullable().optional(),
   /** Round the current arbiter PIN is valid for (server-side hash only). */
   arbiterPinRound: z.number().int().nonnegative().nullable().optional(),
   /** Number of physical floor tables allocated for QR stickers. */
@@ -398,6 +402,7 @@ export const CreateTournamentInputSchema = z.object({
   awardScope: AwardScopeSchema.default('per_category'),
   tiebreakOrder: z.array(TiebreakKeySchema).nullable().optional(),
   sharedPlaces: z.boolean().default(true),
+  organizationId: z.string().uuid().nullable().optional(),
   categories: z
     .array(
       z.object({
@@ -478,4 +483,188 @@ export const COMING_SOON_STYLES: TournamentStyle[] = ['round_robin'];
 
 export function isStyleImplemented(style: TournamentStyle): boolean {
   return SUPPORTED_STYLES.includes(style);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-tenant B2B Organizations & Roles (Phase 1)
+// ---------------------------------------------------------------------------
+
+export const AccountRoleSchema = z.enum(['participant', 'organizer', 'both']);
+export type AccountRole = z.infer<typeof AccountRoleSchema>;
+
+export const OrganizationVerificationStatusSchema = z.enum([
+  'pending_review',
+  'verified',
+  'rejected',
+  'suspended',
+]);
+export type OrganizationVerificationStatus = z.infer<
+  typeof OrganizationVerificationStatusSchema
+>;
+
+export const OrganizationPlanTierSchema = z.enum([
+  'trial',
+  'event_pass',
+  'pro',
+  'enterprise',
+]);
+export type OrganizationPlanTier = z.infer<typeof OrganizationPlanTierSchema>;
+
+export const OrganizationMemberRoleSchema = z.enum([
+  'owner',
+  'admin',
+  'director',
+  'arbiter',
+]);
+export type OrganizationMemberRole = z.infer<typeof OrganizationMemberRoleSchema>;
+
+export const OrganizationSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  slug: z.string().min(1),
+  logoUrl: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  website: z.string().nullable().optional(),
+  contactEmail: z.string().nullable().optional(),
+  contactPhone: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  verificationStatus: OrganizationVerificationStatusSchema.default('pending_review'),
+  planTier: OrganizationPlanTierSchema.default('trial'),
+  trialEndsAt: z.string().datetime().nullable().optional(),
+  maxTournamentsQuota: z.number().int().nullable().optional(),
+  maxPlayersPerTournament: z.number().int().nullable().optional(),
+  eventCreditsRemaining: z.number().int().nonnegative().default(0),
+  canPublishGlobal: z.boolean().default(false),
+  canAcceptPaidRegistrations: z.boolean().default(false),
+  paymentInstructions: z.string().nullable().optional(),
+  paymentQrStoragePath: z.string().nullable().optional(),
+  createdBy: z.string().uuid().nullable().optional(),
+  verifiedAt: z.string().datetime().nullable().optional(),
+  verifiedBy: z.string().uuid().nullable().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type Organization = z.infer<typeof OrganizationSchema>;
+
+export const OrganizationMemberSchema = z.object({
+  organizationId: z.string().uuid(),
+  userId: z.string().uuid(),
+  role: OrganizationMemberRoleSchema.default('owner'),
+  createdAt: z.string().datetime(),
+});
+export type OrganizationMember = z.infer<typeof OrganizationMemberSchema>;
+
+export type AdminOrganizationRow = Organization & {
+  memberCount: number;
+  tournamentCount: number;
+  ownerEmail?: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Global B2C Player & Family Profiles (Phase 1)
+// ---------------------------------------------------------------------------
+
+export const PlayerRelationshipSchema = z.enum([
+  'self',
+  'child',
+  'student',
+  'family',
+]);
+export type PlayerRelationship = z.infer<typeof PlayerRelationshipSchema>;
+
+export const PlayerProfileSchema = z.object({
+  id: z.string().uuid(),
+  accountUserId: z.string().uuid(),
+  isPrimary: z.boolean().default(false),
+  relationship: PlayerRelationshipSchema.default('self'),
+  username: z.string().nullable().optional(),
+  fullName: z.string().min(1),
+  dateOfBirth: z.string().nullable().optional(),
+  yearOfBirth: z.number().int().nullable().optional(),
+  gender: z.string().nullable().optional(),
+  nationalId: z.string().nullable().optional(),
+  fideId: z.number().int().positive().nullable().optional(),
+  fideStandard: z.number().int().nullable().optional(),
+  fideRapid: z.number().int().nullable().optional(),
+  fideBlitz: z.number().int().nullable().optional(),
+  alokasRating: z.number().int().default(1000),
+  school: z.string().nullable().optional(),
+  club: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PlayerProfile = z.infer<typeof PlayerProfileSchema>;
+
+export interface PlayerLiveMatchCard {
+  tournamentId: string;
+  tournamentName: string;
+  tournamentStatus: TournamentStatus;
+  publicToken: string | null;
+  participantId: string;
+  round: number;
+  board: number;
+  color: 'white' | 'black' | 'bye';
+  opponentId: string | null;
+  opponentName: string | null;
+  opponentRating: number | null;
+  result: GameResult;
+  isBye: boolean;
+  currentScore: number;
+}
+
+export interface PlayerTournamentHistoryItem {
+  tournamentId: string;
+  tournamentName: string;
+  tournamentDate: string | null;
+  tournamentStatus: TournamentStatus;
+  style: TournamentStyle;
+  rounds: number;
+  currentRound: number;
+  participantId: string;
+  playerName: string;
+  rating: number | null;
+  score: number;
+  gamesPlayed: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  publicToken: string | null;
+}
+
+export interface PlayerCertificateItem {
+  id: string;
+  tournamentId: string;
+  tournamentName: string;
+  tournamentDate: string | null;
+  participantId: string | null;
+  recipientName: string;
+  type: CertificateIssueType;
+  rank: number | null;
+  serial: string | null;
+  createdAt: string;
+}
+
+export interface PlayerCareerStats {
+  tournamentsCount: number;
+  gamesPlayed: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  totalPoints: number;
+}
+
+export interface PlayerCareerDashboard {
+  profiles: PlayerProfile[];
+  selectedProfile: PlayerProfile | null;
+  liveMatches: PlayerLiveMatchCard[];
+  stats: PlayerCareerStats;
+  tournaments: PlayerTournamentHistoryItem[];
+  certificates: PlayerCertificateItem[];
 }
