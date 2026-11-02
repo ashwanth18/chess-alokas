@@ -151,7 +151,10 @@ describe('queueing a correction', () => {
     const queue = correctedGameFields(game(), input).pendingCorrections!;
     const sent = syncPayloadForGame({ id: 'g', result: '0-1', pendingCorrections: queue });
     expect(sent).toEqual({ id: 'g', result: '0-1', corrections: queue });
-    expect(syncPayloadForGame({ id: 'g', result: '0-1' })).toEqual({ id: 'g', result: '0-1' });
+    expect(syncPayloadForGame({ id: 'g', result: '0-1', pendingCorrections: undefined })).toEqual({
+      id: 'g',
+      result: '0-1',
+    });
     expect(syncPayloadForGame({ id: 'g', pendingCorrections: [] })).toEqual({ id: 'g' });
   });
 

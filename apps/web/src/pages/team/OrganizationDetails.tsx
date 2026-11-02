@@ -1,6 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import type { UserOrganization } from '@chess-alokas/shared';
-import { apiUpdateOrganization } from '../../api/client';
+import { apiUpdateOrganization, type UserOrganization } from '../../api/client';
 
 type Details = {
   name: string;
