@@ -253,6 +253,9 @@ export default function LandingPage() {
             <Link className="lp-toplink lp-hide-xs" to="/discover">
               Find a tournament
             </Link>
+            <Link className="lp-toplink lp-hide-xs" to="/mobile-app">
+              The app
+            </Link>
             {signedIn ? null : (
               <Link className="lp-toplink" to="/login">
                 Sign in
@@ -270,6 +273,7 @@ export default function LandingPage() {
                   </a>
                 ))}
                 <Link to="/discover">Find a tournament</Link>
+                <Link to="/mobile-app">The Chess Alokas app</Link>
                 <Link to={primaryTo}>{signedIn ? 'Open the app' : 'Create account'}</Link>
               </nav>
             </details>
@@ -632,6 +636,21 @@ export default function LandingPage() {
                   <div className="lp-faq-a">{f.a}</div>
                 </details>
               ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="lp-band" aria-labelledby="lp-h-app">
+          <div className="lp-wrap">
+            <h2 id="lp-h-app">Playing, or following your child?</h2>
+            <p>
+              The Chess Alokas app finds tournaments near you, registers you in a few taps, and keeps
+              every result and certificate in one place. Coming soon to Android.
+            </p>
+            <div className="lp-cta">
+              <Link className="lp-btn" to="/mobile-app">
+                See the app
+              </Link>
             </div>
           </div>
         </section>
