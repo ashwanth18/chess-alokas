@@ -7,6 +7,9 @@ import { reactErrorHandler } from '@sentry/react';
 import './design/app.css';
 
 import { AuthProvider, useAuth } from './auth/AuthContext';
+import { WorkspaceProvider, useWorkspace } from './auth/WorkspaceContext';
+import { landingPath } from './auth/workspace';
+import { hasPendingOrganizerSignup } from './lib/pendingSignup';
 import DesktopUpdateBanner from './components/DesktopUpdateBanner';
 import BootIssueCard from './components/BootIssueCard';
 import { trackDesktopPresence } from './lib/productTelemetry';
@@ -15,7 +18,7 @@ import RouteTitle from './components/RouteTitle';
 import ParticipantShell from './shells/ParticipantShell';
 import FloorSurface from './shells/FloorSurface';
 import HallSurface from './shells/HallSurface';
-import { BootSplash, RequireAuth, isDesktop } from './shells/gates';
+import { BootSplash, DeskGate, RequireAuth, isDesktop } from './shells/gates';
 
 // Dexie, sync and the desktop backup agent live behind this one lazy import. See src/shells.
 const OrganizerShell = lazy(() => import('./shells/OrganizerShell'));
@@ -74,21 +77,31 @@ function ProductTelemetry() {
   return null;
 }
 
-/** Guests see marketing landing; signed-in users go to the tournament dashboard. */
+/** Guests see the marketing landing; signed-in people go straight to the area that's theirs. */
 function RootEntry() {
   const auth = useAuth();
-  if (isDesktop) return <Navigate to="/app" replace />;
+  const workspace = useWorkspace();
   if (!auth.configured) return <Navigate to="/app" replace />;
   if (auth.loading) {
     return <BootSplash />;
   }
-  if (auth.user) return <Navigate to="/app" replace />;
+  if (auth.user) {
+    if (workspace.resolving) return <BootSplash />;
+    const to = landingPath(workspace.facts, {
+      desktop: isDesktop,
+      preferredView: workspace.preferredView,
+      pendingOrganizer: hasPendingOrganizerSignup(),
+    });
+    return <Navigate to={to} replace />;
+  }
+  if (isDesktop) return <Navigate to="/app" replace />;
   return <LandingPage />;
 }
 
 function AppRoot() {
   return (
     <AuthProvider>
+      <WorkspaceProvider>
       <Router>
         <>
           <DesktopUpdateBanner />
@@ -111,24 +124,29 @@ function AppRoot() {
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/mobile-app" element={<MobileAppPage />} />
-            <Route
-              element={
-                <RequireAuth>
-                  <Layout />
-                </RequireAuth>
-              }
-            >
-              <Route path="/player" element={<PlayerPortalPage />} />
-            </Route>
+            {/* Desktop is organizer tools only, so its links to /player land on the desk. */}
+            {isDesktop ? (
+              <Route path="/player" element={<Navigate to="/app" replace />} />
+            ) : (
+              <Route
+                element={
+                  <RequireAuth>
+                    <Layout />
+                  </RequireAuth>
+                }
+              >
+                <Route path="/player" element={<PlayerPortalPage />} />
+              </Route>
+            )}
             <Route
               path="*"
               element={
                 <div className="auth-page">
                   <div className="auth-card">
                     <h1>Page not found</h1>
-                    <p className="form-hint">This screen did not match a route. Open the tournament list to continue.</p>
-                    <Link className="btn btn-primary" to="/app">
-                      Go to tournaments
+                    <p className="form-hint">This screen did not match a route.</p>
+                    <Link className="btn btn-primary" to="/">
+                      Go home
                     </Link>
                   </div>
                 </div>
@@ -142,7 +160,8 @@ function AppRoot() {
           <Route element={<HallSurface />}>
             <Route path="/live/:token/tv" element={<LiveTvPage />} />
           </Route>
-          {/* The desk: opens the local database, then sync. */}
+          {/* The desk: opens the local database, then sync. DeskGate turns a player away from /app first. */}
+          <Route element={<DeskGate />}>
           <Route element={<OrganizerShell />}>
             <Route
               element={
@@ -164,11 +183,13 @@ function AppRoot() {
               <Route path="/admin" element={<AdminPage />} />
             </Route>
           </Route>
+          </Route>
           {UiGallery && <Route path="/__ui" element={<UiGallery />} />}
           </Routes>
           </Suspense>
         </>
       </Router>
+      </WorkspaceProvider>
     </AuthProvider>
   );
 }

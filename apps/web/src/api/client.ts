@@ -1,4 +1,5 @@
 import type {
+  AccountRole,
   Tournament,
   Category,
   Participant,
@@ -123,6 +124,18 @@ async function req<T>(
       error: err instanceof Error ? err.message : 'Network error',
     };
   }
+}
+
+/** Someone's organizations or player profiles changed. WorkspaceContext asks the API again. */
+export const ACCOUNT_CHANGED_EVENT = 'account:changed';
+
+function announcingAccountChange<T extends { ok: boolean }>(res: T): T {
+  if (res.ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(ACCOUNT_CHANGED_EVENT));
+  return res;
+}
+
+export async function apiGetMe() {
+  return req<{ id: string | null; email: string | null; displayName?: string | null; accountRole?: AccountRole | null }>('/me');
 }
 
 export async function checkOnline(): Promise<boolean> {
@@ -864,7 +877,7 @@ export async function apiRemoveMember(organizationId: string, userId: string) {
 }
 
 export async function apiLeaveOrganization(organizationId: string) {
-  return req<null>(`${orgPath(organizationId)}/leave`, { method: 'POST' });
+  return announcingAccountChange(await req<null>(`${orgPath(organizationId)}/leave`, { method: 'POST' }));
 }
 
 export async function apiListInvites(organizationId: string) {
@@ -912,10 +925,12 @@ export async function apiLookupInvite(token: string) {
 }
 
 export async function apiAcceptInvite(token: string) {
-  return req<Extract<AcceptInviteResult, { ok: true }>>('/invites/accept', {
-    method: 'POST',
-    body: JSON.stringify({ token }),
-  });
+  return announcingAccountChange(
+    await req<Extract<AcceptInviteResult, { ok: true }>>('/invites/accept', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+  );
 }
 
 export async function apiCreateOrganization(body: {
@@ -931,10 +946,12 @@ export async function apiCreateOrganization(body: {
   country?: string | null;
   paymentInstructions?: string | null;
 }) {
-  return req<{ organization: Organization }>('/organizations', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+  return announcingAccountChange(
+    await req<{ organization: Organization }>('/organizations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 export async function apiUpdateOrganization(
@@ -1013,10 +1030,12 @@ export async function apiCreatePlayerProfile(body: {
   phone?: string | null;
   guardianConsent?: boolean;
 }) {
-  return req<{ profile: PlayerProfile }>('/player/profiles', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+  return announcingAccountChange(
+    await req<{ profile: PlayerProfile }>('/player/profiles', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 export async function apiUpdatePlayerProfile(
@@ -1050,9 +1069,11 @@ export async function apiUpdatePlayerProfile(
 }
 
 export async function apiDeletePlayerProfile(id: string) {
-  return req<void>(`/player/profiles/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
+  return announcingAccountChange(
+    await req<void>(`/player/profiles/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  );
 }
 
 /** Links past tournaments entered under the signed-in account's confirmed email. */

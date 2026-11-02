@@ -83,7 +83,8 @@ for (const [width, height] of [
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     if (width > 720) {
-      const box = await page.locator('.sync-bar').getByRole('button', { name: 'Sign out' }).boundingBox();
+      await page.getByRole('button', { name: 'Account menu' }).click();
+      const box = await page.locator('.am-panel').getByRole('button', { name: 'Sign out' }).boundingBox();
       expect(box).not.toBeNull();
       expect(box!.x + box!.width).toBeLessThanOrEqual(width);
     } else {

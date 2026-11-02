@@ -17,7 +17,8 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [returnTo] = useState(() => resolveReturnTo(location.search));
-  const destination = returnTo ?? '/app';
+  // A return path wins. Otherwise `/` works out which area is this person's.
+  const destination = returnTo ?? '/';
   const [tab, setTab] = useState<Tab>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

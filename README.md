@@ -11,7 +11,7 @@ Cloud-capable chess tournament pairing system with offline-first React UI (PWA +
 - **Tournament styles** — Swiss implemented; Round Robin selectable as “coming soon”
 - **CSV / Excel import** — map columns, auto-assign categories
 - **Offline-first** — Dexie (IndexedDB) local store; **Sync online** push/pull (last-write-wins)
-- **Auth & Multi-Tenant B2B Organizations** — email/password and OTP/magic link; role-based signup (`Player / Parent` vs `Organizer / Academy`), Sandbox Trial quotas (1 tournament / 24 players), and Platform Admin B2B verification
+- **Auth & Multi-Tenant B2B Organizations** — email/password and OTP/magic link; one login that opens each person's own area, chosen at signup, Sandbox Trial quotas (1 tournament / 24 players), and Platform Admin B2B verification
 - **Global Player & Family Portal (`/player`)** — manage `Self` + `Child / Student` sub-profiles under one parent account, claim past tournaments, Live Matchday Companion card (board, color, opponent, score), career W/D/L stats, and Digital Certificate Vault
 - **GPS Tournament Discovery & 1-Click Registration (`/discover`, `/register/:slug`)** — Haversine GPS nearby event search, shareable registration forms with 1-click family profile autofill, DuitNow/QR payment receipt upload, and organizer approval queue that auto-populates the tournament roster
 - **Floor Arbiter Zone Grid, Chief Arbiter Alerts & Offline Queue (`/t/:slug`)** — score an entire zone of tables (`1–15`, `16–30`, `31+`, `Pending Only`) from one round PIN unlock, raise one-tap `"Call Chief Arbiter"` alerts to the Director Desk, and queue floor results offline when venue Wi-Fi drops

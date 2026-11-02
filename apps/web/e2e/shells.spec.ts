@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { test, expect, signIn, seedDesk, settle, type Mocks } from './fixtures/mockApi';
+import { test, expect, signIn, seedDesk, setPersona, settle, type Mocks } from './fixtures/mockApi';
+import { PERSONAS } from './fixtures/personas';
 import { EVENT_SLUG, LIVE_TOKEN, players, TABLE_SLUG, TOURNAMENT_ID } from './fixtures/data';
 
 /**
@@ -133,11 +134,14 @@ test('a signed-out visit to /team keeps where it was going through sign-in', asy
 test('moving from the desk to a parent page and back keeps working', async ({ page }) => {
   await signIn(page);
   await seedDesk(page);
+  setPersona(page, PERSONAS.both);
   await page.goto('/app');
-  await page.locator('.workspace-switcher a', { hasText: 'Player Portal' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('link', { name: 'Switch to player view' }).click();
   await expect(page).toHaveURL(/\/player$/);
   await expect(page.locator('.status-label')).toHaveCount(0);
-  await page.locator('.workspace-switcher a', { hasText: 'Organizer Desk' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('link', { name: 'Switch to organizer view' }).click();
   await expect(page).toHaveURL(/\/app$/);
   await expect(page.locator('.status-label')).toBeVisible();
   await expect(page.getByText('Imaginary Bay Junior Rapid').first()).toBeVisible();

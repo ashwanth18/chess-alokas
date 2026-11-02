@@ -5,6 +5,9 @@ import { DemoBadge, DemoNotice } from '../components/DemoNotice';
 import { isDemoUser } from '../lib/demoAccount';
 import { apiListPublicEvents } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useWorkspace } from '../auth/WorkspaceContext';
+import { isDesktop, isOrganizer } from '../auth/workspace';
+import AccountMenu from '../components/AccountMenu';
 import { trackPageView } from '../lib/pageAnalytics';
 import { BrandCrown } from '../ui/BrandCrown';
 
@@ -23,6 +26,9 @@ function formatFee(cents: number, currency = 'MYR'): string {
 
 export default function DiscoverEventsPage() {
   const auth = useAuth();
+  const { facts } = useWorkspace();
+  // An organizer with no player side has no use for this. They reach the desk from the account menu.
+  const showsPlayerLink = Boolean(auth.user) && !isDesktop && (!facts || !isOrganizer(facts) || facts.hasPlayerProfile);
   const [searchParams] = useSearchParams();
   const showDemo = searchParams.get('demo') === '1';
   const [events, setEvents] = useState<PublicEventSummary[]>([]);
@@ -122,7 +128,7 @@ export default function DiscoverEventsPage() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <Link to={auth.user ? '/player' : '/'} className="brand">
+        <Link to="/" className="brand" aria-label="Chess Alokas home">
           <span className="brand-knight" aria-hidden>
             <BrandCrown />
           </span>
@@ -130,14 +136,7 @@ export default function DiscoverEventsPage() {
         </Link>
         <div className="sync-bar">
           {auth.user ? (
-            <>
-              <Link to="/player" className="btn btn-sm btn-outline">
-                ♟ Player Portal
-              </Link>
-              <Link to="/app" className="btn btn-sm btn-primary">
-                Organizer Desk
-              </Link>
-            </>
+            <AccountMenu place="public" />
           ) : (
             <>
               <Link to="/login" className="btn btn-sm btn-outline">
@@ -164,7 +163,7 @@ export default function DiscoverEventsPage() {
                 register yourself or your children in 1 click.
               </p>
             </div>
-            {auth.user && (
+            {showsPlayerLink && (
               <div className="page-header-actions">
                 <Link to="/player" className="btn btn-outline">
                   My Player &amp; Family Profiles →
@@ -259,7 +258,7 @@ export default function DiscoverEventsPage() {
             <p className="loading-row">Loading published tournaments…</p>
           ) : events.length === 0 ? (
             <div className="empty-state" style={{ padding: '2.5rem 1.5rem' }}>
-              <span className="empty-icon">♟</span>
+              <span className="empty-icon"><BrandCrown /></span>
               <h3>No published tournaments match your filters</h3>
               <p className="form-hint" style={{ maxWidth: '34rem', margin: '0.5rem auto 1rem' }}>
                 Try expanding the distance radius, clearing your search query, or check back soon

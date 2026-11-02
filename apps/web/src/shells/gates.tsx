@@ -1,12 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { loginPathFor } from '../auth/returnTo';
+import { useWorkspace } from '../auth/WorkspaceContext';
+import { deskHomeRedirect, isDesktop } from '../auth/workspace';
 import BootIssueCard from '../components/BootIssueCard';
+import { hasPendingOrganizerSignup } from '../lib/pendingSignup';
 import { Mark } from '../ui/icons';
 
-export const isDesktop =
-  Boolean(typeof window !== 'undefined' && window.desktop?.isDesktop) || import.meta.env.VITE_DESKTOP === '1';
+export { isDesktop };
 
 export function SessionLoading({ title }: { title: string }) {
   const [slow, setSlow] = useState(false);
@@ -49,6 +51,29 @@ export function BootSplash() {
   );
 }
 
+/**
+ * In front of OrganizerShell, so a player sent away from `/app` never downloads the desk. Every other
+ * desk URL passes straight through, and it stays one `Outlet` so moving around never remounts the shell.
+ */
+export function DeskGate() {
+  const auth = useAuth();
+  const location = useLocation();
+  const workspace = useWorkspace();
+  if (location.pathname === '/app' && auth.configured) {
+    if (auth.loading) return <BootSplash />;
+    if (auth.user) {
+      if (workspace.resolving) return <BootSplash />;
+      const to = deskHomeRedirect(workspace.facts, {
+        desktop: isDesktop,
+        settingUp: new URLSearchParams(location.search).has('setup'),
+        pendingOrganizer: hasPendingOrganizerSignup(),
+      });
+      if (to) return <Navigate to={to} replace />;
+    }
+  }
+  return <Outlet />;
+}
+
 export function RequireAuth({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const location = useLocation();
@@ -74,7 +99,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return <SessionLoading title="Loading session" />;
   }
   if (!auth.user) {
-    // /app is where sign-in leads anyway, so it needs no return path.
+    // /app is the front door, and sign-in already finds each person's own, so it needs no return path.
     const here = location.pathname + location.search;
     return <Navigate to={location.pathname === '/app' ? '/login' : loginPathFor(here)} replace />;
   }

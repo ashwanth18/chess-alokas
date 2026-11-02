@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 
 const TITLES: [RegExp, string][] = [
   [/^\/app$/, 'Tournaments'],
-  [/^\/player/, 'Player Portal'],
+  [/^\/player/, 'My page'],
   [/^\/tournaments\/new$/, 'New Tournament'],
   [/^\/tournaments\/[^/]+\/import$/, 'Import Players'],
   [/^\/tournaments\//, 'Tournament'],

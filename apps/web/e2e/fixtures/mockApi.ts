@@ -12,8 +12,9 @@ import {
   publicEventDetail,
   publicEvents,
 } from './data';
+import { emptyDashboard, type Persona } from './personas';
 
-const API = 'http://localhost:3999';
+const API ='http://localhost:3999';
 const SUPABASE = 'http://localhost:3998';
 const AUTH_KEY = 'sb-localhost-auth-token';
 
@@ -29,13 +30,13 @@ export type Mocks = {
   errors: string[];
 };
 
-function json(body: unknown, status = 200) {
+export function json(body: unknown, status = 200, origin = 'http://localhost:4179') {
   return {
     status,
     contentType: 'application/json',
     headers: {
       // The analytics beacon sends credentials, which a wildcard origin would refuse.
-      'access-control-allow-origin': 'http://localhost:4179',
+      'access-control-allow-origin': origin,
       'access-control-allow-credentials': 'true',
       'access-control-allow-headers': '*',
       'access-control-allow-methods': '*',
@@ -44,19 +45,42 @@ function json(body: unknown, status = 200) {
   };
 }
 
-function apiResponse(url: string, method: string) {
+function apiResponse(url: string, method: string, persona: Persona | null, origin: string) {
+  const reply = (body: unknown, status?: number) => json(body, status, origin);
   const path = new URL(url).pathname;
-  if (path === '/health') return json({ ok: true });
-  if (path.startsWith('/public/analytics')) return json({ ok: true });
-  if (path === `/public/live/${LIVE_TOKEN}`) return json(livePayload);
-  if (path === '/public/events') return json(publicEvents);
-  if (path === `/public/events/${EVENT_SLUG}`) return json(publicEventDetail);
-  if (/^\/public\/tables\/[^/]+\/zone$/.test(path)) return json(floorZone);
-  if (/^\/public\/tables\/[^/]+$/.test(path)) return json(floorView('needs_pin'));
-  if (path === '/organizations') return json({ organizations: [] });
-  if (path === '/player/profiles') return json({ profiles: [] });
-  if (path === '/me') return json({ id: USER_ID, email: fixtureUser.email });
-  return json({ error: `not mocked: ${method} ${path}` }, 404);
+  if (path === '/health') return reply({ ok: true });
+  if (path.startsWith('/public/analytics')) return reply({ ok: true });
+  if (path === `/public/live/${LIVE_TOKEN}`) return reply(livePayload);
+  if (path === '/public/events') return reply(publicEvents);
+  if (path === `/public/events/${EVENT_SLUG}`) return reply(publicEventDetail);
+  if (/^\/public\/tables\/[^/]+\/zone$/.test(path)) return reply(floorZone);
+  if (/^\/public\/tables\/[^/]+$/.test(path)) return reply(floorView('needs_pin'));
+  // With no persona the signed-in user is an organizer with no organization yet, so the desk stays put.
+  if (path === '/organizations') return reply({ organizations: persona?.organizations ?? [] });
+  if (path === '/player/profiles') return reply({ profiles: persona?.profiles ?? [] });
+  if (path === '/me') {
+    return reply({ id: USER_ID, email: fixtureUser.email, accountRole: persona ? persona.accountRole : 'organizer' });
+  }
+  if (path === '/player/dashboard' && persona) return reply(emptyDashboard(persona.profiles));
+  if (persona) {
+    const members = path.match(/^\/organizations\/([^/]+)\/members$/);
+    if (members) {
+      const org = persona.organizations.find((o) => (o as { id: string }).id === members[1]) as { memberRole: string };
+      return reply({ members: [], yourRole: org?.memberRole });
+    }
+    if (/^\/organizations\/[^/]+\/invites$/.test(path)) return reply({ invites: [] });
+    if (path === '/tournaments') return reply([]);
+    if (path === '/sync/pull') return reply({ tournaments: [], categories: [], participants: [], games: [], serverTime: NOW });
+    if (path === '/sync/push') return reply({ accepted: 0, rejected: [], serverTime: NOW });
+  }
+  return reply({ error: `not mocked: ${method} ${path}` }, 404);
+}
+
+const personas = new WeakMap<Page, Persona>();
+
+/** Sets who the API says is signed in. Call before the page first loads. */
+export function setPersona(page: Page, persona: Persona) {
+  personas.set(page, persona);
 }
 
 async function installMocks(page: Page, mocks: Mocks) {
@@ -68,16 +92,18 @@ async function installMocks(page: Page, mocks: Mocks) {
   await page.route('**/*', async (route) => {
     const url = route.request().url();
     const method = route.request().method();
+    // Answer whichever origin asked: the desktop build runs from file://, whose origin is "null".
+    const origin = (await route.request().headerValue('origin')) ?? 'http://localhost:4179';
     if (url.startsWith(API)) {
-      if (method === 'OPTIONS') return route.fulfill(json({}));
-      return route.fulfill(apiResponse(url, method));
+      if (method === 'OPTIONS') return route.fulfill(json({}, 200, origin));
+      return route.fulfill(apiResponse(url, method, personas.get(page) ?? null, origin));
     }
     if (url.startsWith(SUPABASE)) {
-      if (method === 'OPTIONS') return route.fulfill(json({}));
+      if (method === 'OPTIONS') return route.fulfill(json({}, 200, origin));
       if (url.includes('/rest/v1/profiles')) {
-        return route.fulfill(json({ display_name: 'Director Rook', is_platform_admin: false }));
+        return route.fulfill(json({ display_name: 'Director Rook', is_platform_admin: false }, 200, origin));
       }
-      return route.fulfill(json({}, 404));
+      return route.fulfill(json({}, 404, origin));
     }
     if (url.startsWith('http://localhost:')) {
       mocks.assets.push(new URL(url).pathname);

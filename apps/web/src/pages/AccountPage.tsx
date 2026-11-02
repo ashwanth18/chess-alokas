@@ -184,7 +184,7 @@ export default function AccountPage() {
       <div className="page-header">
         <div>
           <p className="page-breadcrumb">
-            <Link to="/app">Tournaments</Link>
+            <Link to="/">Home</Link>
             <span aria-hidden> / </span>
             <span>Account</span>
           </p>

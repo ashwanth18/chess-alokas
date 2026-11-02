@@ -8,6 +8,8 @@ import TableSearch from '../components/TableSearch';
 import { matchesTextSearch } from '../lib/textSearch';
 import { styleLabel } from '@chess-alokas/pairing-engine';
 import { useAuth } from '../auth/AuthContext';
+import { useWorkspace } from '../auth/WorkspaceContext';
+import { isArbiterOnly } from '../auth/workspace';
 import { BrandCrown } from '../ui/BrandCrown';
 
 const PAGE_SIZE = 10;
@@ -26,6 +28,9 @@ function deriveListStatus(t: { status: string; currentRound: number; rounds: num
 
 export default function HomePage() {
   const { user } = useAuth();
+  const { facts } = useWorkspace();
+  // An arbiter can't create tournaments, so what they can do goes where Create would be.
+  const arbiterOnly = Boolean(facts && isArbiterOnly(facts));
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -106,9 +111,15 @@ export default function HomePage() {
           <p className="hero-tagline">
             Tournament management for chess clubs &amp; academies that keeps working offline.
           </p>
-          <Link to="/tournaments/new" className="btn btn-primary btn-lg">
-            New Tournament
-          </Link>
+          {arbiterOnly ? (
+            <Link to="/team" className="btn btn-primary btn-lg">
+              Floor duty
+            </Link>
+          ) : (
+            <Link to="/tournaments/new" className="btn btn-primary btn-lg">
+              New Tournament
+            </Link>
+          )}
         </div>
       </section>
 
@@ -128,15 +139,23 @@ export default function HomePage() {
           <div className="empty-state">
             <span className="empty-icon"><BrandCrown /></span>
             <h3>No tournaments yet</h3>
-            <p>Create one here, or hit Sync if you already have cloud tournaments.</p>
-            <div className="empty-actions">
-              <Link to="/tournaments/new" className="btn btn-primary">
-                Create tournament
-              </Link>
-              <Link to="/settings" className="btn btn-outline">
-                Sync settings
-              </Link>
-            </div>
+            {arbiterOnly ? (
+              <p>
+                Your tables are on <Link to="/team">Floor duty</Link>.
+              </p>
+            ) : (
+              <>
+                <p>Create one here, or hit Sync if you already have cloud tournaments.</p>
+                <div className="empty-actions">
+                  <Link to="/tournaments/new" className="btn btn-primary">
+                    Create tournament
+                  </Link>
+                  <Link to="/settings" className="btn btn-outline">
+                    Sync settings
+                  </Link>
+                </div>
+              </>
+            )}
           </div>
         )}
 

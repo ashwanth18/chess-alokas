@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { clearReturnTo, resolveReturnTo } from '../auth/returnTo';
+import { ORGANIZER_SETUP_PATH } from '../auth/workspace';
 import AuthShell from '../components/AuthShell';
 import { SignupAgreement } from '../components/LegalLinks';
 import { trackPageView } from '../lib/pageAnalytics';
@@ -40,8 +41,10 @@ export default function SignupPage() {
     if (signedIn && returnTo) clearReturnTo();
   }, [signedIn, returnTo]);
 
-  if (signedIn) {
-    return <Navigate to={returnTo ?? (role === 'participant' ? '/player' : '/app')} replace />;
+  // Not while submitting: signing up signs in first, and onSubmit still has work to finish.
+  if (signedIn && !busy) {
+    // Already has an account. The organizer link starts the setup; otherwise `/` knows their area.
+    return <Navigate to={returnTo ?? (organizerLink ? ORGANIZER_SETUP_PATH : '/')} replace />;
   }
 
   async function onSubmit(e: FormEvent) {
@@ -79,7 +82,7 @@ export default function SignupPage() {
           // The account exists, so the dashboard retries this and reports the error if it fails.
           rememberPendingSignup();
         }
-        setBusy(false);
+        // The choice decides where they land, unless they came here on the way somewhere.
         navigate(returnTo ?? '/app', { replace: true });
         return;
       } else {
@@ -91,7 +94,6 @@ export default function SignupPage() {
             email: email.trim(),
           });
         }
-        setBusy(false);
         navigate(returnTo ?? '/player', { replace: true });
         return;
       }
@@ -143,45 +145,38 @@ export default function SignupPage() {
         joiningTeam
           ? 'Use the email address your invite was sent to'
           : role === 'participant'
-          ? 'Free global player & family portal for live pairings, ratings, and certificates'
-          : 'Run FIDE Swiss & Dutch tournaments with instant Sandbox Trial access'
+            ? 'Follow your games, register for events, keep your certificates.'
+            : 'Run your tournaments. Start with a free trial.'
       }
     >
       {!joiningTeam && (
-      <div className="auth-tabs" role="tablist" aria-label="Account role">
+      <div className="auth-tabs" role="group" aria-label="I am here to">
         <button
           type="button"
-          role="tab"
-          aria-selected={role === 'participant'}
+          aria-pressed={role === 'participant'}
           className={`cat-tab ${role === 'participant' ? 'active' : ''}`}
           onClick={() => setRole('participant')}
         >
-          ♟ Player / Parent
+          Play, or follow my child
         </button>
         <button
           type="button"
-          role="tab"
-          aria-selected={role === 'organizer'}
+          aria-pressed={role === 'organizer'}
           className={`cat-tab ${role === 'organizer' ? 'active' : ''}`}
           onClick={() => setRole('organizer')}
         >
-          Organizer / Academy
+          Run tournaments
         </button>
       </div>
       )}
 
       <form className="auth-form" onSubmit={(e) => void onSubmit(e)}>
         <label>
-          {joiningTeam
-            ? 'Your full name'
-            : role === 'participant'
-              ? 'Your full name (Player or Parent)'
-              : 'Your name (Director)'}
+          {role === 'participant' ? 'Your full name' : 'Your name'}
           <input
             className="input"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            placeholder={role === 'participant' ? 'e.g. Aarav Ashwanth' : 'Tournament director'}
             required={role === 'participant'}
           />
         </label>
@@ -229,8 +224,7 @@ export default function SignupPage() {
               />
             </label>
             <p className="form-hint" style={{ margin: '0.15rem 0' }}>
-              Starts in <strong>Sandbox Trial</strong> mode (1 tournament · up to 24 players) while
-              our team verifies your organization for public discovery &amp; unlimited events.
+              Your trial allows 1 tournament of up to 24 players until we verify your organization.
             </p>
           </>
         )}
@@ -264,8 +258,8 @@ export default function SignupPage() {
             : joiningTeam
               ? 'Create account and continue'
               : role === 'participant'
-              ? 'Create Player / Family Account'
-              : 'Start Organizer Sandbox Trial'}
+                ? 'Create account'
+                : 'Start your trial'}
         </button>
       </form>
       <SignupAgreement />

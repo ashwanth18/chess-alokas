@@ -35,7 +35,8 @@ export default function AuthCallbackPage() {
       window.clearTimeout(timer);
       const returnTo = peekReturnTo();
       clearReturnTo();
-      navigate(returnTo ?? '/app', { replace: true });
+      // A return path wins. Otherwise `/` works out which area is this person's.
+      navigate(returnTo ?? '/', { replace: true });
     };
 
     const timer = window.setTimeout(() => {

@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { NavLink, Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  apiListOrganizations,
   apiCreateOrganization,
   apiUpdateOrganization,
   apiCreatePlayerProfile,
-  type UserOrganization,
 } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useWorkspace } from '../auth/WorkspaceContext';
+import { areaHome, currentArea, isArbiterOnly, isDesktop } from '../auth/workspace';
+import AccountMenu, { AccountMenuItems } from './AccountMenu';
 import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
 import { isDemoUser } from '../lib/demoAccount';
 import { DemoNotice } from './DemoNotice';
@@ -35,8 +36,17 @@ export default function Layout() {
   const rejections = desk?.rejections ?? [];
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
-  const [orgsLoaded, setOrgsLoaded] = useState(false);
+  const workspace = useWorkspace();
+  const { facts, refresh: refreshWorkspace } = workspace;
+  const organizations = workspace.organizations ?? [];
+  // Only once the API has answered: offline, "no organization yet" would be a false prompt to register one.
+  const orgsLoaded = workspace.organizations !== null;
+  const primaryOrg = organizations[0] ?? null;
+  const area = currentArea(location.pathname, facts, { desktop: isDesktop, preferredView: workspace.preferredView });
+  // /account and /settings live on the desk's shell, but a player has nothing there to sync.
+  const showDeskStatus = Boolean(desk) && area === 'organizer';
+  const settingUp = new URLSearchParams(location.search).get('setup') === 'organization';
+
   const [orgModalOpen, setOrgModalOpen] = useState(false);
   const [orgFormName, setOrgFormName] = useState('');
   const [orgFormCity, setOrgFormCity] = useState('');
@@ -46,34 +56,37 @@ export default function Layout() {
   const [orgBusy, setOrgBusy] = useState(false);
   const [orgError, setOrgError] = useState<string | null>(null);
 
-  const isPlayerWorkspace = location.pathname.startsWith('/player');
   const isOrganizerRoute =
     location.pathname === '/app' ||
     location.pathname.startsWith('/tournaments') ||
     location.pathname.startsWith('/certificates') ||
     location.pathname.startsWith('/simulator');
 
-  const loadOrganizations = useCallback(async () => {
-    if (!auth.user) return;
-    const res = await apiListOrganizations();
-    if (res.ok) {
-      setOrganizations(res.data.organizations);
-      const primary = res.data.organizations[0];
-      if (primary) {
-        setOrgFormName(primary.name);
-        setOrgFormCity(primary.city ?? '');
-        setOrgFormState(primary.state ?? '');
-        setOrgFormPhone(primary.contactPhone ?? '');
-        setOrgFormPayment(primary.paymentInstructions ?? '');
-      }
-      // Only on success: offline, "no organization yet" would be a false prompt to register one.
-      setOrgsLoaded(true);
-    }
-  }, [auth.user]);
-
   useEffect(() => {
-    void loadOrganizations();
-  }, [loadOrganizations]);
+    if (!primaryOrg) return;
+    setOrgFormName(primaryOrg.name);
+    setOrgFormCity(primaryOrg.city ?? '');
+    setOrgFormState(primaryOrg.state ?? '');
+    setOrgFormPhone(primaryOrg.contactPhone ?? '');
+    setOrgFormPayment(primaryOrg.paymentInstructions ?? '');
+  }, [primaryOrg]);
+
+  // "Run a tournament" in the account menu: the organization form, then the desk.
+  useEffect(() => {
+    if (!settingUp || !orgsLoaded) return;
+    if (primaryOrg) {
+      navigate(location.pathname, { replace: true });
+      return;
+    }
+    setOrgError(null);
+    setOrgModalOpen(true);
+  }, [settingUp, orgsLoaded, primaryOrg, location.pathname, navigate]);
+
+  function closeOrgModal() {
+    setOrgModalOpen(false);
+    // Backing out of the setup: a player goes back to their own page from here.
+    if (settingUp) navigate(location.pathname, { replace: true });
+  }
 
   // Complete any pending signup action stored before email verification
   useEffect(() => {
@@ -114,7 +127,6 @@ export default function Layout() {
             setOrgModalOpen(true);
             return;
           }
-          await loadOrganizations();
         } else if (pending.role === 'participant') {
           if (pending.displayName) {
             await apiCreatePlayerProfile({
@@ -132,7 +144,7 @@ export default function Layout() {
     } catch {
       /* ignore */
     }
-  }, [auth.user, loadOrganizations, location.pathname, navigate]);
+  }, [auth.user, location.pathname, navigate]);
 
   useEffect(() => {
     const routeKey = routeKeyFromAppPath(location.pathname);
@@ -195,40 +207,22 @@ export default function Layout() {
         return;
       }
     }
-    await loadOrganizations();
+    await refreshWorkspace();
     setOrgModalOpen(false);
   }
 
-  const label = auth.displayName || auth.user?.email?.split('@')[0] || 'Account';
   const closeMenu = () => setMenuOpen(false);
-  const primaryOrg = organizations[0] ?? null;
+  const arbiterOnly = Boolean(facts && isArbiterOnly(facts));
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <NavLink to={isPlayerWorkspace ? '/player' : '/app'} className="brand" onClick={closeMenu}>
+        <NavLink to={areaHome(area, facts)} className="brand" aria-label="Chess Alokas home" onClick={closeMenu}>
           <span className="brand-knight" aria-hidden>
             <BrandCrown />
           </span>
           <span className="brand-name">Chess Alokas</span>
         </NavLink>
-
-        <div className="workspace-switcher" role="navigation" aria-label="Workspace switcher">
-          <NavLink
-            to="/player"
-            className={({ isActive }) => `workspace-pill ${isActive ? 'active' : ''}`}
-            onClick={closeMenu}
-          >
-            ♟ Player Portal
-          </NavLink>
-          <NavLink
-            to="/app"
-            className={() => `workspace-pill ${!isPlayerWorkspace ? 'active' : ''}`}
-            onClick={closeMenu}
-          >
-            Organizer Desk
-          </NavLink>
-        </div>
 
         <button
           type="button"
@@ -241,19 +235,22 @@ export default function Layout() {
         </button>
 
         <nav className={`topnav ${menuOpen ? 'open' : ''}`} aria-label="Main">
-          {isPlayerWorkspace ? (
+          {area === 'player' ? (
             <>
               <NavLink to="/player" end onClick={closeMenu}>
-                Dashboard &amp; Family
+                My page
               </NavLink>
               <NavLink to="/discover" onClick={closeMenu}>
                 Explore Events
               </NavLink>
-              <NavLink to="/account" onClick={closeMenu}>
-                Account
+            </>
+          ) : arbiterOnly ? (
+            <>
+              <NavLink to="/team" onClick={closeMenu}>
+                Floor duty
               </NavLink>
-              <NavLink to="/settings" onClick={closeMenu}>
-                Settings
+              <NavLink to="/discover" onClick={closeMenu}>
+                Explore Events
               </NavLink>
             </>
           ) : (
@@ -273,12 +270,6 @@ export default function Layout() {
               <NavLink to="/simulator" onClick={closeMenu}>
                 Simulator
               </NavLink>
-              <NavLink to="/account" onClick={closeMenu}>
-                Account
-              </NavLink>
-              <NavLink to="/settings" onClick={closeMenu}>
-                Settings
-              </NavLink>
             </>
           )}
           {auth.isPlatformAdmin && (
@@ -287,7 +278,7 @@ export default function Layout() {
             </NavLink>
           )}
           <div className="topnav-mobile-actions">
-            {desk && (
+            {desk && showDeskStatus && (
               <button
                 type="button"
                 className="btn btn-sm btn-sync"
@@ -300,29 +291,12 @@ export default function Layout() {
                 {syncing ? 'Syncing…' : 'Sync now'}
               </button>
             )}
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => {
-                closeMenu();
-                void auth.signOut('local');
-              }}
-            >
-              Sign out
-            </button>
-            {!window.desktop?.isDesktop && (
-              <Link to="/" className="btn btn-sm btn-outline" onClick={closeMenu}>
-                Marketing home
-              </Link>
-            )}
+            <AccountMenuItems place={area} onChoose={closeMenu} />
           </div>
         </nav>
 
         <div className="sync-bar">
-          <Link to="/account" className="user-chip" title={auth.user?.email ?? 'Account'}>
-            {label}
-          </Link>
-          {desk && (
+          {desk && showDeskStatus && (
             <>
               <span
                 className={`status-dot ${online ? 'online' : 'offline'}`}
@@ -346,13 +320,7 @@ export default function Layout() {
               </button>
             </>
           )}
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
-            onClick={() => void auth.signOut('local')}
-          >
-            Sign out
-          </button>
+          <AccountMenu place={area} collapses />
         </div>
       </header>
 
@@ -429,7 +397,7 @@ export default function Layout() {
       )}
 
       {orgModalOpen && (
-        <div className="modal-backdrop" onClick={() => setOrgModalOpen(false)}>
+        <div className="modal-backdrop" onClick={closeOrgModal}>
           <div
             className="modal-card"
             role="dialog"
@@ -442,7 +410,7 @@ export default function Layout() {
               <button
                 type="button"
                 className="btn btn-sm btn-ghost"
-                onClick={() => setOrgModalOpen(false)}
+                onClick={closeOrgModal}
               >
                 ✕
               </button>
@@ -514,7 +482,7 @@ export default function Layout() {
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  onClick={() => setOrgModalOpen(false)}
+                  onClick={closeOrgModal}
                 >
                   Cancel
                 </button>
@@ -564,12 +532,6 @@ export default function Layout() {
           )}
           <Link to="/discover" className="app-footer-link">
             Explore Events
-          </Link>
-          <Link to="/player" className="app-footer-link">
-            Player Portal
-          </Link>
-          <Link to="/app" className="app-footer-link">
-            Organizer Desk
           </Link>
           <Link to="/account" className="app-footer-link">
             Account

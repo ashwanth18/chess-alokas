@@ -3088,15 +3088,6 @@ details[open] .round-summary::before { transform: rotate(90deg); }
 .auth-oauth .btn { flex: 1; }
 .auth-footer { margin: 1.1rem 0 0; text-align: center; font-size: 0.9rem; color: var(--surface-muted); }
 .auth-footer a { color: var(--forest); font-weight: 600; }
-.user-chip {
-  font-size: 0.85rem;
-  color: inherit;
-  text-decoration: none;
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .account-page .form-error { color: #b42318; margin-top: 1rem; }
 .account-page .account-success { color: var(--forest); font-weight: 600; margin-top: 1rem; }
 
@@ -4965,36 +4956,7 @@ button.live-duel-side:not(:disabled):hover {
   }
 }
 
-/* ─── Phase 1: Workspace Switcher, Player Portal & B2B Org Badges ─────────── */
-.workspace-switcher {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  padding: 0.2rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-border-warm);
-  background: rgba(0, 0, 0, 0.28);
-  flex-shrink: 0;
-}
-.workspace-pill {
-  padding: 0.26rem 0.72rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--ink-300);
-  text-decoration: none;
-  transition: background var(--transition), color var(--transition);
-  white-space: nowrap;
-}
-.workspace-pill:hover {
-  color: var(--wood-100);
-}
-.workspace-pill.active {
-  background: linear-gradient(135deg, var(--wood-600), var(--wood-500));
-  color: var(--green-900);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-}
-
+/* ─── Phase 1: Player Portal & B2B Org Badges ─────────── */
 .player-switcher-bar {
   margin-bottom: 1.5rem;
   padding: 0.9rem 1.1rem;
@@ -5171,10 +5133,6 @@ button.live-duel-side:not(:disabled):hover {
 @media (max-width: 640px) {
   .player-match-metrics {
     grid-template-columns: repeat(2, 1fr);
-  }
-  .workspace-pill {
-    padding: 0.22rem 0.55rem;
-    font-size: 0.74rem;
   }
 }
 
@@ -5369,7 +5327,6 @@ button.live-duel-side:not(:disabled):hover {
 }
 @media (max-width: 1240px) {
   .brand-name { display: none; }
-  .user-chip { display: none; }
 }
 @media (max-width: 1100px) {
   .menu-toggle { display: block; order: 10; }
@@ -5395,8 +5352,6 @@ button.live-duel-side:not(:disabled):hover {
   .page-header-actions, .tab-actions, .tab-actions-buttons, .pairings-toolbar, .pairings-actions { flex-wrap: wrap; }
   .tabs { overflow-x: auto; }
   .topbar { gap: 0.4rem; padding: 0 0.75rem; }
-  .workspace-switcher { min-width: 0; flex-shrink: 1; }
-  .workspace-pill { white-space: nowrap; padding: 0.22rem 0.5rem; font-size: 0.72rem; }
   .sync-bar { flex-shrink: 0; }
 }
 @media (max-width: 480px) {
@@ -5406,22 +5361,18 @@ button.live-duel-side:not(:disabled):hover {
 .menu-toggle { min-width: 44px; min-height: 44px; }
 /* The top bar never pushes the page sideways: it wraps. Sign out stays on screen at every width. */
 @media (max-width: 1500px) {
-  /* One row on a 1366 laptop: Account is already in the nav. */
+  /* One row on a 1366 laptop. */
   .topbar .brand-name { display: none; }
-  .topbar .user-chip { display: none; }
 }
 .topbar { height: auto; min-height: 60px; flex-wrap: wrap; row-gap: 0.25rem; }
 .topnav { min-width: 0; flex-wrap: wrap; }
 .sync-bar { min-width: 0; }
-.user-chip { max-width: 14rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 @media (max-width: 1100px) {
   /* The bar can be two rows now, so the open menu hangs from the bar, not from a fixed 60 px. */
   .topnav { position: absolute; top: 100%; flex-wrap: nowrap; }
 }
 @media (max-width: 720px) {
   .topbar { padding-top: 0.35rem; padding-bottom: 0.35rem; }
-  .workspace-switcher { order: 20; flex: 1 1 100%; justify-content: center; }
-  .workspace-pill { flex: 1 1 0; justify-content: center; text-align: center; }
   .sync-bar { margin-left: auto; }
   .menu-toggle { margin-left: 0; }
 }

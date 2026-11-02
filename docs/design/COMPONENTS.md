@@ -155,6 +155,10 @@ A real `<table>` with a caption, scoped headers and a full spoken row, so don't 
 
 `<Sheet open={open} onClose={close} title="Board 4">...</Sheet>` is a native `<dialog>`, so focus trapping and Esc come free. `variant="sheet"` (default) rises from the bottom for the phone; `variant="modal"` centres for the desk. The parent owns `open`.
 
+### AccountMenu
+
+`<AccountMenu place="public" />` from `src/components/AccountMenu` is the one way to show a signed-in person where they can go. `place` is `player`, `organizer` or `public`, and `workspaceLinks` in `src/auth/workspace.ts` decides the links, including the switch for someone with both sides. The top bar passes `collapses`, because its phone menu carries the same items through `AccountMenuItems`. A public page with its own top bar uses it instead of buttons to `/player` or `/app`. See "Who opens where" in `docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md`.
+
 ### Icons
 
 `IconChevronRight`, `IconClose`, `IconPrint`, `IconCheck`, `IconPlus`, `IconSearch`, `IconUndo`, `IconWifiOff`, `IconMenu`, `IconDownload`, `IconQr`, `IconHelp`, `IconAlert`, `IconSignOut` and others in `src/ui/icons.tsx`, copied from Lucide 0.460 (ISC). Decorative unless you pass `title`. Need another? Copy its paths in; don't add the package. `<Mark />` is the split-square brand mark, which replaces the Unicode queen. No emoji and no Unicode chess glyphs in new work.
@@ -193,5 +197,7 @@ E2E_PARITY=1 pnpm exec playwright test --project=w1366 --update-snapshots   # on
 # change the CSS
 E2E_PARITY=1 pnpm exec playwright test --project=w1366                      # on the new code
 ```
+
+`playwright.shots.config.ts` runs the navigation checks on their own port and retakes the pictures in `docs/design/screenshots/navigation/`, so it doesn't compete with a full run for port 4179.
 
 A floor rebuild's own checks: a screenshot at 360 and 390, no control under 44 px, no sideways scroll, and the existing `floorZone` tests including `409` staying green.
