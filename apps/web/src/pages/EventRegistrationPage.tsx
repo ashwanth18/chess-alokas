@@ -407,6 +407,7 @@ export default function EventRegistrationPage() {
                   full={state === 'full'}
                   lead={lead}
                   idPrefix="rg"
+                  signedIn={Boolean(auth.user)}
                   after={roster}
                 />
               )}

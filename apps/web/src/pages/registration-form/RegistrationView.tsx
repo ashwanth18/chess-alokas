@@ -227,7 +227,7 @@ function Steps({ sections, prefix }: { sections: SectionInfo[]; prefix: string }
   return (
     <nav className="rg-steps" aria-label="Form sections">
       <p className="rg-steps__count">
-        {done} of {sections.length} sections done
+        {done} of {sections.length} sections done, then Check and send
       </p>
       <span className="rg-meter rg-steps__bar" aria-hidden="true">
         <span style={{ width: `${Math.round((done / sections.length) * 100)}%` }} />
@@ -275,6 +275,8 @@ export interface RegistrationFormProps {
   /** Shown above the button instead of sending, in the organizer's preview. */
   previewNote?: ReactNode;
   idPrefix: string;
+  /** Only an account can send a receipt later, so only it is told so. */
+  signedIn?: boolean;
   /** Below the form, in the same column: the roster on the public page. */
   after?: ReactNode;
 }
@@ -337,7 +339,11 @@ export function RegistrationForm(props: RegistrationFormProps) {
                   <FileDrop
                     label={<span className="rg-pay__title">Attach the payment receipt</span>}
                     required={false}
-                    hint="Screenshot or PDF, up to 5 MB. You can also send it later from your account."
+                    hint={
+                    props.signedIn
+                      ? 'Screenshot or PDF, up to 5 MB. You can also send it later from your account.'
+                      : 'Screenshot or PDF, up to 5 MB. You can also give it to the organizer later.'
+                  }
                     file={files.receipt}
                     onFile={(file) => props.onFile('receipt', file)}
                   />

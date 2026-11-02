@@ -392,6 +392,9 @@ describe('the public registration page', () => {
     expect(html).toContain('receipt.png');
     expect(html).toContain('By submitting, you confirm');
     expect(html).toContain('Submit entry');
+    expect(html).toContain('You can also give it to the organizer later.');
+    expect(html).not.toContain('from your account');
+    expect(html).toContain('2 of 5 sections done, then Check and send');
   });
 
   it('turns the button into a waitlist when the roster is full', () => {
