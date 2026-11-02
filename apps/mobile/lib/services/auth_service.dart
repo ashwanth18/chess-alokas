@@ -142,6 +142,10 @@ const String notConfiguredMessage =
     "Sign-in isn't available in this version of the app. You can still browse "
     'events.';
 
+const String accountExistsMessage =
+    'There is already an account with this email. Sign in instead, or reset '
+    'your password.';
+
 const String emailNotConfirmedMessage =
     'Please confirm your email first. Open the link we sent you, then sign in.';
 
@@ -207,8 +211,7 @@ class AuthService {
         return 'That email and password do not match.';
       case 'user_already_exists':
       case 'email_exists':
-        return 'There is already an account with this email. Sign in instead, '
-            'or reset your password.';
+        return accountExistsMessage;
       case 'weak_password':
         return 'That password is too weak. Use a longer one.';
       case 'over_email_send_rate_limit':
@@ -258,9 +261,9 @@ class AuthService {
   }
 
   /// With email confirmation on, the provider answers with a user and no
-  /// tokens, and it does the same for an email already in use so as not to
-  /// reveal who has an account. The two can't be told apart here, so the app
-  /// never claims the account was created, only what to do next.
+  /// tokens. For an email already in use, that user has an empty `identities`
+  /// list, which the app reports so the person signs in instead of waiting for
+  /// a confirmation email that never comes.
   Future<ApiResult<SignUpOutcome>> signUp({
     required String email,
     required String password,
@@ -282,6 +285,10 @@ class AuthService {
     final decoded = _decode(response);
     if (decoded == null) {
       return const ApiFailure('The sign-in service sent an unreadable reply.');
+    }
+    final identities = decoded['identities'] ?? decoded['user']?['identities'];
+    if (identities is List && identities.isEmpty) {
+      return const ApiFailure(accountExistsMessage);
     }
     final session = AuthSession.tryFromTokenResponse(decoded, _now());
     return ApiSuccess(

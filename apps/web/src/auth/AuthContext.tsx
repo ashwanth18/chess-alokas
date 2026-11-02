@@ -336,7 +336,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async signUpWithPassword(email, password, name) {
         if (!supabase) return { error: 'Auth is not configured' };
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -344,6 +344,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             emailRedirectTo: authRedirectTo(),
           },
         });
+        // With email confirmation on, an address already in use comes back as a user with no identities.
+        if (!error && data.user?.identities?.length === 0) {
+          return { error: 'There is already an account with this email. Sign in instead, or reset your password.' };
+        }
         return { error: error?.message };
       },
       async signInWithOtp(email) {
