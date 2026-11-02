@@ -813,7 +813,7 @@ export default function PlayerPortalPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="parent@example.com"
+                    placeholder="name@example.com"
                   />
                 </label>
               </div>

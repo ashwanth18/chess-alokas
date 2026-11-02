@@ -153,7 +153,7 @@ A real `<table>` with a caption, scoped headers and a full spoken row, so don't 
 
 ### Sheet
 
-`<Sheet open={open} onClose={close} title="Board 4">...</Sheet>` is a native `<dialog>`, so focus trapping and Esc come free. `variant="sheet"` (default) rises from the bottom for the phone; `variant="modal"` centres for the desk. The parent owns `open`.
+`<Sheet open={open} onClose={close} title="Board 4">...</Sheet>` is a native `<dialog>`, so focus trapping and Esc come free. `variant="sheet"` (default) rises from the bottom for the phone; `variant="modal"` centres for the desk. The parent owns `open`. `className` adds classes to the dialog, for a page that needs another width, such as the registration preview.
 
 ### AccountMenu
 

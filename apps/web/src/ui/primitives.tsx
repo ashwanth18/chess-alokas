@@ -199,12 +199,15 @@ export function Sheet({
   onClose,
   title,
   variant = 'sheet',
+  className,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: ReactNode;
   variant?: 'sheet' | 'modal';
+  /** Extra classes on the dialog, for a page that needs another width. */
+  className?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -220,7 +223,7 @@ export function Sheet({
   return (
     <dialog
       ref={ref}
-      className={`ui-sheet ui-sheet--${variant}`}
+      className={`ui-sheet ui-sheet--${variant}${className ? ` ${className}` : ''}`}
       aria-labelledby={titleId}
       onClose={onClose}
       onClick={(e) => {

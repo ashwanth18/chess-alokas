@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, IconQr, Sheet, buttonClass } from '../../ui';
 import { whatsappHref } from './formLogic';
 
-/** The one link parents need: no app and no account. */
+/** The one link players need: no app and no account. */
 export function ShareLink({ link, eventName, live }: { link: string; eventName: string; live: boolean }) {
   const [copied, setCopied] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);

@@ -1043,7 +1043,7 @@ export default function TournamentPage() {
         /* enable still works if already synced */
       }
       const res = await apiPublicLiveEnable(id);
-      await applyPublicLiveResult(res, 'Live page enabled — share the link with parents.');
+      await applyPublicLiveResult(res, 'Live page enabled — share the link with players.');
     } finally {
       setLiveBusy(false);
     }
@@ -2288,7 +2288,7 @@ export default function TournamentPage() {
 
             <h3 className="settings-subtitle">Public live page</h3>
             <p className="form-hint">
-              Share with parents — seating and scores, no login. Search by name to find a table.
+              Share with players — seating and scores, no login. Search by name to find a table.
             </p>
             <div className="live-share-box">
               {tournament.publicEnabled && tournament.publicToken ? (

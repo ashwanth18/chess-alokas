@@ -31,8 +31,9 @@ for (const shot of GUEST) {
     // The hall rotates its slides on a timer. Hold it on one, or the shot depends on timing.
     if (shot.name === 'hall') await page.locator('select').first().selectOption('pairings');
     await settle(page);
-    // Native select text repaints a beat after a change. The rest of the page is what's being checked.
-    const mask = shot.name === 'hall' ? [page.locator('select')] : [];
+    // Native select text repaints a beat after a change, and on the register page after first paint.
+    // The rest of the page is what's being checked.
+    const mask = shot.name === 'hall' || shot.name === 'register' ? [page.locator('select')] : [];
     await expect(page).toHaveScreenshot(`${shot.name}.png`, { fullPage: FULL_PAGE, mask });
   });
 }

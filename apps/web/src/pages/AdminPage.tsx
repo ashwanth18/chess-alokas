@@ -762,7 +762,7 @@ export default function AdminPage() {
         <h3>Recent tournaments</h3>
         <p className="admin-metric-detail">
           Status is the tournament lifecycle (draft → ready → in progress → completed). There is no
-          cancelled state. <strong>Public live</strong> is whether the parent viewer link is
+          cancelled state. <strong>Public live</strong> is whether the public viewer link is
           enabled. Times are stored in UTC and shown in your timezone ({viewerTimeZoneLabel()}),
           not the tournament owner’s.
         </p>

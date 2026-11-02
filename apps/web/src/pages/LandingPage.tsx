@@ -26,9 +26,9 @@ import './landing/landing.css';
  */
 
 const SITE = 'https://chess-manager.alokas.com/';
-const TITLE = 'Chess Alokas: chess tournament software for organizers, arbiters and parents';
+const TITLE = 'Chess Alokas: chess tournament software for organizers, arbiters and players';
 const DESCRIPTION =
-  'Swiss and FIDE Dutch pairings, floor result entry by PIN and QR, DuitNow receipt approval, live pages for parents, venue TV and certificates. The desk keeps working when the Wi-Fi drops.';
+  'Swiss and FIDE Dutch pairings, floor result entry by PIN and QR, DuitNow receipt approval, live pages for players, venue TV and certificates. The desk keeps working when the Wi-Fi drops.';
 
 const STRUCTURED_DATA = JSON.stringify({
   '@context': 'https://schema.org',
@@ -63,8 +63,8 @@ const ROLES = [
   },
   {
     Icon: PawnLine,
-    who: 'Parents and players',
-    body: 'Open the link from the organizer and search for your child. Board, colour, opponent and standings are on the phone you already have.',
+    who: 'Players and families',
+    body: 'Open the link from the organizer and search for a name. Board, colour, opponent and standings are on the phone you already have.',
     items: ['No app to install', 'No account for the live page', 'Family profiles if you want them'],
   },
 ];
@@ -139,8 +139,8 @@ const OFFLINE_ROWS = [
     waits: 'The first PIN unlock, and delivery of results to the desk.',
   },
   {
-    who: 'Parents and venue TV',
-    works: 'What is already on screen stays there. The parent page says it has no internet.',
+    who: 'Players and venue TV',
+    works: 'What is already on screen stays there. The live page says it has no internet.',
     waits: 'Anything newer. These pages read from the cloud, so they need a connection, and the desk needs to have synced.',
   },
 ];
@@ -176,15 +176,15 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
   },
   {
     q: 'Does it take payments or send WhatsApp messages?',
-    a: 'No to both. There is no payment gateway: parents pay your academy directly by DuitNow or bank transfer and upload the receipt for you to approve. There is no WhatsApp automation either, but live and registration pages are ordinary links you can share anywhere.',
+    a: 'No to both. There is no payment gateway: players pay your academy directly by DuitNow or bank transfer and upload the receipt for you to approve. There is no WhatsApp automation either, but live and registration pages are ordinary links you can share anywhere.',
   },
   {
     q: 'Can I print pairings and standings?',
     a: 'Not from the app yet. QR stickers and certificates download as PDF files you can print. Pairings and standings are on screen, on the live page and on the venue TV.',
   },
   {
-    q: 'Do parents or arbiters need an account?',
-    a: 'Not for the live page, and not for floor scoring, which uses the sticker and round PIN. Parents can register a child without an account too. An account adds saved family profiles, a matchday card, tournament history and certificates.',
+    q: 'Do players or arbiters need an account?',
+    a: 'Not for the live page, and not for floor scoring, which uses the sticker and round PIN. Players can register without an account too, and so can anyone entering a child. An account adds saved family profiles, a matchday card, tournament history and certificates.',
   },
   {
     q: 'How do I sign in?',
@@ -290,7 +290,7 @@ export default function LandingPage() {
                   Run the whole hall <span className="lp-gold">from a folding table.</span>
                 </h1>
                 <p className="lp-hero-sub">
-                  Chess Alokas is tournament software for organizers, arbiters and parents. Pair
+                  Chess Alokas is tournament software for organizers, arbiters and players. Pair
                   rounds, take results from the floor on phones, put the sheet on the venue TV, and
                   keep working at the desk when the Wi-Fi gives up.
                 </p>
@@ -306,7 +306,7 @@ export default function LandingPage() {
                   Free trial: one tournament, up to 24 players. Sign-up asks for no card.
                 </p>
                 <p className="lp-small lp-hero-parent">
-                  Here for your child&apos;s tournament?{' '}
+                  Playing in an event, or registering a child?{' '}
                   <Link to="/discover">Find the event</Link>, or open the link your organizer sent.{' '}
                   <Link to="/mobile-app">The Chess Alokas app</Link> is coming soon to Android.
                 </p>
@@ -480,7 +480,7 @@ export default function LandingPage() {
               </div>
               <div>
                 <p className="lp-lede lp-lede-top">
-                  Share your registration link. Parents fill in the form, pay your academy using your
+                  Share your registration link. Players fill in the form, pay your academy using your
                   DuitNow QR or bank details, and attach the receipt. You check it and approve, and
                   the player joins the roster in the right category.
                 </p>
@@ -490,7 +490,7 @@ export default function LandingPage() {
                   <li>Set a deadline and a roster cap.</li>
                   <li>Approve, waitlist or reject one at a time, or approve every clear entry at once.</li>
                   <li>Likely duplicate entries are flagged for you to check.</li>
-                  <li>Parents with an account fill the form from a saved profile and can register siblings quickly.</li>
+                  <li>Players with an account fill the form from a saved profile, and can enter family members quickly.</li>
                   <li>Paid entries and listing on Find a tournament need a verified academy.</li>
                 </ul>
               </div>
@@ -513,9 +513,9 @@ export default function LandingPage() {
               </div>
               <div className="lp-live-ph">
                 <ParentVisual />
-                <h3>Live page for parents</h3>
+                <h3>Live page for players</h3>
                 <p>
-                  One link, no app and no account. Search a name, star your child to keep them handy,
+                  One link, no app and no account. Search a name, star a player to keep them handy,
                   and see the board, colour, opponent and standings. If the connection drops, the
                   page says so.
                 </p>

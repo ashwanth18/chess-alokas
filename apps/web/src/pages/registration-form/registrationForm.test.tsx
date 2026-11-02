@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,8 +11,20 @@ import {
   type RegistrationFormConfig,
   type TournamentRegistration,
 } from '@chess-alokas/shared';
+import { MemoryRouter } from 'react-router-dom';
 import { FormBuilder } from './FormBuilder';
-import { EMPTY_PARENT_FORM, ParentFormFields } from './ParentFormFields';
+import {
+  EntrySent,
+  EventHeader,
+  RegistrationClosed,
+  RegistrationForm,
+  availability,
+  deadlineText,
+  formatEventDate,
+  formatFee,
+  type RegistrationEvent,
+} from './RegistrationView';
+import { EMPTY_ENTRY_FORM, EntryFormFields, entrySections } from './EntryFormFields';
 import {
   answerText,
   asPublicForm,
@@ -62,20 +75,20 @@ const FULL_FORM: RegistrationFormConfig = {
   ],
 };
 
-const parentForm = (form: RegistrationFormConfig) =>
+const entryForm = (form: RegistrationFormConfig) =>
   renderToStaticMarkup(
-    <ParentFormFields
+    <EntryFormFields
       form={publicRegistrationForm(form)}
       categories={[{ id: 'c1', name: 'Under 12' }]}
-      values={EMPTY_PARENT_FORM}
+      values={EMPTY_ENTRY_FORM}
       onChange={() => undefined}
       onFile={() => undefined}
     />,
   );
 
-describe('the parent form', () => {
+describe('the entry form', () => {
   it('asks only what is switched on', () => {
-    const plain = parentForm({ ...DEFAULT_REGISTRATION_FORM_CONFIG, collectSchool: false, collectPhone: false, collectFideId: false });
+    const plain = entryForm({ ...DEFAULT_REGISTRATION_FORM_CONFIG, collectSchool: false, collectPhone: false, collectFideId: false });
     expect(plain).toContain('Full name');
     expect(plain).not.toContain('School');
     expect(plain).not.toContain('Contact number');
@@ -85,7 +98,7 @@ describe('the parent form', () => {
   });
 
   it('draws every question type, both languages, and leaves hidden questions out', () => {
-    const html = parentForm(FULL_FORM);
+    const html = entryForm(FULL_FORM);
     expect(html).toContain('T-shirt size / Saiz baju');
     expect(html).toContain('<select');
     expect(html).toContain('type="checkbox"');
@@ -96,24 +109,24 @@ describe('the parent form', () => {
   });
 
   it('labels the standard fields in Malay only when switched on, and hints at NRIC on the name', () => {
-    const html = parentForm(FULL_FORM);
+    const html = entryForm(FULL_FORM);
     expect(html).toContain('Name (as in NRIC) / Nama (seperti dalam NRIC)');
     expect(html).toContain('NRIC number / No. kad pengenalan');
     expect(html).toContain('Age proof (NRIC or birth certificate)');
-    const english = parentForm({ ...FULL_FORM, malayLabels: false });
+    const english = entryForm({ ...FULL_FORM, malayLabels: false });
     expect(english).toContain('Name (as in NRIC)');
     expect(english).not.toContain('Nama');
   });
 
   it('covers every column of the organizer’s real Google Form', () => {
-    const html = parentForm(FULL_FORM);
+    const html = entryForm(FULL_FORM);
     for (const column of ['Name', 'NRIC number', 'Gender', 'Category', 'School', 'Contact number', 'Email', 'Age proof']) {
       expect(html).toContain(column);
     }
   });
 
   it('accepts the same files the server does', () => {
-    expect(parentForm(FULL_FORM)).toContain('accept="image/png,image/jpeg,image/webp,application/pdf"');
+    expect(entryForm(FULL_FORM)).toContain('accept="image/png,image/jpeg,image/webp,application/pdf"');
   });
 });
 
@@ -263,12 +276,161 @@ describe('nothing private reaches the page source', () => {
   });
 
   it('uses tokens, no emoji and no chess glyphs in what it adds', () => {
-    const files = ['./registrationForm.css', './RegistrationSetup.tsx', './EntryQueue.tsx', './FormBuilder.tsx', './ParentFormFields.tsx', './ShareLink.tsx', '../EventRegistrationPage.tsx'];
+    const files = ['./registrationForm.css', './RegistrationSetup.tsx', './EntryQueue.tsx', './FormBuilder.tsx', './EntryFormFields.tsx', './RegistrationView.tsx', './registerPage.css', './ShareLink.tsx', '../EventRegistrationPage.tsx'];
     for (const file of files) {
       const source = readFileSync(new URL(file, import.meta.url), 'utf8');
       expect(source, file).not.toMatch(/[♔-♟]|\p{Extended_Pictographic}/u);
     }
-    const css = readFileSync(new URL('./registrationForm.css', import.meta.url), 'utf8');
-    expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|!important|text-overflow/i);
+    for (const file of ['./registrationForm.css', './registerPage.css']) {
+      const css = readFileSync(new URL(file, import.meta.url), 'utf8');
+      expect(css, file).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|!important|text-overflow/i);
+    }
+  });
+
+  it('speaks to players, not parents, outside the consent notice', () => {
+    for (const file of ['./RegistrationSetup.tsx', './EntryFormFields.tsx', './RegistrationView.tsx', '../EventRegistrationPage.tsx']) {
+      const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+      expect(source, file).not.toMatch(/\bparents?\b/i);
+    }
+  });
+});
+
+const EVENT: RegistrationEvent = {
+  name: 'Imaginary Bay Junior Rapid',
+  organizationName: 'Pretend Heights Chess Academy',
+  date: '2026-08-22',
+  style: 'swiss',
+  rounds: 5,
+  timeControl: '15+5',
+  venueName: 'Dewan Tiada Di Peta',
+  venueAddress: '12 Jalan Pretend',
+  city: 'Imaginary Bay',
+  state: 'Selangor',
+  latitude: null,
+  longitude: null,
+  entryFeeCents: 3000,
+  currency: 'MYR',
+  registrationOpen: true,
+  registrationDeadline: '2026-12-14T15:59:00.000Z',
+  maxParticipants: 64,
+  registeredCount: 8,
+  descriptionMd: null,
+  rulesMd: null,
+  paymentInstructions: 'DuitNow to Pretend Heights',
+  paymentQrUrl: null,
+  publicToken: 'tok',
+};
+const NOW = new Date('2026-12-09T04:00:00.000Z').getTime();
+
+describe('the public registration page', () => {
+  const page = (node: ReactNode) => renderToStaticMarkup(<MemoryRouter>{node}</MemoryRouter>);
+
+  it('formats the fee, the date and the deadline the way players read them', () => {
+    expect(formatFee(3000)).toBe('RM 30');
+    expect(formatFee(3050)).toBe('RM 30.50');
+    expect(formatFee(0)).toBe('Free');
+    expect(formatFee(2000, 'SGD')).toBe('SGD 20');
+    expect(formatEventDate('2026-08-22')).toBe('Sat, 22 Aug 2026');
+    const soon = deadlineText(EVENT.registrationDeadline!, NOW);
+    expect(soon.text).toMatch(/^Closes 14 Dec, \d\d:\d\d · 5 days left$/);
+    expect(soon.urgent).toBe(false);
+    const close = deadlineText(EVENT.registrationDeadline!, NOW + 3 * 86_400_000);
+    expect(close.text).toContain('2 days left');
+    expect(close.urgent).toBe(true);
+    expect(deadlineText(EVENT.registrationDeadline!, NOW + 10 * 86_400_000)).toMatchObject({ passed: true, text: 'Closed 14 Dec' });
+  });
+
+  it('knows when entries are open, full or closed', () => {
+    expect(availability(EVENT, NOW)).toBe('open');
+    expect(availability({ ...EVENT, registeredCount: 64 }, NOW)).toBe('full');
+    expect(availability({ ...EVENT, registrationOpen: false }, NOW)).toBe('closed');
+    expect(availability(EVENT, NOW + 10 * 86_400_000)).toBe('closed');
+  });
+
+  it('puts the event at the top: entry fee, places, deadline and directions', () => {
+    const html = page(<EventHeader event={EVENT} now={NOW} />);
+    expect(html).toContain('Entry RM 30');
+    expect(html).toContain('8 confirmed · 64 places');
+    expect(html).toContain('5 days left');
+    expect(html).toContain('Directions');
+    expect(html).toContain('Open for entries');
+    expect(page(<EventHeader event={{ ...EVENT, entryFeeCents: 0 }} now={NOW} />)).toContain('>Free<');
+    expect(page(<EventHeader event={EVENT} now={NOW + 3 * 86_400_000} />)).toContain('rg-urgent');
+  });
+
+  it('splits a long form into sections and marks the ones that are done', () => {
+    const form = publicRegistrationForm(FULL_FORM);
+    const empty = entrySections(form, EMPTY_ENTRY_FORM, {}, true);
+    expect(empty.map((s) => s.title)).toEqual(['Player', 'Contact', 'Event questions', 'Documents', 'Payment']);
+    expect(empty.every((s) => !s.done)).toBe(true);
+    const named = entrySections(form, { ...EMPTY_ENTRY_FORM, name: 'Tan Zugzwang', nricNumber: '140305145678' }, {}, true);
+    expect(named[0]!.done).toBe(true);
+    const plain = entrySections(publicRegistrationForm(DEFAULT_REGISTRATION_FORM_CONFIG), EMPTY_ENTRY_FORM, {}, false);
+    expect(plain.map((s) => s.key)).toEqual(['player', 'contact']);
+  });
+
+  it('reviews the entry before sending, with the NRIC masked', () => {
+    const html = page(
+      <RegistrationForm
+        event={EVENT}
+        form={publicRegistrationForm(FULL_FORM)}
+        categories={[{ id: 'c1', name: 'Under 12' }]}
+        values={{ ...EMPTY_ENTRY_FORM, name: 'Tan Zugzwang', categoryId: 'c1', nricNumber: '140305-14-5678' }}
+        onChange={() => undefined}
+        files={{ receipt: { name: 'receipt.png', dataUrl: 'data:image/png;base64,AA==' } }}
+        onFile={() => undefined}
+        onSubmit={() => undefined}
+        full={false}
+        idPrefix="t"
+      />,
+    );
+    expect(html).toContain('Check and send');
+    expect(html).toContain('******-**-5678');
+    expect(html.match(/140305/g)?.length ?? 0).toBe(1); // only in the field the player typed it into
+    expect(html).toContain('RM 30 · receipt attached');
+    expect(html).toContain('0 of 2 attached');
+    expect(html).toContain('receipt.png');
+    expect(html).toContain('By submitting, you confirm');
+    expect(html).toContain('Submit entry');
+  });
+
+  it('turns the button into a waitlist when the roster is full', () => {
+    const html = page(
+      <RegistrationForm
+        event={{ ...EVENT, registeredCount: 64 }}
+        form={publicRegistrationForm(DEFAULT_REGISTRATION_FORM_CONFIG)}
+        categories={[]}
+        values={EMPTY_ENTRY_FORM}
+        onChange={() => undefined}
+        files={{}}
+        onFile={() => undefined}
+        onSubmit={() => undefined}
+        full
+        idPrefix="t"
+      />,
+    );
+    expect(html).toContain('All 64 places are taken. New entries join the waitlist.');
+    expect(html).toContain('Join the waitlist');
+  });
+
+  it('says what happens next after sending, including the receipt', () => {
+    const sent = (over: Partial<TournamentRegistration>) =>
+      page(
+        <EntrySent registration={entry(over)} event={EVENT} category="Under 12" signedIn={false} onAnother={() => undefined} />,
+      );
+    const pending = sent({ paymentStatus: 'pending_receipt' });
+    expect(pending).toContain('Entry sent for Tan Zugzwang');
+    expect(pending).toContain('Waiting for approval');
+    expect(pending).toContain('No receipt attached');
+    expect(pending).toContain('Register another player');
+    expect(sent({ paymentStatus: 'submitted' })).toContain('Receipt sent');
+    expect(sent({ status: 'waitlisted' })).toContain('On the waitlist');
+  });
+
+  it('closes politely, with somewhere else to go', () => {
+    const html = page(<RegistrationClosed event={{ ...EVENT, registrationOpen: false }} now={NOW} />);
+    expect(html).toContain('Registration is closed');
+    expect(html).toContain('Find another event');
+    expect(page(<RegistrationClosed event={EVENT} now={NOW + 10 * 86_400_000} />)).toContain('Entries closed on 14 Dec');
   });
 });

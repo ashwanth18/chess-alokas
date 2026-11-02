@@ -48,7 +48,7 @@ export default defineConfig({
   },
   projects: [
     ...viewports.map((v) => ({ name: v.name, testMatch: /visual\.spec\.ts/, use: v })),
-    { name: 'checks', testMatch: /(audit|contrast|shells|ui|legacy|navigation)\.spec\.ts/, use: viewports[2] },
+    { name: 'checks', testMatch: /(audit|contrast|shells|ui|legacy|navigation|register)\.spec\.ts/, use: viewports[2] },
     // Electron grants file:// module loading itself; stock Chromium needs telling.
     {
       name: 'desktop',

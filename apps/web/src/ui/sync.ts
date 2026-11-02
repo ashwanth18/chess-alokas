@@ -105,8 +105,8 @@ export function describeSync(facts: SyncFacts): SyncLine[] {
     lines.push({
       key: 'audience',
       text: asOf
-        ? `Floor phones keep their own results until then. The parents' page stays at ${asOf}.`
-        : "Floor phones keep their own results until then. The parents' page doesn't have this yet.",
+        ? `Floor phones keep their own results until then. The live page stays at ${asOf}.`
+        : "Floor phones keep their own results until then. The live page doesn't have this yet.",
       tone: 'plain',
       marker: 'none',
     });

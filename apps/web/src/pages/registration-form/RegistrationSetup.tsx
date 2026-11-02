@@ -9,11 +9,7 @@ import {
 import { apiGetTournamentPublishing, apiUpdateTournamentPublishing } from '../../api/client';
 import { Button, Field, Sheet } from '../../ui';
 import { FormBuilder } from './FormBuilder';
-import {
-  EMPTY_PARENT_FORM,
-  ParentFormFields,
-  type ParentFormValues,
-} from './ParentFormFields';
+import { RegistrationPreview, type RegistrationEvent } from './RegistrationView';
 import { ShareLink } from './ShareLink';
 import { asPublicForm, formSummary, fromLocalInput, registrationLink, toLocalInput } from './formLogic';
 import './registrationForm.css';
@@ -118,7 +114,6 @@ export function RegistrationSetup({
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'forbidden' | 'offline'>('loading');
   const [editing, setEditing] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewValues, setPreviewValues] = useState<ParentFormValues>(EMPTY_PARENT_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -173,6 +168,33 @@ export function RegistrationSetup({
     Boolean(window.desktop?.isDesktop),
     window.location.origin,
   );
+  const approved = registrations.filter((r) => r.status === 'approved').length;
+  // The public page's event, as this draft would publish it.
+  const previewEvent: RegistrationEvent = {
+    name: tournamentName,
+    organizationName: null,
+    date: local.date ?? null,
+    style: local.style ?? 'swiss',
+    rounds: local.rounds ?? 0,
+    timeControl: draft.timeControl.trim() || null,
+    venueName: draft.venueName.trim() || null,
+    venueAddress: draft.venueAddress.trim() || null,
+    city: draft.city.trim() || null,
+    state: draft.state.trim() || null,
+    latitude: optionalNumber(draft.latitude),
+    longitude: optionalNumber(draft.longitude),
+    entryFeeCents: Math.max(0, Math.round((Number(draft.entryFee) || 0) * 100)),
+    currency: 'MYR',
+    registrationOpen: draft.registrationOpen,
+    registrationDeadline: fromLocalInput(draft.registrationDeadline),
+    maxParticipants: optionalNumber(draft.maxParticipants),
+    registeredCount: approved,
+    descriptionMd: draft.descriptionMd.trim() || null,
+    rulesMd: draft.rulesMd.trim() || null,
+    paymentInstructions: draft.paymentInstructions.trim() || null,
+    paymentQrUrl: draft.paymentQrUrl,
+    publicToken: null,
+  };
   const baselineOpen = useMemo(() => (JSON.parse(baseline) as Draft).registrationOpen, [baseline]);
 
   async function save() {
@@ -247,234 +269,230 @@ export function RegistrationSetup({
   const listLocked = !can.listPublicly && loadState === 'ready';
 
   return (
-    <div className="ui-root rf" data-surface="desk">
-      {loadState === 'offline' && (
-        <p className="rf-note rf-note--warn" role="status">
-          Setting up registration needs a connection. Showing what this device last saved.{' '}
-          <button type="button" className="rf-linkbtn" onClick={() => void load()}>
-            Try again
-          </button>
-        </p>
-      )}
-
-      <section className="ui-card rf-step" aria-labelledby="rf-step-form">
-        <header className="rf-step__head">
-          <span className="rf-step__n" aria-hidden="true">1</span>
-          <div className="rf-step__title">
-            <h3 id="rf-step-form">Form</h3>
-            {!editing && <p>{formSummary(draft.form)}</p>}
-          </div>
-          <div className="rf-step__actions">
-            <Button size="sm" onClick={() => setPreviewOpen(true)}>
-              Preview
-            </Button>
-            <Button size="sm" aria-expanded={editing} onClick={() => setEditing((v) => !v)}>
-              {editing ? 'Close editor' : 'Change form'}
-            </Button>
-          </div>
-        </header>
-        {editing && (
-          <FormBuilder
-            form={draft.form}
-            answerCounts={answerCounts}
-            onChange={(next) => set({ form: next })}
-          />
+    <>
+      <div className="ui-root rf" data-surface="desk">
+        {loadState === 'offline' && (
+          <p className="rf-note rf-note--warn" role="status">
+            Setting up registration needs a connection. Showing what this device last saved.{' '}
+            <button type="button" className="rf-linkbtn" onClick={() => void load()}>
+              Try again
+            </button>
+          </p>
         )}
-      </section>
 
-      <section className="ui-card rf-step" aria-labelledby="rf-step-limits">
-        <header className="rf-step__head">
-          <span className="rf-step__n" aria-hidden="true">2</span>
-          <div className="rf-step__title">
-            <h3 id="rf-step-limits">Deadline and player limit</h3>
-          </div>
-        </header>
-        <div className="rf-pair">
-          <Field
-            label="Registration closes"
-            hint="Your local time. Leave empty for no deadline."
-            type="datetime-local"
-            {...text('registrationDeadline')}
-          />
-          <Field
-            label="Player limit"
-            hint={
-              can.maxPlayers != null
-                ? `Your plan allows up to ${can.maxPlayers}. Everyone on the roster counts. Once full, new entries go on the waitlist.`
-                : 'Everyone on the roster counts. Once full, new entries go on the waitlist. Leave empty for no limit.'
-            }
-            type="number"
-            min={1}
-            {...(can.maxPlayers != null ? { max: can.maxPlayers } : {})}
-            inputMode="numeric"
-            {...text('maxParticipants')}
-          />
-        </div>
-      </section>
-
-      <section className="ui-card rf-step" aria-labelledby="rf-step-share">
-        <header className="rf-step__head">
-          <span className="rf-step__n" aria-hidden="true">3</span>
-          <div className="rf-step__title">
-            <h3 id="rf-step-share">Open and share</h3>
-          </div>
-        </header>
-        <label className="rf-check rf-check--lead">
-          <input
-            type="checkbox"
-            checked={draft.registrationOpen}
-            onChange={(e) => set({ registrationOpen: e.target.checked })}
-          />
-          <span>
-            Accept entries
-            <span className="rf-check__hint">Anyone with the link can register. No app or account needed.</span>
-          </span>
-        </label>
-        <ShareLink link={link} eventName={tournamentName} live={baselineOpen} />
-        <div className="rf-pair">
-          <Field
-            label="Link name"
-            hint="Letters, numbers and hyphens. Empty makes one from the event name."
-            {...text('publicSlug')}
-          />
-          <label className={`rf-check rf-check--inline${listLocked ? ' rf-check--locked' : ''}`}>
-            <input
-              type="checkbox"
-              checked={draft.isPublishedGlobal}
-              disabled={listLocked}
-              onChange={(e) => set({ isPublishedGlobal: e.target.checked })}
-            />
-            <span>
-              List on Find a tournament
-              <span className="rf-check__hint">
-                {listLocked ? 'Needs a verified academy. The link above works without it.' : 'Optional. The link works either way.'}
-              </span>
-            </span>
-          </label>
-        </div>
-
-        <details className="rf-details">
-          <summary>Event details on the public page</summary>
-          <div className="rf-pair">
-            <Field label="Venue" optional {...text('venueName')} />
-            <Field label="Address" optional {...text('venueAddress')} />
-          </div>
-          <div className="rf-triple">
-            <Field label="City" optional {...text('city')} />
-            <Field label="State" optional {...text('state')} />
-            <Field label="Country" optional {...text('country')} />
-          </div>
-          <div className="rf-pair">
-            <Field label="Latitude" optional type="number" step="any" {...text('latitude')} />
-            <Field label="Longitude" optional type="number" step="any" {...text('longitude')} />
-          </div>
-          <Field label="Time control" optional {...text('timeControl')} />
-          <Field label="Description" optional>
-            {(control) => (
-              <textarea
-                {...control}
-                rows={3}
-                maxLength={10000}
-                value={draft.descriptionMd}
-                onChange={(e) => set({ descriptionMd: e.target.value })}
-              />
-            )}
-          </Field>
-          <Field label="Rules" optional>
-            {(control) => (
-              <textarea
-                {...control}
-                rows={3}
-                maxLength={10000}
-                value={draft.rulesMd}
-                onChange={(e) => set({ rulesMd: e.target.value })}
-              />
-            )}
-          </Field>
-        </details>
-
-        <details className="rf-details">
-          <summary>Entry fee and payment</summary>
-          {feeLocked && <p className="rf-note">Paid entries need a verified academy. Free events need nothing.</p>}
-          <Field
-            label="Entry fee (MYR)"
-            type="number"
-            min={0}
-            step="0.01"
-            disabled={feeLocked}
-            {...text('entryFee')}
-          />
-          <Field label="Payment instructions" optional>
-            {(control) => (
-              <textarea
-                {...control}
-                rows={2}
-                maxLength={4000}
-                disabled={feeLocked}
-                value={draft.paymentInstructions}
-                onChange={(e) => set({ paymentInstructions: e.target.value })}
-              />
-            )}
-          </Field>
-          <Field label="Payment QR image" optional hint="Shown on the public page.">
-            {(control) => (
-              <input
-                {...control}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                disabled={feeLocked}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    if (typeof reader.result === 'string') set({ paymentQrUrl: reader.result });
-                  };
-                  reader.readAsDataURL(file);
-                }}
-              />
-            )}
-          </Field>
-          {draft.paymentQrUrl && (
-            <div className="rf-qr-current">
-              <img src={draft.paymentQrUrl} alt="Current payment QR" />
-              <Button size="sm" variant="quiet" onClick={() => set({ paymentQrUrl: null })}>
-                Remove QR
+        <section className="ui-card rf-step" aria-labelledby="rf-step-form">
+          <header className="rf-step__head">
+            <span className="rf-step__n" aria-hidden="true">1</span>
+            <div className="rf-step__title">
+              <h3 id="rf-step-form">Form</h3>
+              {!editing && <p>{formSummary(draft.form)}</p>}
+            </div>
+            <div className="rf-step__actions">
+              <Button size="sm" onClick={() => setPreviewOpen(true)}>
+                Preview
+              </Button>
+              <Button size="sm" aria-expanded={editing} onClick={() => setEditing((v) => !v)}>
+                {editing ? 'Close editor' : 'Change form'}
               </Button>
             </div>
+          </header>
+          {editing && (
+            <FormBuilder
+              form={draft.form}
+              answerCounts={answerCounts}
+              onChange={(next) => set({ form: next })}
+            />
           )}
-        </details>
-      </section>
+        </section>
 
-      {(dirty || error || notice) && (
-        <div className="rf-savebar">
-          <span className="rf-savebar__state" role="status">
-            {error ? <span className="rf-savebar__error">{error}</span> : dirty ? 'Unsaved changes' : notice}
-          </span>
-          {dirty && (
-            <Button variant="primary" disabled={saving || loadState === 'offline'} onClick={() => void save()}>
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-          )}
-        </div>
-      )}
+        <section className="ui-card rf-step" aria-labelledby="rf-step-limits">
+          <header className="rf-step__head">
+            <span className="rf-step__n" aria-hidden="true">2</span>
+            <div className="rf-step__title">
+              <h3 id="rf-step-limits">Deadline and player limit</h3>
+            </div>
+          </header>
+          <div className="rf-pair">
+            <Field
+              label="Registration closes"
+              hint="Your local time. Leave empty for no deadline."
+              type="datetime-local"
+              {...text('registrationDeadline')}
+            />
+            <Field
+              label="Player limit"
+              hint={
+                can.maxPlayers != null
+                  ? `Your plan allows up to ${can.maxPlayers}. Everyone on the roster counts. Once full, new entries go on the waitlist.`
+                  : 'Everyone on the roster counts. Once full, new entries go on the waitlist. Leave empty for no limit.'
+              }
+              type="number"
+              min={1}
+              {...(can.maxPlayers != null ? { max: can.maxPlayers } : {})}
+              inputMode="numeric"
+              {...text('maxParticipants')}
+            />
+          </div>
+        </section>
 
-      <Sheet open={previewOpen} onClose={() => setPreviewOpen(false)} title="What parents see" variant="modal">
-        <form
-          className="rf-preview"
-          onSubmit={(e) => e.preventDefault()}
-          aria-label="Preview of the parent form"
-        >
-          <ParentFormFields
-            form={previewForm}
-            categories={categories}
-            values={previewValues}
-            onChange={(patch) => setPreviewValues((v) => ({ ...v, ...patch }))}
-            onFile={() => undefined}
-          />
-          <p className="rf-note">Preview only. Nothing here is sent.</p>
-        </form>
+        <section className="ui-card rf-step" aria-labelledby="rf-step-share">
+          <header className="rf-step__head">
+            <span className="rf-step__n" aria-hidden="true">3</span>
+            <div className="rf-step__title">
+              <h3 id="rf-step-share">Open and share</h3>
+            </div>
+          </header>
+          <label className="rf-check rf-check--lead">
+            <input
+              type="checkbox"
+              checked={draft.registrationOpen}
+              onChange={(e) => set({ registrationOpen: e.target.checked })}
+            />
+            <span>
+              Accept entries
+              <span className="rf-check__hint">Anyone with the link can register. No app or account needed.</span>
+            </span>
+          </label>
+          <ShareLink link={link} eventName={tournamentName} live={baselineOpen} />
+          <div className="rf-pair">
+            <Field
+              label="Link name"
+              hint="Letters, numbers and hyphens. Empty makes one from the event name."
+              {...text('publicSlug')}
+            />
+            <label className={`rf-check rf-check--inline${listLocked ? ' rf-check--locked' : ''}`}>
+              <input
+                type="checkbox"
+                checked={draft.isPublishedGlobal}
+                disabled={listLocked}
+                onChange={(e) => set({ isPublishedGlobal: e.target.checked })}
+              />
+              <span>
+                List on Find a tournament
+                <span className="rf-check__hint">
+                  {listLocked ? 'Needs a verified academy. The link above works without it.' : 'Optional. The link works either way.'}
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <details className="rf-details">
+            <summary>Event details on the public page</summary>
+            <div className="rf-pair">
+              <Field label="Venue" optional {...text('venueName')} />
+              <Field label="Address" optional {...text('venueAddress')} />
+            </div>
+            <div className="rf-triple">
+              <Field label="City" optional {...text('city')} />
+              <Field label="State" optional {...text('state')} />
+              <Field label="Country" optional {...text('country')} />
+            </div>
+            <div className="rf-pair">
+              <Field label="Latitude" optional type="number" step="any" {...text('latitude')} />
+              <Field label="Longitude" optional type="number" step="any" {...text('longitude')} />
+            </div>
+            <Field label="Time control" optional {...text('timeControl')} />
+            <Field label="Description" optional>
+              {(control) => (
+                <textarea
+                  {...control}
+                  rows={3}
+                  maxLength={10000}
+                  value={draft.descriptionMd}
+                  onChange={(e) => set({ descriptionMd: e.target.value })}
+                />
+              )}
+            </Field>
+            <Field label="Rules" optional>
+              {(control) => (
+                <textarea
+                  {...control}
+                  rows={3}
+                  maxLength={10000}
+                  value={draft.rulesMd}
+                  onChange={(e) => set({ rulesMd: e.target.value })}
+                />
+              )}
+            </Field>
+          </details>
+
+          <details className="rf-details">
+            <summary>Entry fee and payment</summary>
+            {feeLocked && <p className="rf-note">Paid entries need a verified academy. Free events need nothing.</p>}
+            <Field
+              label="Entry fee (MYR)"
+              type="number"
+              min={0}
+              step="0.01"
+              disabled={feeLocked}
+              {...text('entryFee')}
+            />
+            <Field label="Payment instructions" optional>
+              {(control) => (
+                <textarea
+                  {...control}
+                  rows={2}
+                  maxLength={4000}
+                  disabled={feeLocked}
+                  value={draft.paymentInstructions}
+                  onChange={(e) => set({ paymentInstructions: e.target.value })}
+                />
+              )}
+            </Field>
+            <Field label="Payment QR image" optional hint="Shown on the public page.">
+              {(control) => (
+                <input
+                  {...control}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={feeLocked}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      if (typeof reader.result === 'string') set({ paymentQrUrl: reader.result });
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              )}
+            </Field>
+            {draft.paymentQrUrl && (
+              <div className="rf-qr-current">
+                <img src={draft.paymentQrUrl} alt="Current payment QR" />
+                <Button size="sm" variant="quiet" onClick={() => set({ paymentQrUrl: null })}>
+                  Remove QR
+                </Button>
+              </div>
+            )}
+          </details>
+        </section>
+
+        {(dirty || error || notice) && (
+          <div className="rf-savebar">
+            <span className="rf-savebar__state" role="status">
+              {error ? <span className="rf-savebar__error">{error}</span> : dirty ? 'Unsaved changes' : notice}
+            </span>
+            {dirty && (
+              <Button variant="primary" disabled={saving || loadState === 'offline'} onClick={() => void save()}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Outside the desk's styles, so the preview is the public page and nothing else. */}
+      <Sheet
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        title="Preview: what players see"
+        variant="modal"
+        className="rg-preview-sheet"
+      >
+        {previewOpen && <RegistrationPreview event={previewEvent} form={previewForm} categories={categories} />}
       </Sheet>
-    </div>
+    </>
   );
 }

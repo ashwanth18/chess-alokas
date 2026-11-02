@@ -1,4 +1,4 @@
-/* The organizer's Registrations step and the parent's registration page. Tokens only. */
+/* The organizer's Registrations step: form builder, sharing and the entry queue. Tokens only. */
 @layer shell {
   /* The desk page around this has no surface yet, so native controls need telling. */
   .rf { color-scheme: dark; display: grid; gap: var(--s4); margin-bottom: var(--s5); }
@@ -140,44 +140,4 @@
   .rf-danger { display: flex; justify-content: flex-end; border-top: 1px solid var(--rule); padding-top: var(--s3); }
   .rf-sheet-actions { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s4); }
   .rf-viewer { max-width: 100%; height: auto; display: block; margin-inline: auto; border-radius: var(--r-sm); }
-  .rf-preview { display: block; }
-
-  /* The parent's page */
-  .rg-page { max-width: 760px; margin-inline: auto; padding: var(--s4) var(--s4) var(--s8); display: grid; gap: var(--s4); }
-  .rg-main { display: contents; }
-  .rg-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--s3); }
-  .rg-brand { display: inline-flex; align-items: center; gap: var(--s2); color: var(--ink); font-weight: 600; text-decoration: none; }
-  .rg-brand svg { width: 24px; height: 24px; }
-  .rg-top nav { display: flex; flex-wrap: wrap; gap: var(--s2); }
-  .rg-org { color: var(--ink2); font-size: var(--t-sm); }
-  .rg-hero h1 { font-size: var(--t-3xl); margin: var(--s1) 0 var(--s2); overflow-wrap: anywhere; }
-  .rg-where { color: var(--ink2); }
-  .rg-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s3); margin: var(--s4) 0; }
-  .rg-facts dt { color: var(--ink2); font-size: var(--t-sm); }
-  .rg-facts dd { margin: 0; font-weight: 600; color: var(--ink); }
-  .rg-links { display: flex; flex-wrap: wrap; gap: var(--s2); }
-  .rg-text { white-space: pre-wrap; margin-top: var(--s3); }
-  .rg-rules { margin-top: var(--s3); }
-  .rg-rules summary { cursor: pointer; font-weight: 600; min-height: 32px; }
-  .rg-card { display: grid; gap: var(--s3); }
-  .rg-card h2 { font-size: var(--t-xl); margin: 0; }
-  .rg-card .rf-pair { gap: 0 var(--s3); }
-  .rg-profiles { display: flex; flex-wrap: wrap; gap: var(--s2); }
-  .rg-profile {
-    min-height: 44px; padding: 0 var(--s3); cursor: pointer;
-    background: transparent; color: var(--ink); text-align: left;
-    border: 1px solid var(--rule-strong); border-radius: var(--r);
-    font: 500 var(--t-sm)/1.2 var(--font-text);
-  }
-  .rg-profile.is-on { background: var(--paper3); border-color: var(--accent); }
-  .rg-payment { border: 1px solid var(--rule); border-radius: var(--r); padding: var(--s3); margin-bottom: var(--s4); }
-  .rg-payment h3 { font-size: var(--t-body); margin: 0 0 var(--s2); }
-  .rg-payment img { display: block; max-width: 220px; margin-block: var(--s3); border-radius: var(--r-sm); background: var(--piece-white); }
-  .rg-error { color: var(--flag); font-weight: 600; }
-  .rg-submit { display: flex; justify-content: flex-end; }
-  .rg-roster { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  .rg-roster th { text-align: left; color: var(--ink2); font-size: var(--t-sm); font-weight: 600; padding-block: var(--s2); }
-  .rg-roster td { border-top: 1px solid var(--rule); padding-block: var(--s2); vertical-align: top; }
-  .rg-roster .rg-num { width: 2.75rem; }
-  .rg-roster .rg-data { width: 5.5rem; font-family: var(--font-data); }
 }

@@ -15,19 +15,22 @@ import {
   type PublicEventDetailResponse,
 } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { GuardianConsentNotice } from '../components/LegalLinks';
-import { DemoNotice } from '../components/DemoNotice';
 import { trackPageView } from '../lib/pageAnalytics';
 import { BrandCrown } from '../ui/BrandCrown';
-import { Button, Field, PlayerName, buttonClass } from '../ui';
+import { PlayerName, buttonClass } from '../ui';
 import { Surface } from '../ui/Surface';
+import { EMPTY_ENTRY_FORM, type EntryFormValues } from './registration-form/EntryFormFields';
 import {
-  EMPTY_PARENT_FORM,
-  ParentFormFields,
-  type ParentFormValues,
-} from './registration-form/ParentFormFields';
-import { UPLOAD_ACCEPT, asPublicForm, readUpload } from './registration-form/formLogic';
-import './registration-form/registrationForm.css';
+  EntrySent,
+  EventHeader,
+  RegistrationClosed,
+  RegistrationForm,
+  availability,
+  useChosenFiles,
+} from './registration-form/RegistrationView';
+import { asPublicForm } from './registration-form/formLogic';
+
+export { formatEventDate } from './registration-form/RegistrationView';
 
 const RELATIONSHIP_LABELS: Record<PlayerRelationship, string> = {
   self: 'Self',
@@ -35,34 +38,6 @@ const RELATIONSHIP_LABELS: Record<PlayerRelationship, string> = {
   student: 'Student',
   family: 'Family',
 };
-
-const STATUS_SENTENCE: Record<string, string> = {
-  pending: 'waiting for the organizer to approve it',
-  waitlisted: 'on the waitlist, because the roster is full',
-};
-
-function formatFee(cents: number, currency = 'MYR'): string {
-  if (!cents || cents <= 0) return 'Free';
-  const amount = (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
-  return `${currency} ${amount}`;
-}
-
-function formatDeadline(iso: string): string {
-  return new Date(iso).toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-/** The event's own calendar date, so "2 Mar 2030" doesn't move with the reader's time zone. */
-export function formatEventDate(date: string): string {
-  const parsed = new Date(`${date.slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return parsed.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-}
 
 export default function EventRegistrationPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -75,17 +50,17 @@ export default function EventRegistrationPage() {
   const [profiles, setProfiles] = useState<PlayerProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
-  const [values, setValues] = useState<ParentFormValues>(EMPTY_PARENT_FORM);
+  const [values, setValues] = useState<EntryFormValues>(EMPTY_ENTRY_FORM);
   const onChange = useCallback(
-    (patch: Partial<ParentFormValues>) => setValues((v) => ({ ...v, ...patch })),
+    (patch: Partial<EntryFormValues>) => setValues((v) => ({ ...v, ...patch })),
     [],
   );
-  /** Field (`ageProof`, a question id, or `receipt`) to the file chosen for it. */
-  const [files, setFiles] = useState<Record<string, { dataUrl: string; name: string }>>({});
   const [schoolOptions, setSchoolOptions] = useState<string[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Field (`ageProof`, a question id, or `receipt`) to the file chosen for it. */
+  const { files, setFiles, choose: chooseFile } = useChosenFiles(setSubmitError);
   const [submittedReg, setSubmittedReg] = useState<TournamentRegistration | null>(null);
 
   useEffect(() => {
@@ -170,7 +145,7 @@ export default function EventRegistrationPage() {
   const event = detail?.event ?? null;
   const form = useMemo(() => asPublicForm(event?.registrationFormSchema), [event?.registrationFormSchema]);
 
-  // Suggestions come from this organizer's own earlier entries, as the parent types.
+  // Suggestions come from this organizer's own earlier entries, as the player types.
   const schoolQuery = values.school.trim();
   const canSuggestSchools = Boolean(event?.registrationOpen && form.collectSchool);
   useEffect(() => {
@@ -189,23 +164,6 @@ export default function EventRegistrationPage() {
       clearTimeout(timer);
     };
   }, [slug, canSuggestSchools, schoolQuery]);
-
-  async function chooseFile(field: string, file: File | null) {
-    if (!file) {
-      setFiles((prev) => {
-        const { [field]: _removed, ...rest } = prev;
-        return rest;
-      });
-      return;
-    }
-    const read = await readUpload(file);
-    if ('error' in read) {
-      setSubmitError(read.error);
-      return;
-    }
-    setSubmitError(null);
-    setFiles((prev) => ({ ...prev, [field]: { dataUrl: read.dataUrl, name: file.name } }));
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -256,7 +214,8 @@ export default function EventRegistrationPage() {
       return;
     }
     setSubmittedReg(res.data.registration);
-    window.scrollTo?.({ top: 0 });
+    // Lead with what happened, not the event card above it.
+    requestAnimationFrame(() => document.getElementById('rg-done-title')?.scrollIntoView?.({ block: 'start' }));
   }
 
   /** A sibling shares contact details and school, but never a name, an ID or a file. */
@@ -265,7 +224,7 @@ export default function EventRegistrationPage() {
     setFiles({});
     setSelectedProfileId(null);
     setValues((v) => ({
-      ...EMPTY_PARENT_FORM,
+      ...EMPTY_ENTRY_FORM,
       categoryId: v.categoryId,
       school: v.school,
       club: v.club,
@@ -278,18 +237,92 @@ export default function EventRegistrationPage() {
 
   const categories = [...(detail?.categories ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
   const participants = detail?.participants ?? [];
-  const mapsHref =
-    event?.latitude != null && event?.longitude != null
-      ? `https://www.google.com/maps/search/?api=1&query=${event.latitude},${event.longitude}`
-      : event?.venueAddress || event?.venueName
-        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-            [event.venueName, event.venueAddress, event.city, event.state].filter(Boolean).join(', '),
-          )}`
-        : null;
-  const deadlinePassed =
-    event?.registrationDeadline != null && new Date(event.registrationDeadline).getTime() < Date.now();
-  const acceptingEntries = Boolean(event?.registrationOpen) && !deadlinePassed;
-  const full = event?.maxParticipants != null && (event.registeredCount ?? 0) >= event.maxParticipants;
+  const now = Date.now();
+  const state = event ? availability(event, now) : 'closed';
+  const submittedCategory = submittedReg?.selectedCategoryId
+    ? (categories.find((c) => c.id === submittedReg.selectedCategoryId)?.name ?? null)
+    : null;
+
+  const lead =
+    auth.user && profiles.length > 0 ? (
+      <div className="rg-profiles-wrap">
+        <p className="rg-profiles__label">Fill from a saved player</p>
+        <div className="rg-profiles">
+          {profiles.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`rg-profile${selectedProfileId === p.id ? ' is-on' : ''}`}
+              aria-pressed={selectedProfileId === p.id}
+              onClick={() => applyProfileAutofill(p, categories)}
+            >
+              {p.fullName} ({RELATIONSHIP_LABELS[p.relationship] ?? p.relationship})
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`rg-profile${selectedProfileId === null ? ' is-on' : ''}`}
+            aria-pressed={selectedProfileId === null}
+            onClick={() => {
+              setSelectedProfileId(null);
+              onChange({
+                name: '',
+                yearOfBirth: '',
+                gender: '',
+                fideId: '',
+                rating: '',
+                school: '',
+                club: '',
+              });
+            }}
+          >
+            Someone else
+          </button>
+        </div>
+      </div>
+    ) : !auth.user ? (
+      <p className="rg-signin">
+        Registered before? <Link to="/login">Sign in</Link> to fill this from a saved player.
+      </p>
+    ) : null;
+
+  const roster = (
+    <section className="ui-card rg-roster-card" aria-labelledby="rg-roster-title">
+      <h2 id="rg-roster-title">Confirmed players ({participants.length})</h2>
+      {participants.length === 0 ? (
+        <p className="rg-muted">No confirmed players yet.</p>
+      ) : (
+        <table className="rg-roster">
+          <thead>
+            <tr>
+              <th scope="col" className="rg-num">
+                No.
+              </th>
+              <th scope="col">Name</th>
+              <th scope="col" className="rg-data">
+                Rating
+              </th>
+              <th scope="col" className="rg-data">
+                FIDE ID
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {participants.map((p, idx) => (
+              <tr key={p.id}>
+                <td>{idx + 1}</td>
+                <td>
+                  <PlayerName name={p.name} />
+                </td>
+                <td className="rg-data">{p.rating ?? 'None'}</td>
+                <td className="rg-data">{p.fideId ?? 'None'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
 
   return (
     <Surface name="family">
@@ -309,7 +342,7 @@ export default function EventRegistrationPage() {
               </Link>
             ) : (
               <Link to="/login" className={buttonClass({ size: 'sm' })}>
-                Sign in to fill from a saved player
+                Sign in
               </Link>
             )}
           </nav>
@@ -317,240 +350,67 @@ export default function EventRegistrationPage() {
 
         <main className="rg-main">
           {event?.isDemo && (
-            <DemoNotice>
+            <p className="rg-note rg-note--demo" role="note">
               This is a demo event. It is fictional: please don’t attend or pay. Entries are only
               saved from a demo player account.
-            </DemoNotice>
+            </p>
           )}
           {loading ? (
             <p role="status">Loading the event…</p>
           ) : error || !event ? (
-            <section className="ui-card rg-card">
+            <section className="ui-card rg-done">
               <h1>Event not found</h1>
               <p>{error ?? 'This registration link is no longer valid.'}</p>
-              <Link to="/discover" className={buttonClass({ variant: 'primary' })}>
-                Explore events
-              </Link>
+              <div className="rg-done__actions">
+                <Link to="/discover" className={buttonClass({ variant: 'primary' })}>
+                  Explore events
+                </Link>
+              </div>
             </section>
           ) : (
             <>
-              <section className="ui-card rg-hero">
-                {event.organizationName && <span className="rg-org">{event.organizationName}</span>}
-                <h1>{event.name}</h1>
-                <p className="rg-where">
-                  {[event.venueName, event.venueAddress, event.city, event.state].filter(Boolean).join(' · ') ||
-                    'Venue to be announced by the organizer'}
-                </p>
-                <dl className="rg-facts">
-                  <div>
-                    <dt>Date</dt>
-                    <dd>{event.date ? formatEventDate(event.date) : 'To be announced'}</dd>
-                  </div>
-                  <div>
-                    <dt>Format</dt>
-                    <dd>
-                      {event.style === 'dutch' ? 'FIDE Dutch Swiss' : 'Swiss'}, {event.rounds} rounds
-                      {event.timeControl ? `, ${event.timeControl}` : ''}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Entry fee</dt>
-                    <dd>{formatFee(event.entryFeeCents, event.currency)}</dd>
-                  </div>
-                  <div>
-                    <dt>Players</dt>
-                    <dd>
-                      {event.registeredCount} confirmed
-                      {event.maxParticipants ? ` · ${event.maxParticipants} places` : ''}
-                    </dd>
-                  </div>
-                  {event.registrationDeadline && (
-                    <div>
-                      <dt>{deadlinePassed ? 'Registration closed' : 'Registration closes'}</dt>
-                      <dd>{formatDeadline(event.registrationDeadline)}</dd>
-                    </div>
-                  )}
-                </dl>
-                <div className="rg-links">
-                  {mapsHref && (
-                    <a href={mapsHref} target="_blank" rel="noopener noreferrer" className={buttonClass({ size: 'sm' })}>
-                      Open venue in Google Maps
-                    </a>
-                  )}
-                  {event.publicToken && (
-                    <Link to={`/live/${encodeURIComponent(event.publicToken)}`} className={buttonClass({ size: 'sm' })}>
-                      Live standings
-                    </Link>
-                  )}
-                </div>
-                {event.descriptionMd && <p className="rg-text">{event.descriptionMd}</p>}
-                {event.rulesMd && (
-                  <details className="rg-rules">
-                    <summary>Rules</summary>
-                    <p className="rg-text">{event.rulesMd}</p>
-                  </details>
-                )}
-              </section>
+              <EventHeader event={event} now={now} />
 
               {submittedReg ? (
-                <section className="ui-card rg-card" aria-live="polite">
-                  <h2>Entry sent for {submittedReg.playerSnapshot.name}</h2>
-                  <p>
-                    Your entry is {STATUS_SENTENCE[submittedReg.status] ?? submittedReg.status}. Once the
-                    organizer approves it, the player joins the roster.
-                  </p>
-                  <div className="rg-links">
-                    <Button variant="primary" onClick={registerAnother}>
-                      Register another player
-                    </Button>
-                    {auth.user ? (
-                      <Link to="/player" className={buttonClass()}>
-                        Open player portal
-                      </Link>
-                    ) : (
-                      <Link to="/signup" className={buttonClass()}>
-                        Create an account to follow pairings
-                      </Link>
-                    )}
-                  </div>
-                </section>
-              ) : !acceptingEntries ? (
-                <section className="ui-card rg-card">
-                  <h2>Registration is closed</h2>
-                  <p>Contact the organizer about late entries.</p>
-                </section>
-              ) : (
-                <section className="ui-card rg-card" aria-label="Player registration form">
-                  <h2>Register a player</h2>
-                  {full && <p className="rf-note rf-note--warn">The roster is full. New entries join the waitlist.</p>}
-
-                  {auth.user && profiles.length > 0 && (
-                    <div>
-                      <p className="rf-note">Fill from a saved player</p>
-                      <div className="rg-profiles">
-                        {profiles.map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className={`rg-profile${selectedProfileId === p.id ? ' is-on' : ''}`}
-                            aria-pressed={selectedProfileId === p.id}
-                            onClick={() => applyProfileAutofill(p, categories)}
-                          >
-                            {p.fullName} ({RELATIONSHIP_LABELS[p.relationship] ?? p.relationship})
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          className={`rg-profile${selectedProfileId === null ? ' is-on' : ''}`}
-                          aria-pressed={selectedProfileId === null}
-                          onClick={() => {
-                            setSelectedProfileId(null);
-                            onChange({
-                              name: '',
-                              yearOfBirth: '',
-                              gender: '',
-                              fideId: '',
-                              rating: '',
-                              school: '',
-                              club: '',
-                            });
-                          }}
-                        >
-                          Someone else
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <form onSubmit={(e) => void handleSubmit(e)}>
-                    <ParentFormFields
-                      form={form}
-                      categories={categories}
-                      values={values}
-                      onChange={onChange}
-                      fileNames={Object.fromEntries(Object.entries(files).map(([k, v]) => [k, v.name]))}
-                      onFile={(field, file) => void chooseFile(field, file)}
-                      schoolOptions={schoolOptions}
+                <div className="rg-body">
+                  <div className="rg-col">
+                    <EntrySent
+                      registration={submittedReg}
+                      event={event}
+                      category={submittedCategory}
+                      signedIn={Boolean(auth.user)}
+                      onAnother={registerAnother}
                     />
-
-                    {event.entryFeeCents > 0 && (
-                      <div className="rg-payment">
-                        <h3>Entry fee: {formatFee(event.entryFeeCents, event.currency)}</h3>
-                        {event.paymentInstructions && <p className="rg-text">{event.paymentInstructions}</p>}
-                        {event.paymentQrUrl && <img src={event.paymentQrUrl} alt="Organizer payment QR code" />}
-                        <Field
-                          label="Payment receipt"
-                          optional
-                          hint={
-                            files.receipt
-                              ? `Attached: ${files.receipt.name}`
-                              : 'Screenshot or PDF, up to 5 MB. You can also send it later from your account.'
-                          }
-                        >
-                          {(control) => (
-                            <input
-                              {...control}
-                              type="file"
-                              accept={UPLOAD_ACCEPT}
-                              onChange={(e) => void chooseFile('receipt', e.target.files?.[0] ?? null)}
-                            />
-                          )}
-                        </Field>
-                      </div>
-                    )}
-
-                    {submitError && (
-                      <p className="rg-error" role="alert">
-                        {submitError}
-                      </p>
-                    )}
-
-                    <GuardianConsentNotice />
-
-                    <div className="rg-submit">
-                      <Button type="submit" variant="primary" disabled={submitting}>
-                        {submitting ? 'Sending…' : 'Submit entry'}
-                      </Button>
-                    </div>
-                  </form>
-                </section>
+                    {roster}
+                  </div>
+                </div>
+              ) : state === 'closed' ? (
+                <div className="rg-body">
+                  <div className="rg-col">
+                    <RegistrationClosed event={event} now={now} />
+                    {roster}
+                  </div>
+                </div>
+              ) : (
+                <RegistrationForm
+                  event={event}
+                  form={form}
+                  categories={categories}
+                  values={values}
+                  onChange={onChange}
+                  files={files}
+                  onFile={(field, file) => void chooseFile(field, file)}
+                  schoolOptions={schoolOptions}
+                  onSubmit={(e) => void handleSubmit(e)}
+                  submitting={submitting}
+                  error={submitError}
+                  full={state === 'full'}
+                  lead={lead}
+                  idPrefix="rg"
+                  after={roster}
+                />
               )}
 
-              <section className="ui-card rg-card" aria-label="Players on the roster">
-                <h2>Roster ({participants.length})</h2>
-                {participants.length === 0 ? (
-                  <p>No confirmed players yet.</p>
-                ) : (
-                  <table className="rg-roster">
-                    <thead>
-                      <tr>
-                        <th scope="col" className="rg-num">
-                          No.
-                        </th>
-                        <th scope="col">Name</th>
-                        <th scope="col" className="rg-data">
-                          Rating
-                        </th>
-                        <th scope="col" className="rg-data">
-                          FIDE ID
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {participants.map((p, idx) => (
-                        <tr key={p.id}>
-                          <td>{idx + 1}</td>
-                          <td>
-                            <PlayerName name={p.name} />
-                          </td>
-                          <td className="rg-data">{p.rating ?? 'None'}</td>
-                          <td className="rg-data">{p.fideId ?? 'None'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </section>
             </>
           )}
         </main>

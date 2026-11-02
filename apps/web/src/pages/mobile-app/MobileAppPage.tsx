@@ -204,7 +204,7 @@ export default function MobileAppPage() {
             <div className="ma-diff-grid">
               <article className="is-app">
                 <h3>Chess Alokas app</h3>
-                <p className="ma-diff-who">For players and parents. Android, coming soon.</p>
+                <p className="ma-diff-who">For players of any age. Android, coming soon.</p>
                 <ul>
                   <li>Find and register for events</li>
                   <li>Follow every round</li>
