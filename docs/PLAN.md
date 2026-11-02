@@ -28,6 +28,7 @@ Last updated: 2026-11-01. This covers order and gaps. Details stay in `docs/desi
 | K | **Selling:** plan expiry, pass fix, invoicing | **Nobody** | Founder's prices | S-M |
 | L | **Pilot and support:** real event, runbook | **Nobody** | E, F (Floor), J | M |
 | M | **Play Store release** | **Nobody** | Account deletion in app, icon, signing key | M, plus 2+ weeks of testing |
+| N | **Demo tenant** (`docs/DEMO.md`) | Built, loading on production | Migration `036`; the next deploy for admin metrics and friendly messages | S |
 
 ## 2. Order and what ships when
 

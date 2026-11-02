@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 import postgres, { type Sql } from 'postgres';
 import type { Store } from './db.js';
 import { purgeAfterFrom } from './lib/privacyPurge.js';
+import { DEMO_ACCOUNT_LOCKED_MESSAGE } from './demo/constants.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -358,6 +359,9 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (app, opt
 
   app.delete('/me', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.userId) return reply.code(401).send({ error: 'Unauthorized' });
+    if (await opts.store.demo().isAccount(request.userId)) {
+      return reply.code(403).send({ error: DEMO_ACCOUNT_LOCKED_MESSAGE, code: 'DEMO_ACCOUNT' });
+    }
     if (!opts.deleteAuthUser && !getServiceSupabase()) {
       return reply.code(503).send({ error: 'Auth admin not configured' });
     }

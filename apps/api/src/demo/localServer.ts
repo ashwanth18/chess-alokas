@@ -270,7 +270,93 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   send(res, 404, { msg: `stub: no route ${req.method} ${route}` });
 }
 
+/**
+ * Seeds and runs the API in this process, on the one connection PGlite can really serve: its
+ * socket mixes up concurrent queries from a pool, so a separate API process gets random failures.
+ */
+async function serveApi(port: number): Promise<void> {
+  process.env['SUPABASE_URL'] = `http://127.0.0.1:${AUTH_PORT}`;
+  process.env['SUPABASE_SECRET_KEY'] = 'local-stub';
+  process.env['SUPABASE_ANON_KEY'] = 'local-stub';
+  process.env['DEMO_STAFF_PASSWORD'] ??= 'local-staff-password';
+  process.env['DEMO_PLAYER_PASSWORD'] ??= 'local-player-password';
+  const { default: Fastify } = await import('fastify');
+  const { default: cors } = await import('@fastify/cors');
+  const { default: multipart } = await import('@fastify/multipart');
+  const { PostgresStore } = await import('../db.js');
+  const { PostgresCertificateIssueStore } = await import('../certificates/store.js');
+  const { authPlugin } = await import('../auth.js');
+  const routes = {
+    tournaments: await import('../routes/tournaments.js'),
+    import: await import('../routes/import.js'),
+    pairing: await import('../routes/pairing.js'),
+    sync: await import('../routes/sync.js'),
+    certificates: await import('../routes/certificates.js'),
+    publicTables: await import('../routes/publicTables.js'),
+    publicLive: await import('../routes/publicLive.js'),
+    floor: await import('../routes/floor.js'),
+    organizations: await import('../routes/organizations.js'),
+    team: await import('../routes/team.js'),
+    playerProfiles: await import('../routes/playerProfiles.js'),
+    registrations: await import('../routes/registrations.js'),
+    analytics: await import('../routes/publicAnalytics.js'),
+  };
+  const { demoSeed } = await import('./runner.js');
+  const { supabaseAuthAdmin, cliFileStore } = await import('./cliParts.js');
+  const { createClient } = await import('@supabase/supabase-js');
+
+  const store = new PostgresStore(sql);
+  const client = createClient(`http://127.0.0.1:${AUTH_PORT}`, 'local-stub', {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  await demoSeed({
+    ops: store.demo(),
+    auth: supabaseAuthAdmin(client),
+    files: cliFileStore,
+    env: process.env,
+    log: (line) => console.log(line),
+  });
+
+  const app = Fastify({ bodyLimit: 50 * 1024 * 1024 });
+  await app.register(cors, { origin: true });
+  await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });
+  await app.register(authPlugin, { store });
+  await app.register(routes.tournaments.tournamentsPlugin, { store });
+  await app.register(routes.import.importPlugin, { store });
+  await app.register(routes.pairing.pairingPlugin, { store });
+  await app.register(routes.sync.syncPlugin, { store });
+  await app.register(routes.certificates.certificatesPlugin, {
+    store,
+    certificateStore: new PostgresCertificateIssueStore(sql),
+  });
+  await app.register(routes.publicTables.publicTablesPlugin, { store });
+  await app.register(routes.publicLive.publicLivePlugin, { store });
+  await app.register(routes.floor.floorPlugin, { store });
+  await app.register(routes.organizations.organizationsPlugin, { store });
+  await app.register(routes.team.teamPlugin, { store });
+  await app.register(routes.playerProfiles.playerProfilesPlugin, { store });
+  await app.register(routes.registrations.registrationsPlugin, { store });
+  await app.register(routes.analytics.publicAnalyticsPlugin, { store });
+  // Features still being committed register themselves here when their file exists.
+  const corrections = '../routes/resultCorrections.js';
+  const extra = (await import(corrections).catch(() => null)) as {
+    resultCorrectionsPlugin?: Parameters<typeof app.register>[0];
+  } | null;
+  if (extra?.resultCorrectionsPlugin) {
+    await app.register(extra.resultCorrectionsPlugin, { store } as never);
+  }
+  app.get('/health', async () => ({ ok: true }));
+  await app.listen({ port, host: '127.0.0.1' });
+  console.log(`API=http://127.0.0.1:${port}`);
+}
+
 authServer.listen(AUTH_PORT, '127.0.0.1', () => {
+  if (process.argv.includes('--serve')) {
+    void serveApi(Number(process.env['DEMO_LOCAL_API_PORT'] ?? 3199)).catch((err: Error) => {
+      console.error(err);
+      process.exit(1);
+    });
+  }
   console.log(`READY schema=${productionSchema ? 'through-032+036' : 'all'}`);
   console.log(`DATABASE_URL=postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres?sslmode=disable`);
   console.log(`SUPABASE_URL=http://127.0.0.1:${AUTH_PORT}`);

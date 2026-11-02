@@ -20,6 +20,10 @@ import type { Store } from '../db.js';
 import { optionalAuth, requireAuth } from '../auth.js';
 import { rateLimit, type RateLimitBucket } from '../lib/rateLimit.js';
 import { sendResendEmail } from '../lib/resend.js';
+import {
+  DEMO_INVITE_ACCEPT_BLOCKED_MESSAGE,
+  DEMO_INVITE_BLOCKED_MESSAGE,
+} from '../demo/constants.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -258,6 +262,9 @@ export const teamPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) =
       if (isBlocked(org)) {
         return reply.code(403).send({ error: 'This organization cannot invite anyone right now.' });
       }
+      if (org.isDemo) {
+        return reply.code(403).send({ error: DEMO_INVITE_BLOCKED_MESSAGE, code: 'DEMO_ORGANIZATION' });
+      }
       if (!withinSendLimit(request, reply)) return;
 
       const now = new Date();
@@ -305,6 +312,9 @@ export const teamPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) =
       if (!org) return reply.code(404).send({ error: 'Organization not found' });
       if (isBlocked(org)) {
         return reply.code(403).send({ error: 'This organization cannot invite anyone right now.' });
+      }
+      if (org.isDemo) {
+        return reply.code(403).send({ error: DEMO_INVITE_BLOCKED_MESSAGE, code: 'DEMO_ORGANIZATION' });
       }
       if (!withinSendLimit(request, reply)) return;
 
@@ -399,6 +409,9 @@ export const teamPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) =
           error: 'Confirm your email address first, using the link we sent you.',
           code: 'email_unconfirmed',
         });
+      }
+      if (await store.demo().isAccount(request.userId)) {
+        return reply.code(403).send({ error: DEMO_INVITE_ACCEPT_BLOCKED_MESSAGE, code: 'DEMO_ACCOUNT' });
       }
       const result = await store.acceptOrganizationInvite({
         tokenHash: hashInviteToken(parsed.data.token),

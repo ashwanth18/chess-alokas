@@ -7,6 +7,7 @@ import {
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { requireAuth, requirePlatformAdmin } from '../auth.js';
+import { DEMO_ORGANIZATION_BLOCKED_MESSAGE } from '../demo/constants.js';
 
 interface PluginOptions extends FastifyPluginOptions {
   store: Store;
@@ -104,6 +105,9 @@ export const organizationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
       }
       const userId = request.userId ?? DEFAULT_USER_ID;
+      if (await store.demo().isAccount(userId)) {
+        return reply.code(403).send({ error: DEMO_ORGANIZATION_BLOCKED_MESSAGE, code: 'DEMO_ACCOUNT' });
+      }
       const input = parsed.data;
       const now = new Date();
       const nowIso = now.toISOString();

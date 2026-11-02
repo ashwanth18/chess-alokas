@@ -16,6 +16,7 @@ import {
 } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { GuardianConsentNotice } from '../components/LegalLinks';
+import { DemoNotice } from '../components/DemoNotice';
 import { trackPageView } from '../lib/pageAnalytics';
 import { BrandCrown } from '../ui/BrandCrown';
 import { Button, Field, PlayerName, buttonClass } from '../ui';
@@ -315,6 +316,12 @@ export default function EventRegistrationPage() {
         </header>
 
         <main className="rg-main">
+          {event?.isDemo && (
+            <DemoNotice>
+              This is a demo event. It is fictional: please don’t attend or pay. Entries are only
+              saved from a demo player account.
+            </DemoNotice>
+          )}
           {loading ? (
             <p role="status">Loading the event…</p>
           ) : error || !event ? (

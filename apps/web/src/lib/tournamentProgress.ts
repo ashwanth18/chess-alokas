@@ -318,8 +318,8 @@ export function getTournamentInstructions(
       categoryNames,
     );
     if (pendingDetail) playDescription += ` ${pendingDetail}`;
-    const pinOk =
-      !!tournament.arbiterPin && tournament.arbiterPinRound === caps.pendingResultsRound;
+    // The PIN itself stays on the device that issued it, so the round alone says one exists.
+    const pinOk = tournament.arbiterPinRound === caps.pendingResultsRound;
     if (!pinOk && qrReady) {
       playDescription += ' Floor PIN missing — use Issue round PIN on Pairings.';
     }

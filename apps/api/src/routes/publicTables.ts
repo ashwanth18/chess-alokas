@@ -31,10 +31,12 @@ const CARD_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
 const ALERT_ATTEMPTS = new Map<string, { count: number; resetAt: number }>();
 
 function sessionFromRequest(request: { headers: Record<string, unknown> }): string | null {
-  const auth = String(request.headers['authorization'] ?? '');
-  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  // This header first: someone signed in also sends their sign-in token as a bearer token, and
+  // reading that instead would keep asking them for the PIN.
   const header = request.headers['x-arbiter-session'];
-  return typeof header === 'string' ? header : null;
+  if (typeof header === 'string' && header) return header;
+  const auth = String(request.headers['authorization'] ?? '');
+  return auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null;
 }
 
 function baseView(

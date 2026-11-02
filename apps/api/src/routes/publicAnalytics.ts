@@ -3,6 +3,8 @@ import { redactPagePath } from '../lib/logRedaction.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDatabaseSql } from '../auth.js';
+import type { Store } from '../db.js';
+import { isDemoPageView } from '../demo/guards.js';
 
 const ALLOWED_ROUTE_KEYS = new Set([
   'live',
@@ -95,7 +97,7 @@ function referrerHost(header: string | undefined): string | null {
   }
 }
 
-export const publicAnalyticsPlugin: FastifyPluginAsync = async (app) => {
+export const publicAnalyticsPlugin: FastifyPluginAsync<{ store?: Store }> = async (app, opts) => {
   app.post('/public/analytics/pageview', async (request, reply) => {
     const parsed = BodySchema.safeParse(request.body ?? {});
     if (!parsed.success) {
@@ -109,6 +111,14 @@ export const publicAnalyticsPlugin: FastifyPluginAsync = async (app) => {
     const sql = getDatabaseSql();
     if (!sql) {
       return reply.code(204).send();
+    }
+
+    try {
+      if (opts.store && (await isDemoPageView(opts.store, { path, tournamentId, liveToken }))) {
+        return reply.code(204).send();
+      }
+    } catch (err) {
+      request.log.warn({ err }, 'demo pageview check failed');
     }
 
     const ua = request.headers['user-agent'];

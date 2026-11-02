@@ -9,6 +9,8 @@ import {
 } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { routeKeyFromAppPath, trackPageView } from '../lib/pageAnalytics';
+import { isDemoUser } from '../lib/demoAccount';
+import { DemoNotice } from './DemoNotice';
 import { useDeskSync } from '../shells/deskSync';
 import { PENDING_SIGNUP_STORAGE_KEY } from '../lib/pendingSignup';
 import { BrandCrown } from '../ui/BrandCrown';
@@ -535,6 +537,12 @@ export default function Layout() {
       )}
 
       <main className="page-content">
+        {isDemoUser(auth.user) && (
+          <DemoNotice>
+            You are on a shared demo account. Everything here is fictional, nothing you do emails
+            anyone, and a reset puts it all back.
+          </DemoNotice>
+        )}
         <Outlet />
       </main>
 

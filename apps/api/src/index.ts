@@ -107,7 +107,7 @@ await app.register(teamPlugin, { store });
 await app.register(playerProfilesPlugin, { store });
 await app.register(registrationsPlugin, { store });
 await app.register(adminPlugin);
-await app.register(publicAnalyticsPlugin);
+await app.register(publicAnalyticsPlugin, { store });
 
 app.get('/health', async () => {
   const mode = process.env['DATABASE_URL'] ? 'postgres' : 'memory';

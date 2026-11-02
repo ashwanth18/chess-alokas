@@ -1,4 +1,5 @@
 import { resolveApiBaseUrl } from '../api/client';
+import { analyticsSuppressed } from './pageAnalytics';
 
 export type ProductEventName = 'download_click' | 'desktop_launch' | 'desktop_heartbeat';
 
@@ -70,6 +71,7 @@ function localeAndZone(): { locale: string | null; timezone: string | null } {
 }
 
 export function trackProductEvent(args: ProductEventArgs): void {
+  if (analyticsSuppressed()) return;
   const { locale, timezone } = localeAndZone();
   const isDesktop = Boolean(window.desktop?.isDesktop);
   const payload = JSON.stringify({

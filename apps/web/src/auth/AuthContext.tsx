@@ -18,6 +18,8 @@ import { authRedirectTo, supabase, supabaseConfigured } from '../lib/supabase';
 import { persistOwnerId } from '../lib/ownerIdSink';
 import { sentryEnabled } from '../instrument';
 import { clearBootIssue, reportBootIssue } from '../lib/bootDiagnostics';
+import { DEMO_ACCOUNT_EMAIL_REFUSED, DEMO_ACCOUNT_LOCKED, isDemoEmail, isDemoUser } from '../lib/demoAccount';
+import { setAnalyticsSuppressed } from '../lib/pageAnalytics';
 
 interface AuthContextValue {
   configured: boolean;
@@ -123,6 +125,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [offlineUser, setOfflineUser] = useState<User | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+
+  useEffect(() => {
+    setAnalyticsSuppressed(isDemoUser(session?.user));
+  }, [session?.user]);
 
   const refreshProfile = useCallback(async () => {
     if (!supabase || !session?.user) {
@@ -352,6 +358,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async signInWithOtp(email) {
         if (!supabase) return { error: 'Auth is not configured' };
+        if (isDemoEmail(email)) return { error: DEMO_ACCOUNT_EMAIL_REFUSED };
         const { error } = await supabase.auth.signInWithOtp({
           email,
           options: { emailRedirectTo: authRedirectTo(), shouldCreateUser: true },
@@ -369,6 +376,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async resetPassword(email) {
         if (!supabase) return { error: 'Auth is not configured' };
+        if (isDemoEmail(email)) return { error: DEMO_ACCOUNT_EMAIL_REFUSED };
         if (isDesktopApp()) return { error: DESKTOP_RESET_MESSAGE };
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: authRedirectTo('/auth/reset'),
@@ -377,6 +385,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async updatePassword(password) {
         if (!supabase) return { error: 'Auth is not configured' };
+        if (isDemoUser(session?.user)) return { error: DEMO_ACCOUNT_LOCKED };
         const { error } = await supabase.auth.updateUser({ password });
         return { error: error?.message };
       },

@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { resolveApiBaseUrl } from '../api/client';
 import { copySupportInfo } from '../lib/supportInfo';
+import { DEMO_ACCOUNT_LOCKED, isDemoUser } from '../lib/demoAccount';
+import { DemoNotice } from '../components/DemoNotice';
 
 interface SessionRow {
   id: string;
@@ -254,22 +256,26 @@ export default function AccountPage() {
 
         <section className="account-panel">
           <h3>Security</h3>
-          <form className="auth-form" onSubmit={(e) => void savePassword(e)}>
-            <label>
-              New password
-              <input
-                className="input"
-                type="password"
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </label>
-            <button className="btn btn-outline" type="submit" disabled={busy}>
-              Update password
-            </button>
-          </form>
+          {isDemoUser(auth.user) ? (
+            <DemoNotice>{DEMO_ACCOUNT_LOCKED}</DemoNotice>
+          ) : (
+            <form className="auth-form" onSubmit={(e) => void savePassword(e)}>
+              <label>
+                New password
+                <input
+                  className="input"
+                  type="password"
+                  minLength={8}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </label>
+              <button className="btn btn-outline" type="submit" disabled={busy}>
+                Update password
+              </button>
+            </form>
+          )}
           <div className="account-actions">
             <button
               type="button"
@@ -332,6 +338,7 @@ export default function AccountPage() {
           </button>
         </section>
 
+        {!isDemoUser(auth.user) && (
         <section className="account-panel danger">
           <h3>Danger zone</h3>
           <p className="form-hint">
@@ -383,6 +390,7 @@ export default function AccountPage() {
             Delete account
           </button>
         </section>
+        )}
       </div>
 
       {error && <div className="form-error">{error}</div>}

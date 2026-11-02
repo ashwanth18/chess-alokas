@@ -1,3 +1,5 @@
+import { DEMO_EMAIL_BLOCKED_MESSAGE, isDemoEmailAddress } from '../demo/constants.js';
+
 export const MAX_EMAIL_PDF_BYTES = 8 * 1024 * 1024;
 
 export async function sendResendEmail(opts: {
@@ -10,6 +12,9 @@ export async function sendResendEmail(opts: {
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const apiKey = process.env['RESEND_API_KEY'];
   const from = process.env['RESEND_FROM'] ?? 'Chess Alokas <onboarding@resend.dev>';
+  if (isDemoEmailAddress(opts.to)) {
+    return { ok: false, error: DEMO_EMAIL_BLOCKED_MESSAGE };
+  }
   if (!apiKey) {
     return { ok: false, error: 'RESEND_API_KEY is not configured' };
   }

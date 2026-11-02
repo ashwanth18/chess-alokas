@@ -17,6 +17,7 @@ import {
 import type { Store } from '../db.js';
 import { playerLimitFor, registrationTakesReceipt } from '../db.js';
 import { optionalAuth, requireAuth } from '../auth.js';
+import { demoEntryRefusal } from '../demo/guards.js';
 import { rateLimit, type RateLimitBucket } from '../lib/rateLimit.js';
 import {
   MAX_RECEIPT_BYTES,
@@ -217,8 +218,9 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       lng?: string;
       radiusKm?: string;
       search?: string;
+      demo?: string;
     };
-  }>('/public/events', async (request) => {
+  }>('/public/events', { preHandler: optionalAuth }, async (request) => {
     const lat = request.query.lat != null && request.query.lat !== '' ? Number(request.query.lat) : undefined;
     const lng = request.query.lng != null && request.query.lng !== '' ? Number(request.query.lng) : undefined;
     const radiusKm =
@@ -232,6 +234,10 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       lng: lng != null && Number.isFinite(lng) ? lng : undefined,
       radiusKm: radiusKm != null && Number.isFinite(radiusKm) ? radiusKm : undefined,
       search,
+      // demo=1 and demo accounts see demo events even while they're off for the public.
+      includeDemo:
+        request.query.demo === '1' ||
+        Boolean(request.userId && (await store.demo().isAccount(request.userId))),
     });
     return { events };
   });
@@ -277,6 +283,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
 
     return {
       event: {
+        ...(org?.isDemo ? { isDemo: true } : {}),
         id: tournament.id,
         publicSlug: tournament.publicSlug ?? null,
         name: tournament.name,
@@ -381,6 +388,10 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         : null;
       if (isBlockedOrganization(eventOrg)) {
         return reply.code(404).send({ error: 'Event not found' });
+      }
+      const demoRefusal = await demoEntryRefusal(store, tournament, request.userId ?? null);
+      if (demoRefusal) {
+        return reply.code(403).send({ error: demoRefusal, code: 'DEMO_EVENT' });
       }
       if ((tournament.entryFeeCents ?? 0) > 0 && !eventOrg?.canAcceptPaidRegistrations) {
         return reply.code(403).send({

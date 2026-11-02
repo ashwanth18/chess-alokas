@@ -60,6 +60,9 @@ import {
   type SyncPushResult,
   type SyncResultEvent,
 } from './lib/syncEngine.js';
+import { createMemoryDemoOps, type MemoryStoreInternals } from './demo/memoryOps.js';
+import { createPostgresDemoOps } from './demo/postgresOps.js';
+import type { DemoOps } from './demo/types.js';
 import {
   roundGamesToUndo,
   roundUndoNote,
@@ -108,6 +111,9 @@ export interface SyncPullResult {
 // ---------------------------------------------------------------------------
 
 export interface Store {
+  /** The fictional tenant used for showing the product: docs/DEMO.md. */
+  demo(): DemoOps;
+
   // Tournaments
   listTournaments(ownerId?: string | null): Promise<Tournament[]>;
   getTournament(id: string): Promise<Tournament | null>;
@@ -344,6 +350,8 @@ export interface Store {
     lng?: number;
     radiusKm?: number;
     search?: string;
+    /** Shows demo events even while they are switched off for the public. */
+    includeDemo?: boolean;
   }): Promise<PublicEventSummary[]>;
   listTournamentRegistrations(tournamentId: string): Promise<TournamentRegistration[]>;
   listUserRegistrations(userId: string): Promise<TournamentRegistration[]>;
@@ -705,6 +713,13 @@ export class MemoryStore implements Store {
     note: string | null;
     createdAt: string;
   }> = [];
+
+  private demoOps: DemoOps | null = null;
+
+  demo(): DemoOps {
+    this.demoOps ??= createMemoryDemoOps(this as unknown as MemoryStoreInternals);
+    return this.demoOps;
+  }
 
   /** Register a certificate issue in memory so getPlayerCareerDashboard can surface it in offline/unit tests. */
   registerCertificateIssue(issue: CertificateIssue): void {
@@ -2090,6 +2105,7 @@ export class MemoryStore implements Store {
   async listAllOrganizationsForAdmin(): Promise<AdminOrganizationRow[]> {
     const rows: AdminOrganizationRow[] = [];
     for (const org of this.organizations.values()) {
+      if (org.isDemo) continue;
       const memberIds = new Set<string>();
       if (org.createdBy) memberIds.add(org.createdBy);
       for (const m of this.organizationMembers.values()) {
@@ -2372,6 +2388,7 @@ export class MemoryStore implements Store {
     lng?: number;
     radiusKm?: number;
     search?: string;
+    includeDemo?: boolean;
   }): Promise<PublicEventSummary[]> {
     const q = filters?.search?.trim().toLowerCase() || '';
     const hasCoords =
@@ -2388,7 +2405,9 @@ export class MemoryStore implements Store {
     for (const t of this.tournaments.values()) {
       if (t.deletedAt || !t.isPublishedGlobal) continue;
       const org = t.organizationId ? (this.organizations.get(t.organizationId) ?? null) : null;
-      if (!org || org.verificationStatus !== 'verified' || !org.canPublishGlobal) continue;
+      if (!org || org.verificationStatus !== 'verified') continue;
+      // canPublishGlobal is the switch for demo events too. includeDemo looks past it.
+      if (!org.canPublishGlobal && !(org.isDemo && filters?.includeDemo)) continue;
       const orgName = org?.name ?? null;
       if (q) {
         const hay = [
@@ -2448,6 +2467,7 @@ export class MemoryStore implements Store {
         descriptionMd: t.descriptionMd ?? null,
         organizationName: orgName,
         categories,
+        ...(org.isDemo ? { isDemo: true } : {}),
       });
     }
 
@@ -3046,6 +3066,7 @@ interface TournamentRegistrationRow extends GuardianConsentColumns {
 }
 
 interface OrganizationRow {
+  is_demo?: boolean | null;
   id: string;
   name: string;
   slug: string;
@@ -3384,6 +3405,7 @@ function rowToOrganization(row: OrganizationRow): Organization {
     verifiedBy: row.verified_by ?? null,
     createdAt: toIso(row.created_at)!,
     updatedAt: toIso(row.updated_at)!,
+    ...(row.is_demo ? { isDemo: true } : {}),
   };
 }
 
@@ -3515,6 +3537,10 @@ function rowToOrganizationInvite(row: OrganizationInviteRow): OrganizationInvite
 
 export class PostgresStore implements Store {
   private readonly sql: Sql;
+
+  demo(): DemoOps {
+    return createPostgresDemoOps(this.sql);
+  }
 
   /** Tests pass their own connection; everything else passes a URL. */
   constructor(database: string | Sql) {
@@ -5542,6 +5568,7 @@ export class PostgresStore implements Store {
         u.email AS owner_email
       FROM organizations o
       LEFT JOIN auth.users u ON u.id = o.created_by
+      WHERE NOT COALESCE((to_jsonb(o)->>'is_demo')::boolean, false)
       ORDER BY o.created_at DESC
     `;
     return rows.map((r) => ({
@@ -5932,6 +5959,7 @@ export class PostgresStore implements Store {
     lng?: number;
     radiusKm?: number;
     search?: string;
+    includeDemo?: boolean;
   }): Promise<PublicEventSummary[]> {
     const q = filters?.search?.trim().toLowerCase() || '';
     const hasCoords =
@@ -5947,12 +5975,14 @@ export class PostgresStore implements Store {
     const rows = await this.sql<
       (TournamentRow & {
         organization_name: string | null;
+        organization_is_demo: boolean;
         registered_count: string;
       })[]
     >`
       SELECT
         t.*,
         o.name AS organization_name,
+        COALESCE((to_jsonb(o)->>'is_demo')::boolean, false) AS organization_is_demo,
         (
           SELECT COUNT(*)::text
           FROM participants p
@@ -5963,7 +5993,10 @@ export class PostgresStore implements Store {
       WHERE t.deleted_at IS NULL
         AND t.is_published_global = true
         AND o.verification_status = 'verified'
-        AND o.can_publish_global = true
+        AND (
+          o.can_publish_global = true
+          OR (COALESCE((to_jsonb(o)->>'is_demo')::boolean, false) AND ${filters?.includeDemo === true})
+        )
       ORDER BY t.date ASC NULLS LAST, t.updated_at DESC
     `;
 
@@ -6038,6 +6071,7 @@ export class PostgresStore implements Store {
         descriptionMd: t.descriptionMd ?? null,
         organizationName: orgName,
         categories: categoriesByTournament.get(t.id) ?? [],
+        ...(r.organization_is_demo ? { isDemo: true } : {}),
       });
     }
 

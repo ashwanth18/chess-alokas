@@ -8,6 +8,8 @@ import {
 import { readCertificatePdf, saveCertificatePdf } from '../certificates/storage.js';
 import { authEnabled, requireAuth } from '../auth.js';
 import { MAX_EMAIL_PDF_BYTES, sendResendEmail } from '../lib/resend.js';
+import { DEMO_EMAIL_BLOCKED_MESSAGE } from '../demo/constants.js';
+import { isDemoTournament } from '../demo/guards.js';
 import {
   DEFAULT_CERT_EMAIL_BODY,
   DEFAULT_CERT_EMAIL_SUBJECT,
@@ -294,6 +296,16 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
         return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
       }
 
+      if (await isDemoTournament(tournamentStore, tournament)) {
+        return {
+          sent: false,
+          simulated: true,
+          attachedPdf: false,
+          to: parsed.data.to,
+          message: DEMO_EMAIL_BLOCKED_MESSAGE,
+        };
+      }
+
       // With auth on, a test goes only to the sender's own confirmed address. Otherwise any
       // account could use the platform's domain to mail strangers.
       if (authEnabled() || request.confirmedEmail) {
@@ -402,6 +414,21 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
         targets = all.filter((i) => i.status !== 'pending');
       } else {
         targets = all.filter((i) => i.status === 'stored' || i.status === 'failed');
+      }
+
+      if (await isDemoTournament(tournamentStore, tournament)) {
+        return {
+          sent: 0,
+          failed: 0,
+          simulated: true,
+          message: DEMO_EMAIL_BLOCKED_MESSAGE,
+          results: targets.map((i) => ({
+            id: i.id,
+            name: i.recipientName,
+            email: i.recipientEmail?.trim() || null,
+            status: 'simulated',
+          })),
+        };
       }
 
       const bulkOrg = tournament.organizationId

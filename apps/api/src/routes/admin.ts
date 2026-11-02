@@ -209,6 +209,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
             ) AS participant_count
           FROM profiles p
           JOIN auth.users u ON u.id = p.id
+          WHERE p.id NOT IN (SELECT user_id FROM demo_accounts)
           ORDER BY p.created_at ASC
         `;
 
@@ -216,6 +217,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           SELECT status, COUNT(*)::text AS count
           FROM tournaments
           WHERE deleted_at IS NULL
+            AND id NOT IN (SELECT id FROM demo_tournament_ids)
           GROUP BY status
         `;
 
@@ -233,47 +235,61 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           }[]
         >`
           SELECT
-            (SELECT COUNT(*)::text FROM profiles) AS users,
-            (SELECT COUNT(*)::text FROM tournaments WHERE deleted_at IS NULL) AS tournaments,
+            (
+              SELECT COUNT(*)::text FROM profiles
+              WHERE id NOT IN (SELECT user_id FROM demo_accounts)
+            ) AS users,
+            (
+              SELECT COUNT(*)::text FROM tournaments
+              WHERE deleted_at IS NULL AND id NOT IN (SELECT id FROM demo_tournament_ids)
+            ) AS tournaments,
             (
               SELECT COUNT(*)::text
               FROM tournaments
               WHERE deleted_at IS NULL AND public_enabled = true
+                AND id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS public_live,
             (
               SELECT COUNT(*)::text
               FROM participants
               WHERE deleted_at IS NULL
+                AND tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS participants,
             (
               SELECT COUNT(*)::text
               FROM games
               WHERE deleted_at IS NULL
+                AND tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS games,
             (
               SELECT COUNT(*)::text
               FROM games
               WHERE deleted_at IS NULL AND result = 'pending'
+                AND tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS games_pending,
             (
               SELECT COUNT(*)::text
               FROM games
               WHERE deleted_at IS NULL AND result <> 'pending'
+                AND tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS games_finished,
             (
               SELECT COUNT(*)::text
               FROM tournaments
               WHERE deleted_at IS NULL AND COALESCE(table_count, 0) > 0
+                AND id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS floor_tournaments,
             (
               SELECT COUNT(DISTINCT tournament_id)::text
               FROM certificate_issues
+              WHERE tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS tournaments_with_certs
         `;
 
         const certRows = await sql<{ status: string; count: string }[]>`
           SELECT status, COUNT(*)::text AS count
           FROM certificate_issues
+          WHERE tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
           GROUP BY status
         `;
 
@@ -281,6 +297,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           SELECT card_type, COUNT(*)::text AS count
           FROM game_cards
           WHERE deleted_at IS NULL
+            AND tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
           GROUP BY card_type
         `;
 
@@ -288,6 +305,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           SELECT actor_role, COUNT(*)::text AS count
           FROM game_result_events
           WHERE created_at >= now() - interval '7 days'
+            AND tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
           GROUP BY actor_role
         `;
 
@@ -314,11 +332,13 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
               SELECT COUNT(*)::text
               FROM profiles p
               WHERE date_trunc('week', p.created_at)::date = w.week_start
+                AND p.id NOT IN (SELECT user_id FROM demo_accounts)
             ) AS users,
             (
               SELECT COUNT(*)::text
               FROM game_result_events e
               WHERE date_trunc('week', e.created_at)::date = w.week_start
+                AND e.tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS result_events,
             (
               SELECT COUNT(*)::text
@@ -329,6 +349,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
               SELECT COUNT(*)::text
               FROM certificate_issues c
               WHERE date_trunc('week', c.created_at)::date = w.week_start
+                AND c.tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS certificates
           FROM weeks w
           ORDER BY w.week_start ASC
@@ -417,6 +438,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           FROM tournaments t
           LEFT JOIN auth.users u ON u.id = t.owner_id
           WHERE t.deleted_at IS NULL
+            AND t.id NOT IN (SELECT id FROM demo_tournament_ids)
           ORDER BY t.updated_at DESC
           LIMIT 20
         `;

@@ -907,8 +907,10 @@ export default function CertificatesPage() {
         throw new Error(emailRes.error ?? 'Email failed');
       }
       setEmailResults(emailRes.data.results);
-      setIssuedSummary(`Emailed ${emailRes.data.sent}, failed ${emailRes.data.failed}`);
-      setMessage(`Emailed ${emailRes.data.sent}, failed ${emailRes.data.failed}`);
+      const emailSummary =
+        emailRes.data.message ?? `Emailed ${emailRes.data.sent}, failed ${emailRes.data.failed}`;
+      setIssuedSummary(emailSummary);
+      setMessage(emailSummary);
       setConfirmOpen(false);
       await refreshIssues();
     } catch (err) {
@@ -941,9 +943,10 @@ export default function CertificatesPage() {
         throw new Error(res.error ?? 'Test email failed');
       }
       setMessage(
-        res.data.attachedPdf
+        res.data.message ??
+        (res.data.attachedPdf
           ? `Test email sent to ${res.data.to} (sample PDF attached).`
-          : `Test email sent to ${res.data.to} (no stored PDF to attach yet).`,
+          : `Test email sent to ${res.data.to} (no stored PDF to attach yet).`),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Test email failed');

@@ -649,6 +649,8 @@ export const OrganizationSchema = z.object({
   eventCreditsRemaining: z.number().int().nonnegative().default(0),
   canPublishGlobal: z.boolean().default(false),
   canAcceptPaidRegistrations: z.boolean().default(false),
+  /** The fictional tenant for showing the product. Only the demo command sets it: docs/DEMO.md. */
+  isDemo: z.boolean().optional(),
   paymentInstructions: z.string().nullable().optional(),
   paymentQrStoragePath: z.string().nullable().optional(),
   createdBy: z.string().uuid().nullable().optional(),
@@ -946,6 +948,8 @@ export const TournamentRegistrationSchema = z.object({
 export type TournamentRegistration = z.infer<typeof TournamentRegistrationSchema>;
 
 export const PublicEventSummarySchema = z.object({
+  /** A fictional event from the demo tenant. Absent on real events and older servers. */
+  isDemo: z.boolean().optional(),
   id: z.string().uuid(),
   publicSlug: z.string().nullable().optional(),
   name: z.string().min(1),

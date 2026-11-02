@@ -1,6 +1,8 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { PublicEventSummary } from '@chess-alokas/shared';
+import { DemoBadge, DemoNotice } from '../components/DemoNotice';
+import { isDemoUser } from '../lib/demoAccount';
 import { apiListPublicEvents } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { trackPageView } from '../lib/pageAnalytics';
@@ -21,6 +23,8 @@ function formatFee(cents: number, currency = 'MYR'): string {
 
 export default function DiscoverEventsPage() {
   const auth = useAuth();
+  const [searchParams] = useSearchParams();
+  const showDemo = searchParams.get('demo') === '1';
   const [events, setEvents] = useState<PublicEventSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +62,7 @@ export default function DiscoverEventsPage() {
         lng: effectiveLng,
         radiusKm: effectiveRadius,
         search: effectiveSearch,
+        demo: showDemo,
       });
       setLoading(false);
       if (!res.ok) {
@@ -66,7 +71,7 @@ export default function DiscoverEventsPage() {
       }
       setEvents(res.data.events);
     },
-    [coords, radiusKm, search],
+    [coords, radiusKm, search, showDemo],
   );
 
   useEffect(() => {
@@ -167,6 +172,13 @@ export default function DiscoverEventsPage() {
               </div>
             )}
           </div>
+
+          {(showDemo || isDemoUser(auth.user)) && (
+            <DemoNotice>
+              Showing demo events too. They are fictional, and marked Demo: nobody should attend,
+              pay or enter one as if it were real.
+            </DemoNotice>
+          )}
 
           {/* Search & GPS Nearby Controls */}
           <section className="admin-panel discover-filter-bar" aria-label="Search and GPS filters">
@@ -282,6 +294,7 @@ export default function DiscoverEventsPage() {
                         {ev.organizationName && (
                           <span className="discover-org-label">{ev.organizationName}</span>
                         )}
+                        {ev.isDemo && <DemoBadge />}
                         <h3 className="discover-event-title">{ev.name}</h3>
                       </div>
                       <div className="discover-badges">

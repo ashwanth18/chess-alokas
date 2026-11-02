@@ -348,7 +348,7 @@ function profileFor(
   accountUserId: string,
   relationship: PlayerProfile['relationship'],
   isPrimary: boolean,
-  email: string,
+  email: string | null,
   nowIso: string,
 ): PlayerProfile {
   return {
@@ -497,7 +497,10 @@ function addEntries(
   entries.forEach((entry, index) => {
     const createdAt = minutesAgo(input.now, (entries.length - index) * 190);
     const id = randomUUID();
-    const email = entry.profile?.email ?? demoEmailFor(entry.person, domain);
+    const email =
+      entry.submittedBy === input.accounts.parent.userId
+        ? input.accounts.parent.email
+        : (entry.profile?.email ?? demoEmailFor(entry.person, domain));
     let participantId: string | null = null;
     if (entry.status === 'approved') {
       const participant = makeParticipant(
@@ -625,8 +628,10 @@ export async function buildDemoPlan(input: DemoPlanInput): Promise<DemoPlan> {
     isDemo: true,
   };
 
-  const ainaProfile = profileFor(AINA, accounts.parent.userId, 'child', true, accounts.parent.email, nowIso);
-  const haziqProfile = profileFor(HAZIQ, accounts.parent.userId, 'child', false, accounts.parent.email, nowIso);
+  // No email on the children's profiles: certificates matched by email would show one child's in
+  // the other's vault, as both are addressed to their parent.
+  const ainaProfile = profileFor(AINA, accounts.parent.userId, 'child', true, null, nowIso);
+  const haziqProfile = profileFor(HAZIQ, accounts.parent.userId, 'child', false, null, nowIso);
   const priyaProfile = profileFor(PRIYA, accounts.teen.userId, 'self', true, accounts.teen.email, nowIso);
   const linked = (person: DemoPerson): Partial<Participant> => {
     if (person === AINA) return { playerProfileId: ainaProfile.id, email: accounts.parent.email };
@@ -748,7 +753,7 @@ export async function buildDemoPlan(input: DemoPlanInput): Promise<DemoPlan> {
       name: 'Terbuka Junior Kuala Lumpur',
       date: dayOffset(now, 17),
       rounds: 6,
-      status: 'ready',
+      status: 'draft',
       publicSlug: DEMO_LINKS.slugs.kualaLumpur,
       isPublishedGlobal: true,
       registrationOpen: true,
@@ -799,7 +804,7 @@ export async function buildDemoPlan(input: DemoPlanInput): Promise<DemoPlan> {
       name: 'Rapid Percuma Pulau Pinang',
       date: dayOffset(now, 24),
       rounds: 5,
-      status: 'ready',
+      status: 'draft',
       publicSlug: DEMO_LINKS.slugs.penang,
       isPublishedGlobal: true,
       registrationOpen: true,
@@ -836,7 +841,7 @@ export async function buildDemoPlan(input: DemoPlanInput): Promise<DemoPlan> {
       name: 'Cheltenham Rapid Morning',
       date: dayOffset(now, 12),
       rounds: 5,
-      status: 'ready',
+      status: 'draft',
       publicSlug: DEMO_LINKS.slugs.cheltenham,
       isPublishedGlobal: true,
       registrationOpen: true,

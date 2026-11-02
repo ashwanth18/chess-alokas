@@ -327,6 +327,9 @@ export async function apiEmailCertificates(
   return req<{
     sent: number;
     failed: number;
+    /** Set for the demo tenant, which sends nothing. */
+    simulated?: boolean;
+    message?: string;
     results: Array<{
       id: string;
       name: string;
@@ -344,7 +347,7 @@ export async function apiEmailCertificateTest(
   tournamentId: string,
   body: { to: string; subject?: string; body?: string; issueId?: string },
 ) {
-  return req<{ sent: boolean; attachedPdf: boolean; to: string }>(
+  return req<{ sent: boolean; attachedPdf: boolean; to: string; simulated?: boolean; message?: string }>(
     `/tournaments/${tournamentId}/certificates/email-test`,
     {
       method: 'POST',
@@ -1112,6 +1115,7 @@ export async function apiDownloadCertificatePdf(
 
 export type PublicEventDetailResponse = {
   event: {
+    isDemo?: boolean;
     id: string;
     publicSlug: string | null;
     name: string;
@@ -1168,8 +1172,10 @@ export async function apiListPublicEvents(params?: {
   lng?: number | null;
   radiusKm?: number | null;
   search?: string | null;
+  demo?: boolean;
 }) {
   const qs = new URLSearchParams();
+  if (params?.demo) qs.set('demo', '1');
   if (params?.lat != null && Number.isFinite(params.lat)) qs.set('lat', String(params.lat));
   if (params?.lng != null && Number.isFinite(params.lng)) qs.set('lng', String(params.lng));
   if (params?.radiusKm != null && Number.isFinite(params.radiusKm) && params.radiusKm > 0) {

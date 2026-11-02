@@ -27,8 +27,19 @@ type TrackArgs = {
 
 let lastKey = '';
 let lastAt = 0;
+let suppressed = false;
+
+/** A demo account's activity isn't real use of the product. */
+export function setAnalyticsSuppressed(value: boolean): void {
+  suppressed = value;
+}
+
+export function analyticsSuppressed(): boolean {
+  return suppressed;
+}
 
 export function trackPageView(args: TrackArgs): void {
+  if (suppressed) return;
   const path = args.path.slice(0, 500);
   const dedupe = `${args.routeKey}|${path}`;
   const now = Date.now();

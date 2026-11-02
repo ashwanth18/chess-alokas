@@ -3041,7 +3041,9 @@ export default function TournamentPage() {
                         </p>
                       ) : (
                         <p className="form-hint stage-banner-warn">
-                          No PIN for Round {tournament.currentRound} yet.
+                          {tournament.arbiterPinRound === tournament.currentRound
+                            ? `A PIN for Round ${tournament.currentRound} was issued elsewhere, and only its hash is kept. Issue a new one to see it here.`
+                            : `No PIN for Round ${tournament.currentRound} yet.`}
                         </p>
                       )}
                     </div>
