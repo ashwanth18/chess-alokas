@@ -54,6 +54,7 @@ export default function CertificateDesignerCanvas({
     null,
   );
   const viewportRef = useRef<HTMLDivElement>(null);
+  const fittedRef = useRef(false);
 
   // Base display width in CSS px (page then scales with zoom)
   const baseWidth = 720;
@@ -127,6 +128,11 @@ export default function CertificateDesignerCanvas({
         canvas.height = viewport.height;
         renderTask = page.render({ canvasContext: ctx, viewport });
         await renderTask.promise;
+        // Start fitted to the box, so a phone or a narrow column shows the whole page.
+        if (!cancelled && !fittedRef.current) {
+          fittedRef.current = true;
+          fitWidth();
+        }
       } catch (err) {
         if (!cancelled) {
           setRenderError(err instanceof Error ? err.message : 'Failed to render PDF');
@@ -237,39 +243,53 @@ export default function CertificateDesignerCanvas({
   }
 
   return (
-    <div className="cert-designer">
-      <div className="cert-zoom-bar">
-        <button type="button" className="btn btn-sm btn-outline" onClick={() => setZoom((z) => Math.max(0.35, z - 0.15))}>
-          −
-        </button>
-        <span className="cert-zoom-label">{Math.round(zoom * 100)}%</span>
-        <button type="button" className="btn btn-sm btn-outline" onClick={() => setZoom((z) => Math.min(3, z + 0.15))}>
-          +
-        </button>
-        <button type="button" className="btn btn-sm btn-ghost" onClick={fitWidth}>
+    <div className="cw-dz">
+      <div className="cw-dz__bar">
+        <span className="cw-dz__zoom" role="group" aria-label="Zoom">
+          <button
+            type="button"
+            className="ui-btn ui-btn--sm"
+            aria-label="Zoom out"
+            onClick={() => setZoom((z) => Math.max(0.35, z - 0.15))}
+          >
+            -
+          </button>
+          <span className="cw-dz__pct ui-num" aria-live="polite">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            className="ui-btn ui-btn--sm"
+            aria-label="Zoom in"
+            onClick={() => setZoom((z) => Math.min(3, z + 0.15))}
+          >
+            +
+          </button>
+        </span>
+        <button type="button" className="ui-btn ui-btn--sm ui-btn--quiet" onClick={fitWidth}>
           Fit width
         </button>
-        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setZoom(1)}>
-          100%
+        <button type="button" className="ui-btn ui-btn--sm ui-btn--quiet" onClick={() => setZoom(1)}>
+          Actual size
         </button>
-        <span className="form-hint cert-zoom-hint">
-          Drag a column onto the page to preview its size · click a field to resize
+        <span className="cw-small cw-dz__hint">
+          Click the page to place the chosen field. Drag a field to move it.
         </span>
       </div>
 
       <div
         ref={viewportRef}
-        className={`cert-viewport ${spaceDown ? 'panning' : ''}`}
+        className={`cw-dz__viewport${spaceDown ? ' is-panning' : ''}`}
         onMouseDown={onViewportMouseDown}
         onWheel={onWheel}
       >
         <div
-          className="cert-page-stage"
+          className="cw-dz__stage"
           style={{ width: displayWidth, height: displayHeight }}
         >
           <div
             ref={pageRef}
-            className="cert-page"
+            className="cw-dz__page"
             style={{ width: displayWidth, height: displayHeight }}
             onClick={onPageClick}
             onDragOver={(e) => {
@@ -289,18 +309,22 @@ export default function CertificateDesignerCanvas({
               if (norm) onPlace(norm.x, norm.y, col);
             }}
           >
-            <canvas ref={canvasRef} className="cert-page-canvas" />
-            {rendering && <div className="cert-page-loading">Rendering template…</div>}
-            {renderError && <div className="form-error cert-page-error">{renderError}</div>}
+            <canvas ref={canvasRef} className="cw-dz__canvas" />
+            {rendering && <div className="cw-dz__veil">Drawing your template...</div>}
+            {renderError && (
+              <div className="cw-dz__veil" role="alert">
+                This PDF could not be drawn: {renderError}
+              </div>
+            )}
 
-            <div className="cert-overlay">
+            <div className="cw-dz__overlay">
               {fields.map((f) => {
                 const selected = selectedFieldId === f.id;
                 const px = previewPx(f.fontSize, pageHeight, displayHeight);
                 return (
                   <div
                     key={f.id}
-                    className={`cert-field-marker${selected ? ' is-selected' : ''}`}
+                    className={`cw-dz__field${selected ? ' is-selected' : ''}`}
                     style={{
                       left: `${f.x * 100}%`,
                       top: `${f.y * 100}%`,
@@ -314,28 +338,29 @@ export default function CertificateDesignerCanvas({
                     }}
                     onMouseDown={(e) => onFieldMouseDown(f.id, e)}
                     onClick={(e) => e.stopPropagation()}
-                    title="Drag to move · use the slider to resize"
+                    title="Drag to move"
                   >
-                    <span className="cert-field-sample" style={{ fontSize: px }}>
+                    <span className="cw-dz__sample" style={{ fontSize: px, color: f.color }}>
                       {fieldSample(f.sourceColumn)}
                     </span>
                     {selected && (
-                      <div className="cert-field-chrome">
-                        <span className="cert-field-size-badge">
-                          {certificateColumnLabel(f.sourceColumn)} · {f.fontSize} pt
+                      <div className="cw-dz__chrome">
+                        <span className="cw-dz__badge">
+                          {certificateColumnLabel(f.sourceColumn)}, {f.fontSize} pt
                         </span>
                         {onFontSizeChange && (
                           <div
-                            className="cert-field-resize"
+                            className="cw-dz__resize"
                             onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
                           >
                             <button
                               type="button"
-                              className="btn btn-sm btn-outline"
+                              className="ui-btn ui-btn--sm"
+                              aria-label="Smaller"
                               onClick={() => onFontSizeChange(f.id, Math.max(8, f.fontSize - 2))}
                             >
-                              −
+                              -
                             </button>
                             <input
                               type="range"
@@ -347,7 +372,8 @@ export default function CertificateDesignerCanvas({
                             />
                             <button
                               type="button"
-                              className="btn btn-sm btn-outline"
+                              className="ui-btn ui-btn--sm"
+                              aria-label="Larger"
                               onClick={() => onFontSizeChange(f.id, Math.min(72, f.fontSize + 2))}
                             >
                               +
@@ -361,7 +387,7 @@ export default function CertificateDesignerCanvas({
               })}
               {ghost && (
                 <div
-                  className="cert-field-marker is-ghost"
+                  className="cw-dz__field is-ghost"
                   style={{
                     left: `${ghost.x * 100}%`,
                     top: `${ghost.y * 100}%`,
@@ -370,14 +396,14 @@ export default function CertificateDesignerCanvas({
                   }}
                 >
                   <span
-                    className="cert-field-sample"
+                    className="cw-dz__sample"
                     style={{ fontSize: previewPx(placeFontSize, pageHeight, displayHeight) }}
                   >
                     {fieldSample(ghost.column)}
                   </span>
-                  <div className="cert-field-chrome">
-                    <span className="cert-field-size-badge">
-                      {certificateColumnLabel(ghost.column)} · {placeFontSize} pt
+                  <div className="cw-dz__chrome">
+                    <span className="cw-dz__badge">
+                      {certificateColumnLabel(ghost.column)}, {placeFontSize} pt
                     </span>
                   </div>
                 </div>

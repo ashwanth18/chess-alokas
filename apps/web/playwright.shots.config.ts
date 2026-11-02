@@ -7,6 +7,7 @@ import base from './playwright.config';
  *
  *   pnpm exec playwright test -c playwright.shots.config.ts navigation
  *   SHOT_PHASE=after pnpm exec playwright test -c playwright.shots.config.ts navShots
+ *   SHOT_PHASE=after pnpm exec playwright test -c playwright.shots.config.ts certShots
  */
 const PORT = 4279;
 
@@ -16,7 +17,7 @@ export default defineConfig({
   projects: [
     {
       name: 'nav',
-      testMatch: /(navigation|desktopNav|navShots)\.spec\.ts/,
+      testMatch: /(navigation|desktopNav|navShots|certShots)\.spec\.ts/,
       use: { viewport: { width: 1366, height: 768 }, launchOptions: { args: ['--allow-file-access-from-files'] } },
     },
   ],

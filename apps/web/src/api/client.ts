@@ -265,12 +265,14 @@ export async function apiIssueCertificates(
   tournamentId: string,
   items: CertificateIssueItem[],
   batchSize = 5,
+  onProgress?: (stored: number, total: number) => void,
 ) {
   let issued = 0;
   let storageBackend: 'supabase' | 'local' | undefined;
   const issues: unknown[] = [];
 
   for (let i = 0; i < items.length; i += batchSize) {
+    onProgress?.(issued, items.length);
     const chunk = items.slice(i, i + batchSize);
     const res = await req<{
       issued: number;
@@ -327,11 +329,33 @@ export async function apiReserveCertificateSerials(tournamentId: string, count: 
   });
 }
 
+export type CertificateEmailResult = {
+  id: string;
+  name: string;
+  email: string | null;
+  /** emailed, failed, skipped (with a reason in error), or simulated for the demo tenant. */
+  status: 'emailed' | 'failed' | 'skipped' | 'simulated';
+  error?: string;
+};
+
+export type CertificateEmailQuota = {
+  canSend: boolean;
+  demo: boolean;
+  /** False when the server has no mail provider key, so every send would fail. */
+  emailConfigured: boolean;
+  /** null means no daily cap (local desktop use). */
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+  /** Why sending isn't possible, or the demo notice. */
+  reason: string | null;
+};
+
+/** Sends to exactly these certificates. The server checks each id belongs to the tournament. */
 export async function apiEmailCertificates(
   tournamentId: string,
   body: {
-    issueIds?: string[];
-    allPending?: boolean;
+    issueIds: string[];
     resend?: boolean;
     subject?: string;
     body?: string;
@@ -340,20 +364,37 @@ export async function apiEmailCertificates(
   return req<{
     sent: number;
     failed: number;
+    skipped?: number;
     /** Set for the demo tenant, which sends nothing. */
     simulated?: boolean;
     message?: string;
-    results: Array<{
-      id: string;
-      name: string;
-      email: string | null;
-      status: string;
-      error?: string;
-    }>;
+    quota?: { limit: number | null; used: number; remaining: number | null };
+    results: CertificateEmailResult[];
   }>(`/tournaments/${tournamentId}/certificates/email`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export async function apiCertificateEmailQuota(tournamentId: string) {
+  return req<CertificateEmailQuota>(`/tournaments/${tournamentId}/certificates/email-quota`);
+}
+
+/** The stored PDF of one issued certificate, for an on-screen preview. */
+export async function apiFetchCertificatePdf(
+  issueId: string,
+): Promise<{ ok: true; data: Uint8Array } | { ok: false; error: string }> {
+  try {
+    const authHeaders = await getAuthHeaders(AbortSignal.timeout(8_000));
+    const res = await fetch(
+      `${resolveApiBaseUrl()}/certificates/${encodeURIComponent(issueId)}/download`,
+      { headers: { ...(authHeaders ?? {}) }, signal: AbortSignal.timeout(30_000) },
+    );
+    if (!res.ok) return { ok: false, error: `Could not load the certificate (${res.status})` };
+    return { ok: true, data: new Uint8Array(await res.arrayBuffer()) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Could not load the certificate' };
+  }
 }
 
 export async function apiEmailCertificateTest(

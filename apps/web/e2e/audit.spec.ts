@@ -4,7 +4,7 @@ import { EVENT_SLUG, LIVE_TOKEN, TABLE_SLUG, TOURNAMENT_ID } from './fixtures/da
 /** What must hold on every key route: the checks from the design audit, not pixels. */
 
 const GUEST = ['/', '/login', '/discover', `/register/${EVENT_SLUG}`, `/live/${LIVE_TOKEN}`, `/live/${LIVE_TOKEN}/tv`, `/t/${TABLE_SLUG}`];
-const DESK = ['/app', `/tournaments/${TOURNAMENT_ID}`, '/player', '/settings'];
+const DESK = ['/app', `/tournaments/${TOURNAMENT_ID}`, '/player', '/settings', '/certificates', `/certificates?tournament=${TOURNAMENT_ID}`];
 
 /** Same-origin console noise from the fake backends, which answer 404 for anything unmocked. */
 const isFixtureNoise = (text: string) => /status of 404|ERR_FAILED|WebSocket/.test(text);
