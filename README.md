@@ -156,7 +156,8 @@ pnpm --filter @chess-alokas/pairing-engine test
 | GET | `/sync/pull?since=` | Pull LWW sync (server-assigned cursor) |
 | POST | `/sync/push` | Push LWW sync; returns `accepted` and per-row `rejected` reasons |
 | POST | `/tournaments/:id/certificates/issue` | Store digital PDFs |
-| POST | `/tournaments/:id/certificates/email` | Email issued PDFs |
+| POST | `/tournaments/:id/certificates/email` | Email issued PDFs to the certificate ids given (each checked against the tournament; already sent ones skipped unless `resend`) |
+| GET | `/tournaments/:id/certificates/email-quota` | Whether bulk email can send, and how many of today's cap are left |
 | GET | `/certificates/:issueId/download` | Download issued PDF (organizer or linked player) |
 | GET/POST | `/organizations` | List / create B2B organization (Sandbox Trial) |
 | PATCH | `/organizations/:id` | Update organization contact & payment info |

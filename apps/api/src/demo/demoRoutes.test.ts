@@ -429,14 +429,40 @@ describe.each([
       const owner = await accountId('owner');
       const domain = demoEmailDomain();
       const completed = (await store.getTournamentByPublicToken(DEMO_LINKS.completedToken))!;
+      const issued = await app.inject({
+        method: 'POST',
+        url: `/tournaments/${completed.id}/certificates/issue`,
+        headers: as(owner),
+        payload: {
+          items: [
+            {
+              type: 'participation',
+              recipientName: 'Demo Pawn',
+              recipientEmail: 'someone-real@example.com',
+              pdfBase64: Buffer.from('%PDF-1.4 demo').toString('base64'),
+            },
+          ],
+        },
+      });
+      expect(issued.statusCode).toBe(201);
+      const issueId = issued.json().issues[0].id as string;
+      const quota = await app.inject({
+        method: 'GET',
+        url: `/tournaments/${completed.id}/certificates/email-quota`,
+        headers: as(owner),
+      });
+      expect(quota.json()).toMatchObject({ demo: true, canSend: true });
       const bulk = await app.inject({
         method: 'POST',
         url: `/tournaments/${completed.id}/certificates/email`,
         headers: as(owner),
-        payload: { allPending: true },
+        payload: { issueIds: [issueId] },
       });
       expect(bulk.statusCode).toBe(200);
       expect(bulk.json()).toMatchObject({ simulated: true, sent: 0, failed: 0 });
+      expect(bulk.json().results).toEqual([
+        expect.objectContaining({ id: issueId, status: 'simulated' }),
+      ]);
       expect(bulk.json().message).toContain('no email was sent');
 
       const test = await app.inject({

@@ -15,6 +15,7 @@ import {
   DEFAULT_CERT_EMAIL_SUBJECT,
   certBodyToHtml,
   certTypeLabel,
+  isSendableEmail,
   renderCertTemplate,
   type Organization,
   type OrganizationPlanTier,
@@ -47,7 +48,11 @@ const IssueItemSchema = z.object({
   type: z.enum(['participation', 'winner']),
   rank: z.number().int().positive().nullable().optional(),
   categoryId: z.string().uuid().nullable().optional(),
-  recipientEmail: z.string().email().nullable().optional().or(z.literal('')).optional(),
+  /**
+   * Stored as typed. A typo in one player's address must not fail the whole batch: the bulk send
+   * checks addresses itself, and its review screen shows the bad ones as "Email not valid".
+   */
+  recipientEmail: z.string().trim().max(320).nullable().optional(),
   recipientName: z.string().min(1),
   serial: z.string().min(1).max(64).nullable().optional(),
   /** Base64-encoded compressed PDF */
@@ -58,11 +63,13 @@ const IssueBodySchema = z.object({
   items: z.array(IssueItemSchema).min(1).max(500),
 });
 
+/**
+ * Bulk email goes to exactly the certificates named here, each checked against this tournament.
+ * There is no "everyone pending" mode: the organizer picks recipients on a review screen first.
+ */
 const EmailBodySchema = z.object({
-  issueIds: z.array(z.string().uuid()).optional(),
-  /** Email stored/failed issues only. Required unless issueIds is set. */
-  allPending: z.boolean().optional(),
-  /** If true, also include already-emailed issues (opt-in resend). */
+  issueIds: z.array(z.string().uuid()).min(1).max(500),
+  /** Without this, any named certificate that was already emailed is skipped, not sent twice. */
   resend: z.boolean().optional(),
   subject: z.string().min(1).max(200).optional(),
   body: z.string().min(1).max(20_000).optional(),
@@ -379,6 +386,95 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
     },
   );
 
+  /**
+   * Whether this request may bulk-send, and against which daily cap. Local desktop use has no
+   * organizations and sends through the user's own Resend key, so it has no cap.
+   */
+  async function bulkAllowance(
+    tournament: { organizationId?: string | null },
+    userId: string | undefined,
+  ): Promise<
+    | { kind: 'unlimited' }
+    | { kind: 'refused'; reason: string }
+    | { kind: 'capped'; scopeKey: string; limit: number }
+  > {
+    if (!authEnabled() && !userId) return { kind: 'unlimited' };
+    const org = tournament.organizationId
+      ? await tournamentStore.getOrganization(tournament.organizationId)
+      : null;
+    const limit = bulkEmailLimit(org);
+    if (!org || limit === 0) {
+      return {
+        kind: 'refused',
+        reason: 'Organizer Verification is required to email certificates to players.',
+      };
+    }
+    return { kind: 'capped', scopeKey: `org:${org.id}`, limit };
+  }
+
+  /** What the review screen shows before anything is sent: can this send, and how many are left today. */
+  app.get<{ Params: { id: string } }>(
+    '/tournaments/:id/certificates/email-quota',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { tournament, forbidden, missing } = await assertOwner(
+        request.params.id,
+        request.userId,
+        reply,
+      );
+      if (forbidden) return;
+      if (missing || !tournament) return reply.code(404).send({ error: 'Tournament not found' });
+
+      const emailConfigured = Boolean(process.env['RESEND_API_KEY']);
+      if (await isDemoTournament(tournamentStore, tournament)) {
+        return {
+          canSend: true,
+          demo: true,
+          emailConfigured,
+          limit: null,
+          used: 0,
+          remaining: null,
+          reason: DEMO_EMAIL_BLOCKED_MESSAGE,
+        };
+      }
+      const allowance = await bulkAllowance(tournament, request.userId);
+      if (allowance.kind === 'refused') {
+        return {
+          canSend: false,
+          demo: false,
+          emailConfigured,
+          limit: 0,
+          used: 0,
+          remaining: 0,
+          reason: allowance.reason,
+        };
+      }
+      if (allowance.kind === 'unlimited') {
+        return {
+          canSend: true,
+          demo: false,
+          emailConfigured,
+          limit: null,
+          used: 0,
+          remaining: null,
+          reason: null,
+        };
+      }
+      const used = await tournamentStore.emailSendsUsed(allowance.scopeKey, 'bulk');
+      const remaining = Math.max(0, allowance.limit - used);
+      return {
+        canSend: remaining > 0,
+        demo: false,
+        emailConfigured,
+        limit: allowance.limit,
+        used,
+        remaining,
+        reason:
+          remaining > 0 ? null : `Today's limit of ${allowance.limit} certificate emails is used up.`,
+      };
+    },
+  );
+
   app.post<{ Params: { id: string }; Body: unknown }>(
     '/tournaments/:id/certificates/email',
     { preHandler: requireAuth },
@@ -394,69 +490,96 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
 
       const parsed = EmailBodySchema.safeParse(request.body ?? {});
       if (!parsed.success) {
-        return reply.code(400).send({ error: 'Invalid request', details: parsed.error.format() });
-      }
-      if (!parsed.data.issueIds?.length && !parsed.data.allPending) {
         return reply.code(400).send({
-          error: 'Pass allPending: true or issueIds. Mass email will not run without an explicit target.',
+          error: 'Choose who to send to. Bulk email only goes to certificates named by id.',
+          details: parsed.error.format(),
         });
       }
 
-      const all = await certStore.listIssues(tournamentId);
-      let targets = all;
-      if (parsed.data.issueIds?.length) {
-        const set = new Set(parsed.data.issueIds);
-        targets = all.filter((i) => set.has(i.id));
-        if (!parsed.data.resend) {
-          targets = targets.filter((i) => i.status === 'stored' || i.status === 'failed');
-        }
-      } else if (parsed.data.resend) {
-        targets = all.filter((i) => i.status !== 'pending');
-      } else {
-        targets = all.filter((i) => i.status === 'stored' || i.status === 'failed');
+      // Every id must be a certificate of this tournament. One stranger and nothing is sent, so a
+      // forged list can't reach another event's players, or anyone else.
+      const requested = [...new Set(parsed.data.issueIds)];
+      const byId = new Map((await certStore.listIssues(tournamentId)).map((i) => [i.id, i]));
+      const unknownIds = requested.filter((id) => !byId.has(id));
+      if (unknownIds.length > 0) {
+        const n = unknownIds.length;
+        return reply.code(400).send({
+          error: `${n} of the chosen certificates ${n === 1 ? 'is' : 'are'} not in this tournament. Nothing was sent.`,
+          unknownIds,
+        });
+      }
+      const selected = requested.map((id) => byId.get(id)!);
+
+      type Result = {
+        id: string;
+        name: string;
+        email: string | null;
+        status: string;
+        error?: string;
+      };
+      const skipped: Result[] = [];
+      const sendable: Array<{ issue: (typeof selected)[number]; email: string }> = [];
+      for (const issue of selected) {
+        const email = issue.recipientEmail?.trim() || null;
+        const skip = (error: string) =>
+          skipped.push({ id: issue.id, name: issue.recipientName, email, status: 'skipped', error });
+        if (issue.status === 'emailed' && !parsed.data.resend) skip('Already sent');
+        else if (!email) skip('No email address');
+        else if (!isSendableEmail(email)) skip('Email address is not valid');
+        else sendable.push({ issue, email });
       }
 
       if (await isDemoTournament(tournamentStore, tournament)) {
         return {
           sent: 0,
           failed: 0,
+          skipped: skipped.length,
           simulated: true,
           message: DEMO_EMAIL_BLOCKED_MESSAGE,
-          results: targets.map((i) => ({
-            id: i.id,
-            name: i.recipientName,
-            email: i.recipientEmail?.trim() || null,
-            status: 'simulated',
-          })),
+          results: [
+            ...sendable.map(({ issue, email }) => ({
+              id: issue.id,
+              name: issue.recipientName,
+              email,
+              status: 'simulated',
+            })),
+            ...skipped,
+          ],
         };
       }
 
-      const bulkOrg = tournament.organizationId
-        ? await tournamentStore.getOrganization(tournament.organizationId)
-        : null;
-      // Local desktop use has no organizations and sends through the user's own Resend key.
-      if (authEnabled() || request.userId) {
-        const bulkLimit = bulkEmailLimit(bulkOrg);
-        if (bulkLimit === 0) {
-          return reply.code(403).send({
-            error: 'Organizer Verification is required to email certificates to players.',
-          });
-        }
-        const recipients = targets.filter((i) => i.recipientEmail?.trim()).length;
-        if (recipients > 0) {
+      let quota: { limit: number | null; used: number; remaining: number | null } = {
+        limit: null,
+        used: 0,
+        remaining: null,
+      };
+      const allowance = await bulkAllowance(tournament, request.userId);
+      if (allowance.kind === 'refused') {
+        return reply.code(403).send({ error: allowance.reason });
+      }
+      if (allowance.kind === 'capped') {
+        if (sendable.length > 0) {
           const cap = await tournamentStore.reserveEmailSends({
             kind: 'bulk',
-            scopeKey: `org:${bulkOrg!.id}`,
-            count: recipients,
-            limit: bulkLimit,
+            scopeKey: allowance.scopeKey,
+            count: sendable.length,
+            limit: allowance.limit,
             tournamentId,
             userId: request.userId ?? null,
           });
           if (!cap.allowed) {
+            const left = Math.max(0, cap.limit - cap.used);
             return reply.code(429).send({
-              error: `Daily certificate email limit reached: ${cap.used} of ${cap.limit} used, and this send needs ${recipients}.`,
+              error: `Only ${left} of today's ${cap.limit} certificate emails are left, and this send needs ${sendable.length}. Nothing was sent. Untick some, or send the rest tomorrow.`,
+              limit: cap.limit,
+              used: cap.used,
+              remaining: left,
             });
           }
+          quota = { limit: cap.limit, used: cap.used, remaining: Math.max(0, cap.limit - cap.used) };
+        } else {
+          const used = await tournamentStore.emailSendsUsed(allowance.scopeKey, 'bulk');
+          quota = { limit: allowance.limit, used, remaining: Math.max(0, allowance.limit - used) };
         }
       }
 
@@ -464,58 +587,20 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
         parsed.data.subject || tournament.certEmailSubject || DEFAULT_CERT_EMAIL_SUBJECT;
       const bodyTpl = parsed.data.body || tournament.certEmailBody || DEFAULT_CERT_EMAIL_BODY;
 
-      const results: Array<{
-        id: string;
-        name: string;
-        email: string | null;
-        status: string;
-        error?: string;
-      }> = [];
+      const sent: Result[] = [];
+      const fail = async (issue: { id: string; recipientName: string }, email: string, error: string) => {
+        await certStore.updateIssueStatus(issue.id, { status: 'failed', error });
+        sent.push({ id: issue.id, name: issue.recipientName, email, status: 'failed', error });
+      };
 
-      for (const issue of targets) {
-        const email = issue.recipientEmail?.trim() || null;
-        if (!email) {
-          await certStore.updateIssueStatus(issue.id, {
-            status: 'failed',
-            error: 'Missing recipient email',
-          });
-          results.push({
-            id: issue.id,
-            name: issue.recipientName,
-            email: null,
-            status: 'failed',
-            error: 'Missing recipient email',
-          });
-          continue;
-        }
-
+      for (const { issue, email } of sendable) {
         const pdf = await readCertificatePdf(issue.storagePath);
         if (!pdf) {
-          await certStore.updateIssueStatus(issue.id, {
-            status: 'failed',
-            error: 'PDF file missing',
-          });
-          results.push({
-            id: issue.id,
-            name: issue.recipientName,
-            email,
-            status: 'failed',
-            error: 'PDF file missing',
-          });
+          await fail(issue, email, 'The certificate file is missing. Issue it again.');
           continue;
         }
         if (pdf.byteLength > MAX_EMAIL_PDF_BYTES) {
-          await certStore.updateIssueStatus(issue.id, {
-            status: 'failed',
-            error: 'PDF is too large to email (over 8 MB)',
-          });
-          results.push({
-            id: issue.id,
-            name: issue.recipientName,
-            email,
-            status: 'failed',
-            error: 'PDF is too large to email (over 8 MB)',
-          });
+          await fail(issue, email, 'PDF is too large to email (over 8 MB)');
           continue;
         }
 
@@ -535,31 +620,24 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
         });
 
         if (send.ok) {
+          // This is what "Already sent" on the review screen reads back.
           await certStore.updateIssueStatus(issue.id, {
             status: 'emailed',
             emailedAt: new Date().toISOString(),
             error: null,
           });
-          results.push({ id: issue.id, name: issue.recipientName, email, status: 'emailed' });
+          sent.push({ id: issue.id, name: issue.recipientName, email, status: 'emailed' });
         } else {
-          await certStore.updateIssueStatus(issue.id, {
-            status: 'failed',
-            error: send.error,
-          });
-          results.push({
-            id: issue.id,
-            name: issue.recipientName,
-            email,
-            status: 'failed',
-            error: send.error,
-          });
+          await fail(issue, email, send.error);
         }
       }
 
       return {
-        sent: results.filter((r) => r.status === 'emailed').length,
-        failed: results.filter((r) => r.status === 'failed').length,
-        results,
+        sent: sent.filter((r) => r.status === 'emailed').length,
+        failed: sent.filter((r) => r.status === 'failed').length,
+        skipped: skipped.length,
+        quota,
+        results: [...sent, ...skipped],
       };
     },
   );

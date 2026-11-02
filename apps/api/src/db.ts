@@ -391,6 +391,8 @@ export interface Store {
 
   /** Counts sends against a rolling 24-hour cap. Reserves them only when allowed. */
   reserveEmailSends(input: EmailSendReservation): Promise<EmailSendQuota>;
+  /** Sends counted in the rolling 24 hours, without reserving any. For showing what's left. */
+  emailSendsUsed(scopeKey: string, kind: 'test' | 'bulk'): Promise<number>;
 
   // Floor Chief Arbiter Alerts (Phase 3)
   createFloorAlert(alert: FloorAlert): Promise<FloorAlert>;
@@ -2760,6 +2762,13 @@ export class MemoryStore implements Store {
     };
     this.registrations.set(regId, updatedReg);
     return { registration: updatedReg, participant: null };
+  }
+
+  async emailSendsUsed(scopeKey: string, kind: 'test' | 'bulk'): Promise<number> {
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    return this.emailSends
+      .filter((e) => e.scopeKey === scopeKey && e.kind === kind && e.at > since)
+      .reduce((sum, e) => sum + e.count, 0);
   }
 
   async reserveEmailSends(input: EmailSendReservation): Promise<EmailSendQuota> {
@@ -6431,6 +6440,17 @@ export class PostgresStore implements Store {
         participant: null,
       };
     });
+  }
+
+  async emailSendsUsed(scopeKey: string, kind: 'test' | 'bulk'): Promise<number> {
+    const [row] = await this.sql<{ used: number }[]>`
+      SELECT COALESCE(SUM(recipient_count), 0)::int AS used
+      FROM email_sends
+      WHERE scope_key = ${scopeKey}
+        AND kind = ${kind}
+        AND created_at > now() - interval '24 hours'
+    `;
+    return Number(row?.used ?? 0);
   }
 
   async reserveEmailSends(input: EmailSendReservation): Promise<EmailSendQuota> {

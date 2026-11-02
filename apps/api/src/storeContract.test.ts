@@ -2854,8 +2854,19 @@ describe.each([
       const owner = await newUser();
       const org = await makeOrg(owner);
       const t = await seedTournament(owner, { organizationId: org.id });
+      const issued = await call(owner, 'POST', `/tournaments/${t.id}/certificates/issue`, {
+        items: [
+          {
+            type: 'participation',
+            recipientName: 'Unverified Pawn',
+            recipientEmail: 'pawn@example.invalid',
+            pdfBase64: Buffer.from('%PDF-1.4').toString('base64'),
+          },
+        ],
+      });
+      expect(issued.status).toBe(201);
       const res = await call(owner, 'POST', `/tournaments/${t.id}/certificates/email`, {
-        allPending: true,
+        issueIds: [issued.body.issues[0].id],
       });
       expect(res.status).toBe(403);
     });

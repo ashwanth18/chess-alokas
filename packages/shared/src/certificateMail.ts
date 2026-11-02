@@ -68,6 +68,17 @@ export function certBodyToHtml(body: string): string {
     .join('\n');
 }
 
+/**
+ * Whether a stored address is worth handing to the mail provider. Deliberately loose, like the
+ * browser's own check: the point is to catch typing slips ("not given", a phone number), not to
+ * validate mailboxes. The bulk send and its review screen both use this, so they agree.
+ */
+export function isSendableEmail(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const address = value.trim();
+  return address.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address);
+}
+
 export function certTypeLabel(type: string): string {
   return type === 'winner' ? 'winner' : 'participation';
 }

@@ -287,8 +287,8 @@ describe.each(TEST_STORES)('cross-tenant sweep: %s', (_name, makeBackend) => {
         issueIds: [params['issueId']],
         resend: true,
       });
-      expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ sent: 0, failed: 0, results: [] });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/not in this tournament\. Nothing was sent/);
       expect(await snapshot()).toBe(before);
     });
   });
