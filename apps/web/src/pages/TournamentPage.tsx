@@ -105,10 +105,7 @@ import { EntryQueue } from './registration-form/EntryQueue';
 import { RegistrationSetup } from './registration-form/RegistrationSetup';
 import { subscribeTournamentGames } from '../lib/gamesRealtime';
 import { subscribeTournamentGameCards } from '../lib/gameCardsRealtime';
-import {
-  buildTableStickerPdf,
-  downloadPdfBytes,
-} from '../lib/tableStickers';
+import TableStickerDownload from '../components/TableStickerDownload';
 import { livePublicUrl } from '../lib/liveViewer';
 import { useAuth } from '../auth/AuthContext';
 import FideLookupModal from '../components/FideLookupModal';
@@ -2983,30 +2980,11 @@ export default function TournamentPage() {
                             ? `QR ready (${floorTables!.length}) — recreate if needed`
                             : `Create table QR codes (${estimatedTables})`}
                       </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        disabled={(floorTables?.length ?? 0) === 0}
-                        onClick={() => {
-                          void (async () => {
-                            if (!tournament || !floorTables?.length) return;
-                            const bytes = await buildTableStickerPdf(
-                              tournament.name,
-                              floorTables.map((t) => ({
-                                tableNumber: t.tableNumber,
-                                slug: t.slug,
-                              })),
-                            );
-                            downloadPdfBytes(
-                              `${tournament.name.replace(/\s+/g, '-').toLowerCase()}-table-qr.pdf`,
-                              bytes,
-                            );
-                          })();
-                        }}
-                      >
-                        Download QR stickers
-                        {(floorTables?.length ?? 0) > 0 ? ` (${floorTables!.length})` : ''}
-                      </button>
+                      <TableStickerDownload
+                        tournamentName={tournament.name}
+                        tables={floorTables}
+                        buttonClassName="btn btn-outline btn-sm"
+                      />
                     </div>
                   </>
                 ) : (
@@ -3109,29 +3087,11 @@ export default function TournamentPage() {
                       <details className="floor-more">
                         <summary>Need stickers again?</summary>
                         <div className="floor-more-actions">
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            disabled={(floorTables?.length ?? 0) === 0}
-                            onClick={() => {
-                              void (async () => {
-                                if (!tournament || !floorTables?.length) return;
-                                const bytes = await buildTableStickerPdf(
-                                  tournament.name,
-                                  floorTables.map((t) => ({
-                                    tableNumber: t.tableNumber,
-                                    slug: t.slug,
-                                  })),
-                                );
-                                downloadPdfBytes(
-                                  `${tournament.name.replace(/\s+/g, '-').toLowerCase()}-table-qr.pdf`,
-                                  bytes,
-                                );
-                              })();
-                            }}
-                          >
-                            Download QR stickers ({floorTables!.length})
-                          </button>
+                          <TableStickerDownload
+                            tournamentName={tournament.name}
+                            tables={floorTables}
+                            buttonClassName="btn btn-ghost btn-sm"
+                          />
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
