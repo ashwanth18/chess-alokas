@@ -16,7 +16,7 @@ This document covers **Phase 2** of Chess Alokas 2.0: public tournament discover
 - `latitude double precision`, `longitude double precision` — WGS84 coordinates for GPS Haversine distance sorting and Google Maps deep links.
 - `description_md text`, `rules_md text`, `time_control text`, `prize_summary_json jsonb`, `poster_storage_path text`.
 - `entry_fee_cents integer not null default 0`, `currency text not null default 'MYR'`, `payment_instructions text`, `payment_qr_url text` (paid fees require verified B2B organization `can_accept_paid_registrations = true`).
-- `registration_form_schema jsonb` — configurable toggles (`collectSchool`, `collectFideId`, `collectPhone`) and custom questions (`customQuestions`).
+- `registration_form_schema jsonb` — the form. See "The form builder" below.
 
 ### 1.2 `tournament_registrations` Table
 - `id uuid primary key default gen_random_uuid()`
@@ -118,3 +118,31 @@ Each review runs in one transaction, locking the tournament and the registration
 - `selectedCategoryId` must belong to the tournament, or registering returns `400`.
 - Approving a paid registration needs a receipt or `confirmPaymentWithoutReceipt: true`. Without either, it returns `409` and nothing changes.
 - The organizer list sets `possibleDuplicate` when another live registration has the same name and at least one of the two has no email. Both registrations stay allowed.
+
+## The form builder
+
+Each event has one form, on the Registrations step of its tournament page, used by the public link (`/register/:slug`, no app or account) and by the apps. Both land in one queue. An entry shows "Link, no account" or "Signed-in account"; nothing in the data separates a browser from the app.
+
+**Form (`RegistrationFormConfig`):** `collectSchool`, `collectFideId`, `collectPhone` (on by default), `collectNric`, `collectAgeProof` (off; required when on), `malayLabels`, and `customQuestions`: `{ id, label, labelMs?, type, required, options?, retiredOptions?, hidden? }` where `type` is `text`, `select`, `checkbox` or `file`. At most 30 visible questions and 3 file questions.
+
+**Editing is non-destructive.** `PATCH /tournaments/:id/publishing` compares with what entries have answered (`mergeRegistrationForm`). A removed question with answers becomes `hidden`; a removed option with answers moves to `retiredOptions`; changing the type of an answered question is a 409. Sync never writes the form: only this route does.
+
+**What public clients get** (`publicRegistrationForm`): no hidden questions or retired options. `questions` lists every visible question with `label` and `labelMs`. `customQuestions` lists text and select only, with both languages in `label`, for app builds that predate `questions`.
+
+**Submitting** `POST /public/events/:slugOrId/register` also takes `customAnswers` (string, or boolean for a checkbox), `customFiles` (question id to data URL), `nricNumber` and `ageProofDataUrl`. The server checks required answers, dropdown values, types, lengths, file types and bytes (`checkRegistrationAnswers`), and answers `400 { error }` with text to show as it is. An answer to a question not on the form is dropped, not refused, so a page opened before an edit still works. A body is limited to 36 MB.
+
+**Private data.** `nric_number` and `private_files` sit on the registration, and clients can't read the table directly (`034`). `toClientRegistration` replaces them with `nricMasked` (`******-**-1234`) and `files` (no storage paths). Neither is ever copied to a participant. Files use the receipts bucket and `decodeReceiptDataUrl`: PNG, JPEG, WebP or PDF, checked by signature, 5 MB.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| `GET` | `/tournaments/:id/publishing` | Owner, admin, director | Settings, form with hidden questions, answer counts, what the org `can` do |
+| `GET` | `/tournaments/:id/registrations/:regId/nric` | Owner, admin, director | The full number |
+| `GET` | `/tournaments/:id/registrations/:regId/files/:fileId` | Owner, admin, director | File bytes, `nosniff`, `no-store` |
+| `POST` | `/tournaments/:id/registrations/delete-age-proofs` | Owner, admin, director | Body `{ "confirm": true }`. Removes age proof files and NRIC numbers. Receipts and file answers stay |
+| `GET` | `/public/events/:slugOrId/schools?q=` | Public, open events | School names from the organizer's earlier entries used at least twice |
+
+Those private routes, the registrations list and the receipt route refuse an arbiter even if they created the tournament, because they check organization role as well as ownership. Account deletion clears the NRIC at once and removes files through the existing 30-day purge.
+
+**Who can open a link:** any account, verified or not, for a free event. Listing on `/discover` needs a verified academy with `canPublishGlobal`, and a fee needs `canAcceptPaidRegistrations`. A suspended or rejected organization's link stops working.
+
+**Exports.** The queue's "Download CSV" has answers and whether each file was attached, never NRIC numbers. It is the only registration export.

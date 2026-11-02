@@ -251,14 +251,20 @@ export const TournamentSchema = z.object({
       collectSchool: z.boolean().default(true),
       collectFideId: z.boolean().default(true),
       collectPhone: z.boolean().default(true),
+      collectNric: z.boolean().default(false),
+      collectAgeProof: z.boolean().default(false),
+      malayLabels: z.boolean().default(false),
       customQuestions: z
         .array(
           z.object({
             id: z.string().min(1),
             label: z.string().min(1),
-            type: z.enum(['text', 'select']).default('text'),
+            labelMs: z.string().nullable().optional(),
+            type: z.enum(['text', 'select', 'checkbox', 'file']).default('text'),
             required: z.boolean().default(false),
             options: z.array(z.string()).optional(),
+            retiredOptions: z.array(z.string()).optional(),
+            hidden: z.boolean().optional(),
           }),
         )
         .default([]),
@@ -757,12 +763,21 @@ export interface PlayerCareerDashboard {
 // Tournament Discovery, GPS Nearby Search & Shareable Registrations (Phase 2)
 // ---------------------------------------------------------------------------
 
+export const RegistrationQuestionTypeSchema = z.enum(['text', 'select', 'checkbox', 'file']);
+export type RegistrationQuestionType = z.infer<typeof RegistrationQuestionTypeSchema>;
+
 export const RegistrationCustomQuestionSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
-  type: z.enum(['text', 'select']).default('text'),
+  /** Optional Malay label. The form shows both: "T-shirt size / Saiz baju". */
+  labelMs: z.string().nullable().optional(),
+  type: RegistrationQuestionTypeSchema.default('text'),
   required: z.boolean().default(false),
   options: z.array(z.string()).optional(),
+  /** Removed from the form, kept because entries chose them. Never sent to public pages. */
+  retiredOptions: z.array(z.string()).optional(),
+  /** Off the form for new entries, kept because entries answered it. Never sent to public pages. */
+  hidden: z.boolean().optional(),
 });
 export type RegistrationCustomQuestion = z.infer<typeof RegistrationCustomQuestionSchema>;
 
@@ -770,6 +785,10 @@ export const RegistrationFormConfigSchema = z.object({
   collectSchool: z.boolean().default(true),
   collectFideId: z.boolean().default(true),
   collectPhone: z.boolean().default(true),
+  collectNric: z.boolean().default(false),
+  collectAgeProof: z.boolean().default(false),
+  /** Shows the standard labels in English and Malay, as the organizer's own questions can be. */
+  malayLabels: z.boolean().default(false),
   customQuestions: z.array(RegistrationCustomQuestionSchema).default([]),
 });
 export type RegistrationFormConfig = z.infer<typeof RegistrationFormConfigSchema>;
@@ -778,8 +797,55 @@ export const DEFAULT_REGISTRATION_FORM_CONFIG: RegistrationFormConfig = {
   collectSchool: true,
   collectFideId: true,
   collectPhone: true,
+  collectNric: false,
+  collectAgeProof: false,
+  malayLabels: false,
   customQuestions: [],
 };
+
+/** A question as public pages receive it: nothing about what was hidden or retired. */
+export interface PublicRegistrationQuestion {
+  id: string;
+  label: string;
+  labelMs: string | null;
+  type: RegistrationQuestionType;
+  required: boolean;
+  options?: string[];
+}
+
+export interface PublicRegistrationForm {
+  collectSchool: boolean;
+  collectFideId: boolean;
+  collectPhone: boolean;
+  collectNric: boolean;
+  collectAgeProof: boolean;
+  malayLabels: boolean;
+  /** All visible questions, in order. Current clients read this. */
+  questions: PublicRegistrationQuestion[];
+  /** Text and select only, with both languages in `label`, for app builds that predate `questions`. */
+  customQuestions: Array<{
+    id: string;
+    label: string;
+    type: 'text' | 'select';
+    required: boolean;
+    options?: string[];
+  }>;
+}
+
+/** A private file attached to an entry: `ageProof`, or the id of a file question. */
+export const RegistrationFileFieldSchema = z.string().min(1);
+
+export const RegistrationPrivateFileSchema = z.object({
+  id: z.string().uuid(),
+  field: RegistrationFileFieldSchema,
+  storagePath: z.string().min(1),
+  contentType: z.string().min(1),
+  bytes: z.number().int().nonnegative(),
+});
+export type RegistrationPrivateFile = z.infer<typeof RegistrationPrivateFileSchema>;
+
+/** What a client is told about a private file. Bytes come from an authorised route. */
+export type RegistrationFileInfo = Omit<RegistrationPrivateFile, 'storagePath'>;
 
 export const RegistrationPaymentStatusSchema = z.enum([
   'not_required',
@@ -832,6 +898,14 @@ export const TournamentRegistrationSchema = z.object({
   receiptContentType: z.string().nullable().optional(),
   /** Set on API responses; fetch bytes from /tournaments/:id/registrations/:regId/receipt. */
   hasReceipt: z.boolean().optional(),
+  /** Internal. Only GET .../registrations/:regId/nric returns the value. Never on a participant. */
+  nricNumber: z.string().nullable().optional(),
+  /** Internal: age proof and file answers, with their storage paths. Never sent to clients. */
+  privateFiles: z.array(RegistrationPrivateFileSchema).optional(),
+  /** Set on API responses in place of nricNumber: ******-**-1234. */
+  nricMasked: z.string().nullable().optional(),
+  /** Set on API responses in place of privateFiles. */
+  files: z.array(RegistrationPrivateFileSchema.omit({ storagePath: true })).optional(),
   amountCents: z.number().int().nonnegative().default(0),
   status: RegistrationStatusSchema.default('pending'),
   reviewerNote: z.string().nullable().optional(),

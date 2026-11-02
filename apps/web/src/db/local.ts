@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { FilterGroup } from '@chess-alokas/shared';
+import type { FilterGroup, RegistrationFormConfig } from '@chess-alokas/shared';
 
 export interface LocalTournament {
   id: string;
@@ -57,6 +57,8 @@ export interface LocalTournament {
   currency?: string;
   paymentInstructions?: string | null;
   paymentQrUrl?: string | null;
+  /** The cloud's copy, for reading. The form is only ever saved through the publishing route. */
+  registrationFormSchema?: RegistrationFormConfig | null;
   /** When the organizer last confirmed consent for an import. The server records it at sync. */
   rosterConsentConfirmedAt?: string | null;
   updatedAt: string;

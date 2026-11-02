@@ -24,8 +24,8 @@ export const LEGAL_PROVIDER_LOCATIONS = {
 
 export type ProviderKey = keyof typeof LEGAL_PROVIDER_LOCATIONS;
 
-export const LEGAL_LAST_UPDATED_ISO = '2026-11-01';
-export const LEGAL_LAST_UPDATED = '1 November 2026';
+export const LEGAL_LAST_UPDATED_ISO = '2026-11-02';
+export const LEGAL_LAST_UPDATED = '2 November 2026';
 
 export const NO_CONTACT_TEXT = 'Contact details will be added here.';
 export const NO_LOCATION_TEXT = 'Location to be added here.';

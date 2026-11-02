@@ -83,7 +83,7 @@ describe.each([
   const text = render(page).replace(/<[^>]+>/g, ' ');
 
   it('shows the date', () => {
-    expect(text).toContain('1 November 2026');
+    expect(text).toContain('2 November 2026');
   });
 
   it('never claims compliance, certification or endorsement', () => {

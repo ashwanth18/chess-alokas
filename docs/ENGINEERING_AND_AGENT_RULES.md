@@ -38,7 +38,7 @@ This document is the authoritative engineering standard for **Chess Alokas 2.0**
 ### 2.2 Global Participant Resources (B2C)
 - Participant accounts and `player_profiles` are **global across the platform** and free to create without admin approval.
 - One account (`account_user_id`) can manage a primary player profile (`is_primary = true`) plus multiple family/student sub-profiles (`relationship IN ('self', 'child', 'student', 'family')`).
-- Public endpoints (`/public/live/:token`, `/public/events`, `/public/events/:slug`) MUST sanitize responses and never expose private fields (`recipient_email`, `phone`, `national_id`, `arbiter_pin_hash`, `owner_id`, or payment receipt paths).
+- Public endpoints (`/public/live/:token`, `/public/events`, `/public/events/:slug`) MUST sanitize responses and never expose private fields (`recipient_email`, `phone`, `national_id`, `nric_number`, `private_files`, `arbiter_pin_hash`, `owner_id`, or payment receipt paths).
 
 ---
 

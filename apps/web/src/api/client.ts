@@ -13,6 +13,7 @@ import type {
   PlayerRelationship,
   PlayerCareerDashboard,
   PublicEventSummary,
+  PublicRegistrationForm,
   RegistrationFormConfig,
   TournamentRegistration,
   FloorAlert,
@@ -1119,7 +1120,7 @@ export type PublicEventDetailResponse = {
     currency: string;
     paymentInstructions: string | null;
     paymentQrUrl: string | null;
-    registrationFormSchema: RegistrationFormConfig;
+    registrationFormSchema: PublicRegistrationForm | RegistrationFormConfig;
     organizationName: string | null;
     publicToken: string | null;
   };
@@ -1185,17 +1186,68 @@ export async function apiSubmitEventRegistration(
     email?: string | null;
     phone?: string | null;
     customAnswers?: Record<string, unknown>;
+    customFiles?: Record<string, string>;
+    nricNumber?: string | null;
+    ageProofDataUrl?: string | null;
     receiptDataUrl?: string | null;
     guardianConsent?: boolean;
   },
 ) {
+  const hasFiles = Boolean(body.receiptDataUrl || body.ageProofDataUrl || body.customFiles);
   return req<{ registration: TournamentRegistration }>(
     `/public/events/${encodeURIComponent(slugOrId)}/register`,
     {
       method: 'POST',
       body: JSON.stringify(body),
-      timeoutMs: 20_000,
+      // Several photos over a venue's mobile signal take a while.
+      timeoutMs: hasFiles ? 180_000 : 20_000,
     },
+  );
+}
+
+export async function apiSchoolSuggestions(slugOrId: string, query: string) {
+  return req<{ schools: string[] }>(
+    `/public/events/${encodeURIComponent(slugOrId)}/schools?q=${encodeURIComponent(query)}`,
+  );
+}
+
+export async function apiGetTournamentPublishing(tournamentId: string) {
+  return req<{
+    tournament: Tournament;
+    form: RegistrationFormConfig;
+    answerCounts: Record<string, { answers: number; options: Record<string, number> }>;
+    can: { listPublicly: boolean; takePaidEntries: boolean };
+  }>(`/tournaments/${encodeURIComponent(tournamentId)}/publishing`);
+}
+
+export async function apiFetchRegistrationFile(
+  tournamentId: string,
+  registrationId: string,
+  fileId: string,
+): Promise<{ ok: true; blob: Blob } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(
+      `${resolveApiBaseUrl()}/tournaments/${encodeURIComponent(tournamentId)}/registrations/${encodeURIComponent(registrationId)}/files/${encodeURIComponent(fileId)}`,
+      { headers: (await getAuthHeaders(AbortSignal.timeout(8_000))) ?? {} },
+    );
+    if (!res.ok) return { ok: false, error: `Could not load the file (${res.status}).` };
+    return { ok: true, blob: await res.blob() };
+  } catch {
+    return { ok: false, error: 'Could not load the file. Check your connection.' };
+  }
+}
+
+/** The full number, for an organizer who asks to see it. Not kept in any list. */
+export async function apiRevealRegistrationNric(tournamentId: string, registrationId: string) {
+  return req<{ nricNumber: string }>(
+    `/tournaments/${encodeURIComponent(tournamentId)}/registrations/${encodeURIComponent(registrationId)}/nric`,
+  );
+}
+
+export async function apiDeleteRegistrationAgeProofs(tournamentId: string) {
+  return req<{ files: number; nricNumbers: number; failed: number }>(
+    `/tournaments/${encodeURIComponent(tournamentId)}/registrations/delete-age-proofs`,
+    { method: 'POST', body: JSON.stringify({ confirm: true }), timeoutMs: 60_000 },
   );
 }
 
@@ -1240,7 +1292,10 @@ export async function apiUpdateTournamentPublishing(
     registrationFormSchema?: RegistrationFormConfig | null;
   },
 ) {
-  return req<{ tournament: Tournament }>(
+  return req<{
+    tournament: Tournament;
+    answerCounts?: Record<string, { answers: number; options: Record<string, number> }>;
+  }>(
     `/tournaments/${encodeURIComponent(tournamentId)}/publishing`,
     {
       method: 'PATCH',

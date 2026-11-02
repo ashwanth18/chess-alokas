@@ -143,6 +143,17 @@ describe('database migrations', () => {
     await expect(asUser(USER_A, sql)).rejects.toThrow(/permission denied/);
   });
 
+  it('keeps NRIC numbers and file paths away from direct client reads', async () => {
+    const { rows } = await db.query<{ anon: boolean; signed_in: boolean }>(`
+      select has_column_privilege('anon', 'public.tournament_registrations', 'nric_number', 'select') as anon,
+             has_column_privilege('authenticated', 'public.tournament_registrations', 'private_files', 'select') as signed_in
+    `);
+    expect(rows[0]).toEqual({ anon: false, signed_in: false });
+    await expect(
+      asUser(USER_A, `select nric_number from public.tournament_registrations`),
+    ).rejects.toThrow(/permission denied/);
+  });
+
   it('existing tournament owners keep unlimited private use without publishing rights', async () => {
     const backfill = readFileSync(
       path.join(MIGRATIONS_DIR, '028_lock_down_client_writes.sql'),

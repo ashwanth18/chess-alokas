@@ -196,7 +196,7 @@ A founder decision on 2026-11-01: keep the rules relaxed now, and keep anything 
 | Bahasa Malaysia notice | Lawyer's advice, or before marketing widely in Malaysia | `LEGAL_BM_VERSION_URL` in `legalConfig.ts` is ready for the link |
 | DPO appointment and registration questions | Lawyer's advice, ideally before the first paying school | Ask whether Chess Alokas must appoint a DPO or register, given children's data |
 | Breach runbook | Before the first paying school | None exists. Needs who decides, who is told and how fast |
-| NRIC and age proof retention | Before the form builder ships NRIC, and before anyone collects age proof | Decide how long each is kept and who can see it. `national_id` stays optional |
+| Automatic NRIC and age proof retention | Public launch, a school asking, or the lawyer's advice | Shipped without a schedule, by founder decision on 2026-11-02: both stay until an organizer presses "Delete age proofs for this event" or the account behind the entry is deleted. `runPrivacyPurge` is the place to extend. Also consider encrypting `nric_number` at rest and recording who opened a number. Other file answers aren't covered by that button. `national_id` stays optional |
 
 **Triggers:**
 

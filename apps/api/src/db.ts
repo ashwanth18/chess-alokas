@@ -333,6 +333,24 @@ export interface Store {
   listTournamentRegistrations(tournamentId: string): Promise<TournamentRegistration[]>;
   listUserRegistrations(userId: string): Promise<TournamentRegistration[]>;
   createTournamentRegistration(reg: TournamentRegistration): Promise<TournamentRegistration>;
+  /**
+   * Removes an entry's NRIC number and the named private files from its row. The caller removes the
+   * files from storage first, so a failure leaves the link and the next attempt can retry.
+   */
+  clearRegistrationPrivateData(
+    tournamentId: string,
+    registrationId: string,
+    input: { nric: boolean; fileIds: string[] },
+  ): Promise<void>;
+  /**
+   * School names from an organization's earlier entries (or one owner's, with no organization),
+   * most used first. Only names on two or more entries, so a one-off slip in the box never surfaces.
+   */
+  listKnownSchools(
+    scope: { organizationId?: string | null; ownerId?: string | null },
+    query: string,
+    limit: number,
+  ): Promise<string[]>;
   reviewTournamentRegistration(
     tournamentId: string,
     regId: string,
@@ -409,6 +427,8 @@ export interface AccountDeletionOutcome {
 export interface DueReceiptPurge {
   registrationId: string;
   storagePath: string | null;
+  /** Age proof and file answers on the same entry. */
+  filePaths: string[];
 }
 
 export interface DueTournamentPurge {
@@ -1816,11 +1836,14 @@ export class MemoryStore implements Store {
         reg.submittedByUserId === userId ||
         (reg.playerProfileId != null && profileIds.has(reg.playerProfileId));
       if (!theirs) continue;
-      const hasReceipt = Boolean(reg.receiptStoragePath || reg.receiptDataUrl);
+      const hasReceipt = Boolean(
+        reg.receiptStoragePath || reg.receiptDataUrl || reg.privateFiles?.length,
+      );
       this.registrations.set(reg.id, {
         ...reg,
         ...anonymisedRegistration(reg),
         customAnswers: {},
+        nricNumber: null,
         submittedByUserId: null,
         playerProfileId: null,
         guardianConsentByUserId: null,
@@ -1848,6 +1871,7 @@ export class MemoryStore implements Store {
         due.push({
           registrationId,
           storagePath: this.registrations.get(registrationId)?.receiptStoragePath ?? null,
+          filePaths: (this.registrations.get(registrationId)?.privateFiles ?? []).map((f) => f.storagePath),
         });
       }
     }
@@ -1862,6 +1886,7 @@ export class MemoryStore implements Store {
         receiptDataUrl: null,
         receiptStoragePath: null,
         receiptContentType: null,
+        privateFiles: [],
       });
     }
     this.receiptPurgeAfter.delete(registrationId);
@@ -1874,8 +1899,11 @@ export class MemoryStore implements Store {
       due.push({
         id,
         receiptPaths: [...this.registrations.values()]
-          .filter((r) => r.tournamentId === id && r.receiptStoragePath)
-          .map((r) => r.receiptStoragePath!),
+          .filter((r) => r.tournamentId === id)
+          .flatMap((r) => [
+            ...(r.receiptStoragePath ? [r.receiptStoragePath] : []),
+            ...(r.privateFiles ?? []).map((f) => f.storagePath),
+          ]),
         certificatePaths: [...this.certificateIssues.values()]
           .filter((c) => c.tournamentId === id && c.storagePath)
           .map((c) => c.storagePath),
@@ -2432,6 +2460,62 @@ export class MemoryStore implements Store {
     return reg;
   }
 
+  async clearRegistrationPrivateData(
+    tournamentId: string,
+    registrationId: string,
+    input: { nric: boolean; fileIds: string[] },
+  ): Promise<void> {
+    const reg = this.registrations.get(registrationId);
+    if (!reg || reg.tournamentId !== tournamentId) return;
+    this.registrations.set(registrationId, {
+      ...reg,
+      nricNumber: input.nric ? null : (reg.nricNumber ?? null),
+      privateFiles: (reg.privateFiles ?? []).filter((f) => !input.fileIds.includes(f.id)),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async listKnownSchools(
+    scope: { organizationId?: string | null; ownerId?: string | null },
+    query: string,
+    limit: number,
+  ): Promise<string[]> {
+    const inScope = (t: Tournament | undefined): boolean =>
+      Boolean(t) &&
+      !t!.deletedAt &&
+      (scope.organizationId
+        ? t!.organizationId === scope.organizationId
+        : Boolean(scope.ownerId) && !t!.organizationId && t!.ownerId === scope.ownerId);
+    const typed = [
+      ...[...this.participants.values()]
+        .filter((p) => !p.deletedAt && inScope(this.tournaments.get(p.tournamentId)))
+        .map((p) => p.school),
+      // An approved entry is already counted through its participant.
+      ...[...this.registrations.values()]
+        .filter((r) => !r.participantId && inScope(this.tournaments.get(r.tournamentId)))
+        .map((r) => r.playerSnapshot.school),
+    ];
+    const needle = query.trim().toLowerCase();
+    const groups = new Map<string, Map<string, number>>();
+    for (const raw of typed) {
+      const name = raw?.trim();
+      if (!name || !name.toLowerCase().includes(needle)) continue;
+      const spellings = groups.get(name.toLowerCase()) ?? new Map<string, number>();
+      spellings.set(name, (spellings.get(name) ?? 0) + 1);
+      groups.set(name.toLowerCase(), spellings);
+    }
+    return [...groups.entries()]
+      .map(([key, spellings]) => ({
+        key,
+        total: [...spellings.values()].reduce((a, b) => a + b, 0),
+        name: [...spellings.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]![0],
+      }))
+      .filter((g) => g.total >= 2)
+      .sort((a, b) => b.total - a.total || a.key.localeCompare(b.key))
+      .slice(0, limit)
+      .map((g) => g.name);
+  }
+
   async reviewTournamentRegistration(
     tournamentId: string,
     regId: string,
@@ -2879,6 +2963,8 @@ interface TournamentRegistrationRow extends GuardianConsentColumns {
   receipt_data_url: string | null;
   receipt_storage_path?: string | null;
   receipt_content_type?: string | null;
+  nric_number?: string | null;
+  private_files?: TournamentRegistration['privateFiles'] | null;
   amount_cents: number;
   status: string;
   reviewer_note: string | null;
@@ -3115,6 +3201,8 @@ function rowToTournamentRegistration(row: TournamentRegistrationRow): Tournament
     receiptDataUrl: row.receipt_data_url ?? null,
     receiptStoragePath: row.receipt_storage_path ?? null,
     receiptContentType: row.receipt_content_type ?? null,
+    nricNumber: row.nric_number ?? null,
+    privateFiles: row.private_files ?? [],
     guardianConsentAt: toIso(row.guardian_consent_at ?? null),
     guardianConsentNoticeVersion: row.guardian_consent_notice_version ?? null,
     guardianConsentByUserId: row.guardian_consent_by_user_id ?? null,
@@ -5043,7 +5131,8 @@ export class PostgresStore implements Store {
         }[]
       >`
         SELECT id::text AS id, status, player_snapshot,
-               (receipt_storage_path IS NOT NULL OR receipt_data_url IS NOT NULL) AS has_receipt
+               (receipt_storage_path IS NOT NULL OR receipt_data_url IS NOT NULL
+                 OR jsonb_array_length(private_files) > 0) AS has_receipt
         FROM tournament_registrations
         WHERE submitted_by_user_id = ${userId}
            OR player_profile_id IN (SELECT id FROM player_profiles WHERE account_user_id = ${userId})
@@ -5054,7 +5143,8 @@ export class PostgresStore implements Store {
         await s`
           UPDATE tournament_registrations
           SET status = ${next.status}, player_snapshot = ${this.j(next.playerSnapshot)},
-              custom_answers = '{}'::jsonb, submitted_by_user_id = NULL, player_profile_id = NULL,
+              custom_answers = '{}'::jsonb, nric_number = NULL,
+              submitted_by_user_id = NULL, player_profile_id = NULL,
               guardian_consent_by_user_id = NULL,
               receipt_purge_after = ${reg.has_receipt ? purgeAfter : null}, updated_at = now()
           WHERE id = ${reg.id}
@@ -5068,19 +5158,29 @@ export class PostgresStore implements Store {
   }
 
   async listDueReceiptPurges(nowIso: string): Promise<DueReceiptPurge[]> {
-    const rows = await this.sql<{ id: string; receipt_storage_path: string | null }[]>`
-      SELECT id::text AS id, receipt_storage_path FROM tournament_registrations
+    const rows = await this.sql<
+      {
+        id: string;
+        receipt_storage_path: string | null;
+        private_files: NonNullable<TournamentRegistration['privateFiles']> | null;
+      }[]
+    >`
+      SELECT id::text AS id, receipt_storage_path, private_files FROM tournament_registrations
       WHERE receipt_purge_after <= ${nowIso}
       LIMIT 500
     `;
-    return rows.map((r) => ({ registrationId: r.id, storagePath: r.receipt_storage_path }));
+    return rows.map((r) => ({
+      registrationId: r.id,
+      storagePath: r.receipt_storage_path,
+      filePaths: (r.private_files ?? []).map((f) => f.storagePath),
+    }));
   }
 
   async clearPurgedReceipt(registrationId: string): Promise<void> {
     await this.sql`
       UPDATE tournament_registrations
       SET receipt_data_url = NULL, receipt_storage_path = NULL, receipt_content_type = NULL,
-          receipt_purge_after = NULL
+          private_files = '[]'::jsonb, receipt_purge_after = NULL
       WHERE id = ${registrationId}
     `;
   }
@@ -5094,6 +5194,10 @@ export class PostgresStore implements Store {
       const receipts = await this.sql<{ path: string }[]>`
         SELECT receipt_storage_path AS path FROM tournament_registrations
         WHERE tournament_id = ${id} AND receipt_storage_path IS NOT NULL
+        UNION ALL
+        SELECT f->>'storagePath' AS path
+        FROM tournament_registrations r, jsonb_array_elements(r.private_files) f
+        WHERE r.tournament_id = ${id}
       `;
       const certificates = await this.sql<{ path: string }[]>`
         SELECT storage_path AS path FROM certificate_issues
@@ -5844,7 +5948,7 @@ export class PostgresStore implements Store {
       INSERT INTO tournament_registrations (
         id, tournament_id, player_profile_id, submitted_by_user_id, selected_category_id,
         player_snapshot, custom_answers, payment_status, receipt_data_url,
-        receipt_storage_path, receipt_content_type, amount_cents,
+        receipt_storage_path, receipt_content_type, nric_number, private_files, amount_cents,
         status, reviewer_note, reviewed_at, participant_id, created_at, updated_at,
         guardian_consent_at, guardian_consent_notice_version, guardian_consent_by_user_id
       )
@@ -5853,7 +5957,8 @@ export class PostgresStore implements Store {
         ${reg.submittedByUserId ?? null}, ${reg.selectedCategoryId ?? null},
         ${this.j(reg.playerSnapshot)}, ${this.j(reg.customAnswers ?? {})},
         ${reg.paymentStatus}, ${reg.receiptDataUrl ?? null},
-        ${reg.receiptStoragePath ?? null}, ${reg.receiptContentType ?? null}, ${reg.amountCents ?? 0},
+        ${reg.receiptStoragePath ?? null}, ${reg.receiptContentType ?? null},
+        ${reg.nricNumber ?? null}, ${this.j(reg.privateFiles ?? [])}, ${reg.amountCents ?? 0},
         ${reg.status}, ${reg.reviewerNote ?? null}, ${reg.reviewedAt ?? null},
         ${reg.participantId ?? null}, ${reg.createdAt}, ${reg.updatedAt},
         ${reg.guardianConsentAt ?? null}, ${reg.guardianConsentNoticeVersion ?? null},
@@ -5862,6 +5967,66 @@ export class PostgresStore implements Store {
       RETURNING *
     `;
     return rowToTournamentRegistration(rows[0]!);
+  }
+
+  async clearRegistrationPrivateData(
+    tournamentId: string,
+    registrationId: string,
+    input: { nric: boolean; fileIds: string[] },
+  ): Promise<void> {
+    await this.tx(async (s) => {
+      const [row] = await s<{ private_files: NonNullable<TournamentRegistration['privateFiles']> | null }[]>`
+        SELECT private_files FROM tournament_registrations
+        WHERE id = ${registrationId} AND tournament_id = ${tournamentId}
+        FOR UPDATE
+      `;
+      if (!row) return;
+      const kept = (row.private_files ?? []).filter((f) => !input.fileIds.includes(f.id));
+      await s`
+        UPDATE tournament_registrations
+        SET nric_number = CASE WHEN ${input.nric}::boolean THEN NULL ELSE nric_number END,
+            private_files = ${this.j(kept)},
+            updated_at = now()
+        WHERE id = ${registrationId} AND tournament_id = ${tournamentId}
+      `;
+    });
+  }
+
+  async listKnownSchools(
+    scope: { organizationId?: string | null; ownerId?: string | null },
+    query: string,
+    limit: number,
+  ): Promise<string[]> {
+    const organizationId = scope.organizationId ?? null;
+    const ownerId = scope.ownerId ?? null;
+    if (!organizationId && !ownerId) return [];
+    const pattern = `%${query.trim().toLowerCase().replace(/[\\%_]/g, '\\$&')}%`;
+    const rows = await this.sql<{ school: string }[]>`
+      WITH scoped AS (
+        SELECT id FROM tournaments
+        WHERE deleted_at IS NULL
+          AND (
+            organization_id = ${organizationId}::uuid
+            OR (${organizationId}::uuid IS NULL AND organization_id IS NULL AND owner_id = ${ownerId}::uuid)
+          )
+      ),
+      typed AS (
+        SELECT btrim(p.school) AS name FROM participants p
+        WHERE p.deleted_at IS NULL AND p.tournament_id IN (SELECT id FROM scoped)
+        UNION ALL
+        -- An approved entry is already counted through its participant.
+        SELECT btrim(r.player_snapshot->>'school') AS name FROM tournament_registrations r
+        WHERE r.participant_id IS NULL AND r.tournament_id IN (SELECT id FROM scoped)
+      )
+      SELECT mode() WITHIN GROUP (ORDER BY name) AS school
+      FROM typed
+      WHERE name <> '' AND lower(name) LIKE ${pattern}
+      GROUP BY lower(name)
+      HAVING count(*) >= 2
+      ORDER BY count(*) DESC, lower(name)
+      LIMIT ${limit}
+    `;
+    return rows.map((r) => r.school);
   }
 
   async reviewTournamentRegistration(

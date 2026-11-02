@@ -195,7 +195,7 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
   },
   {
     q: 'Which languages does it support?',
-    a: 'English only today.',
+    a: 'English only today, though you can add Malay labels to your registration form.',
   },
 ];
 
@@ -482,6 +482,8 @@ export default function LandingPage() {
                 </p>
                 <ul className="lp-list">
                   <li>Money goes straight to you. Chess Alokas has no payment gateway and holds no funds.</li>
+                  <li>Choose what the form asks and add your own questions, in English and Malay.</li>
+                  <li>Set a deadline and a roster cap.</li>
                   <li>Approve, waitlist or reject, one at a time, or approve all pending.</li>
                   <li>Likely duplicate entries are flagged for you to check.</li>
                   <li>Parents with an account fill the form from a saved profile and can register siblings quickly.</li>

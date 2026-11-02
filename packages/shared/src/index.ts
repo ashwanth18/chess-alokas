@@ -4,3 +4,4 @@ export * from './availability.js';
 export * from './certificateMail.js';
 export * from './organizationInvites.js';
 export * from './guardianConsent.js';
+export * from './registrationForm.js';

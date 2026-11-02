@@ -4,7 +4,7 @@ import type { PlayerRelationship } from './types.js';
  * Recorded with each consent, so a record says which notice the person saw. Change it whenever the
  * Privacy Policy changes in a way that matters to a consent. A test keeps it equal to the page's date.
  */
-export const PRIVACY_NOTICE_VERSION = '2026-11-01';
+export const PRIVACY_NOTICE_VERSION = '2026-11-02';
 
 /**
  * Not enforced today: the forms show a notice and the API takes every request. These and

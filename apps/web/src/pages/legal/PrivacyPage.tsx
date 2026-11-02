@@ -128,6 +128,16 @@ const SECTIONS: LegalSection[] = [
               'The person registering.',
             ],
             [
+              'NRIC or passport number',
+              'Only when the organizer’s form asks for it. See “ID numbers” below.',
+              'The person registering.',
+            ],
+            [
+              'Age proof and other uploads',
+              'Only when the organizer’s form asks for them: an NRIC or birth certificate, or another file the organizer asks for, as PNG, JPEG, WebP or PDF. These can show a child’s full name, birth date, address and ID number.',
+              'The person registering.',
+            ],
+            [
               'Payment receipt',
               'The file you upload: PNG, JPEG, WebP or PDF. It may show names, bank details, amounts and references. We also keep the amount due and the payment status.',
               'The person registering.',
@@ -176,25 +186,36 @@ const SECTIONS: LegalSection[] = [
         />
         <h3>ID numbers</h3>
         <p>
-          Our forms don&apos;t ask for IC or passport numbers. Our database and server still have a
-          field that can hold a national ID on a player profile. Please don&apos;t put an ID number in
-          any name, note or answer box.
+          An organizer can choose to ask for an NRIC or passport number on their event&apos;s form. It
+          is off unless they turn it on. It is kept with that registration and isn&apos;t copied to the
+          roster, certificates or any public page. Lists show it masked, like ******-**-1234, and the
+          full number appears only when an owner, admin or director opens it. An organizer can also
+          turn on an age proof upload, kept and limited the same way. An organizer can delete an
+          event&apos;s age proofs and NRIC numbers at any time.
+        </p>
+        <p>
+          We don&apos;t check that a number or document is genuine. Our database and server also have a
+          field that can hold a national ID on a player profile, and our forms don&apos;t ask for it.
+          Please don&apos;t put an ID number in any name, note or answer box.
         </p>
         <h3>Location</h3>
         <p>
           Near me on the Find a tournament page asks your browser for your location, and only if you
           press it. The coordinates go to our server to sort events by distance. We don&apos;t save
           them in the database, and our application removes them from its logs. The proxy in front
-          of our server may still record them. The mobile app can do the same with
-          your approximate location, if you allow it. Organizers can publish a venue&apos;s
-          address and coordinates.
+          of our server may still record them. The mobile app can use your precise location, if you
+          allow it. It keeps that on the phone and doesn&apos;t send it to our server. To show a place
+          name, it sends rounded coordinates to your phone&apos;s own geocoder, usually Google&apos;s.
+          Its map views load map tiles from OpenFreeMap, which sees your IP address and the area you
+          view (map data © OpenStreetMap). Organizers can publish a venue&apos;s address and coordinates.
         </p>
         <h3>What you must give us</h3>
         <p>
           An account needs an email address and a password or email code. A registration needs the
           player&apos;s name. Other fields are voluntary for us, but an organizer may need them to accept
-          an entry or place a player in a category. A paid entry normally needs a receipt, or the
-          organizer has to confirm payment another way. Without what&apos;s required, you can&apos;t
+          an entry or place a player in a category. If an organizer&apos;s form requires an answer, an
+          NRIC number or an age proof, the entry can&apos;t be sent without it. A paid entry normally
+          needs a receipt, or the organizer has to confirm payment another way. Without what&apos;s required, you can&apos;t
           create the account or complete the entry.
         </p>
       </>
@@ -247,8 +268,9 @@ const SECTIONS: LegalSection[] = [
         />
         <p>
           These pages don&apos;t show email addresses, phone numbers, school, club, age or year of
-          birth. Receipts and certificates are not public. Floor pages show player names only after an
-          arbiter enters the round PIN.
+          birth, or answers to an organizer&apos;s questions. NRIC numbers, age proofs, other uploads,
+          receipts and certificates are not public. Floor pages show player names only after an arbiter
+          enters the round PIN.
         </p>
         <p>
           A single player can&apos;t hide their name with a setting. If you want a name removed or
@@ -265,7 +287,10 @@ const SECTIONS: LegalSection[] = [
       <ul>
         <li>
           <strong>The organizer and their team</strong> can see their event&apos;s registrations,
-          contact details and receipts, according to their role.
+          contact details and receipts, according to their role. Answers to the form&apos;s questions
+          are copied to the player&apos;s roster entry when approved, and can be downloaded with the
+          entries. NRIC numbers and uploads are not. Only an owner, admin or director can open those,
+          and arbiters on the team cannot.
         </li>
         <li>
           <strong>Arbiters using a round PIN</strong> can see boards and player names for that round.
@@ -296,7 +321,7 @@ const SECTIONS: LegalSection[] = [
           rows={[
             [
               'Supabase',
-              'Database, sign-in and file storage. This holds almost everything on this page, including receipts and certificates.',
+              'Database, sign-in and file storage. This holds almost everything on this page, including receipts, NRIC numbers, age proofs and certificates.',
               providerLocation('supabase'),
             ],
             [
@@ -324,10 +349,11 @@ const SECTIONS: LegalSection[] = [
         <h3>Error reports</h3>
         <p>
           Reports from the website and desktop app are filtered to remove emails, passwords, tokens,
-          live links and home folder names, and carry only an opaque user ID. Reports from our server
-          filter sign-in headers and coordinates and searches in the address, and when a signed-in
-          request fails they carry that opaque ID, not an email address. Other text in an error message
-          isn&apos;t filtered on the server.
+          live links, numbers shaped like an NRIC and home folder names, and carry only an opaque user
+          ID. Reports from our server filter sign-in headers, coordinates and searches in the address,
+          what was sent in a form, and numbers shaped like an NRIC, and when a signed-in request fails
+          they carry that opaque ID, not an email address. Other text in an error message isn&apos;t
+          filtered on the server.
         </p>
         <h3>Sending data outside Malaysia</h3>
         <p>
@@ -350,8 +376,9 @@ const SECTIONS: LegalSection[] = [
         <div className="lg-note">
           <p>
             <strong>We have no general retention period yet.</strong> The only scheduled deletion
-            is what follows a deleted account, below. Otherwise registrations, receipts, rosters,
-            results, certificates and usage statistics stay until someone removes them by hand. We
+            is what follows a deleted account, below. Otherwise registrations, NRIC numbers, age
+            proofs, receipts, rosters, results, certificates and usage statistics stay until someone
+            removes them by hand. We
             can&apos;t give you an end date today. We will publish retention periods here once they are
             set.
           </p>
@@ -366,11 +393,11 @@ const SECTIONS: LegalSection[] = [
             ['Player and family profiles on the account', 'Removed.'],
             [
               'Registrations you or your profiles made, with the copy of the player’s details',
-              'Contact details, other details and answers are removed straight away. Open entries are cancelled. An approved entry keeps only the player’s name, which the organizer’s roster already shows. Payment status and amount stay.',
+              'Contact details, other details, answers and any NRIC number are removed straight away. Open entries are cancelled. An approved entry keeps only the player’s name, which the organizer’s roster already shows. Payment status and amount stay.',
             ],
             [
-              'Receipts on those registrations',
-              'Kept for 30 days so the organizer can settle payments, then deleted by a scheduled job. Deletion can run later than day 30, and a failed attempt is tried again.',
+              'Receipts, age proofs and other uploads on those registrations',
+              'Kept for 30 days so the organizer can finish with them, then deleted by a scheduled job. Deletion can run later than day 30, and a failed attempt is tried again.',
             ],
             [
               'Roster entries, results and certificates in an organizer’s event',
@@ -382,7 +409,7 @@ const SECTIONS: LegalSection[] = [
             ],
             [
               'Tournaments of your own, outside any organization',
-              'Hidden straight away, then erased after 30 days with their rosters, results, registrations, receipts and certificates.',
+              'Hidden straight away, then erased after 30 days with their rosters, results, registrations, NRIC numbers, uploads, receipts and certificates.',
             ],
             [
               'An organization where you are the only owner',
@@ -403,7 +430,10 @@ const SECTIONS: LegalSection[] = [
         <h3>Other deletions</h3>
         <p>
           Deleting a player profile removes that profile, but not past registrations or roster entries.
-          When an organizer deletes a tournament, it is marked as deleted, not erased.
+          When an organizer deletes a tournament, it is marked as deleted, not erased, so its NRIC
+          numbers and uploads stay until removed. An organizer&apos;s &ldquo;Delete age proofs for this
+          event&rdquo; removes that event&apos;s age proof files and NRIC numbers straight away; receipts
+          and other uploads stay.
         </p>
         <p>
           If you want something erased, contact us or the organizer. We handle these requests by hand
@@ -423,8 +453,8 @@ const SECTIONS: LegalSection[] = [
         <ul>
           <li>The website uses HTTPS.</li>
           <li>Sign-in and database access rules limit who can read each organizer&apos;s data.</li>
-          <li>Receipts go to private storage and are served only through a route that checks the organizer&apos;s access.</li>
-          <li>Uploaded receipts are checked for file type and size.</li>
+          <li>Receipts, age proofs and other uploads go to private storage and are served only through a route that checks the organizer&apos;s access.</li>
+          <li>Uploads are checked for file type and size.</li>
           <li>Floor scoring needs a PIN, and changing the PIN ends older sessions.</li>
           <li>Public routes omit private fields and have rate limits.</li>
         </ul>

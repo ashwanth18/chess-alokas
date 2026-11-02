@@ -1,6 +1,7 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  AGE_PROOF_FIELD,
   matchesFilter,
   type PlayerProfile,
   type PlayerRelationship,
@@ -9,6 +10,7 @@ import {
 import {
   apiGetPublicEvent,
   apiListPlayerProfiles,
+  apiSchoolSuggestions,
   apiSubmitEventRegistration,
   type PublicEventDetailResponse,
 } from '../api/client';
@@ -16,6 +18,15 @@ import { useAuth } from '../auth/AuthContext';
 import { GuardianConsentNotice } from '../components/LegalLinks';
 import { trackPageView } from '../lib/pageAnalytics';
 import { BrandCrown } from '../ui/BrandCrown';
+import { Button, Field, PlayerName, buttonClass } from '../ui';
+import { Surface } from '../ui/Surface';
+import {
+  EMPTY_PARENT_FORM,
+  ParentFormFields,
+  type ParentFormValues,
+} from './registration-form/ParentFormFields';
+import { UPLOAD_ACCEPT, asPublicForm, readUpload } from './registration-form/formLogic';
+import './registration-form/registrationForm.css';
 
 const RELATIONSHIP_LABELS: Record<PlayerRelationship, string> = {
   self: 'Self',
@@ -24,10 +35,19 @@ const RELATIONSHIP_LABELS: Record<PlayerRelationship, string> = {
   family: 'Family',
 };
 
+const STATUS_SENTENCE: Record<string, string> = {
+  pending: 'waiting for the organizer to approve it',
+  waitlisted: 'on the waitlist, because the roster is full',
+};
+
 function formatFee(cents: number, currency = 'MYR'): string {
-  if (!cents || cents <= 0) return 'Free Entry';
+  if (!cents || cents <= 0) return 'Free';
   const amount = (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
   return `${currency} ${amount}`;
+}
+
+function formatDeadline(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export default function EventRegistrationPage() {
@@ -41,21 +61,14 @@ export default function EventRegistrationPage() {
   const [profiles, setProfiles] = useState<PlayerProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
-  const [name, setName] = useState('');
-  const [yearOfBirth, setYearOfBirth] = useState('');
-  const [gender, setGender] = useState('');
-  const [fideId, setFideId] = useState('');
-  const [rating, setRating] = useState('');
-  const [school, setSchool] = useState('');
-  const [club, setClub] = useState('');
-  const [city, setCity] = useState('');
-  const [stateName, setStateName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
-  const [receiptDataUrl, setReceiptDataUrl] = useState<string | null>(null);
-  const [receiptFileName, setReceiptFileName] = useState<string | null>(null);
+  const [values, setValues] = useState<ParentFormValues>(EMPTY_PARENT_FORM);
+  const onChange = useCallback(
+    (patch: Partial<ParentFormValues>) => setValues((v) => ({ ...v, ...patch })),
+    [],
+  );
+  /** Field (`ageProof`, a question id, or `receipt`) to the file chosen for it. */
+  const [files, setFiles] = useState<Record<string, { dataUrl: string; name: string }>>({});
+  const [schoolOptions, setSchoolOptions] = useState<string[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -70,39 +83,38 @@ export default function EventRegistrationPage() {
   const applyProfileAutofill = useCallback(
     (profile: PlayerProfile, cats: PublicEventDetailResponse['categories']) => {
       setSelectedProfileId(profile.id);
-      setName(profile.fullName);
       const yob = profile.yearOfBirth;
-      setYearOfBirth(yob != null ? String(yob) : '');
-      setGender(profile.gender ?? '');
-      setFideId(profile.fideId != null ? String(profile.fideId) : '');
-      const bestRating =
-        profile.fideStandard ?? profile.fideRapid ?? profile.fideBlitz ?? null;
-      setRating(bestRating != null ? String(bestRating) : '');
-      setSchool(profile.school ?? '');
-      setClub(profile.club ?? '');
-      setCity(profile.city ?? '');
-      setStateName(profile.state ?? '');
-      setEmail(profile.email ?? auth.user?.email ?? '');
-      setPhone(profile.phone ?? '');
-
-      if (cats.length > 0) {
-        const age = yob != null ? Math.max(0, new Date().getFullYear() - yob) : 0;
-        const matched = cats.find((c) =>
-          matchesFilter(
-            {
-              name: profile.fullName,
-              age,
-              gender: profile.gender ?? null,
-              rating: bestRating,
-              club: profile.club ?? profile.school ?? null,
-            },
-            c.filter,
-          ),
-        );
-        if (matched) {
-          setSelectedCategoryId(matched.id);
-        }
-      }
+      const bestRating = profile.fideStandard ?? profile.fideRapid ?? profile.fideBlitz ?? null;
+      const matched =
+        cats.length > 0
+          ? cats.find((c) =>
+              matchesFilter(
+                {
+                  name: profile.fullName,
+                  age: yob != null ? Math.max(0, new Date().getFullYear() - yob) : 0,
+                  gender: profile.gender ?? null,
+                  rating: bestRating,
+                  club: profile.club ?? profile.school ?? null,
+                },
+                c.filter,
+              ),
+            )
+          : undefined;
+      setValues((v) => ({
+        ...v,
+        name: profile.fullName,
+        yearOfBirth: yob != null ? String(yob) : '',
+        gender: profile.gender ?? '',
+        fideId: profile.fideId != null ? String(profile.fideId) : '',
+        rating: bestRating != null ? String(bestRating) : '',
+        school: profile.school ?? '',
+        club: profile.club ?? '',
+        city: profile.city ?? '',
+        state: profile.state ?? '',
+        email: profile.email ?? auth.user?.email ?? '',
+        phone: profile.phone ?? '',
+        ...(matched ? { categoryId: matched.id } : {}),
+      }));
     },
     [auth.user?.email],
   );
@@ -118,83 +130,108 @@ export default function EventRegistrationPage() {
       return;
     }
     setDetail(res.data);
-    if (res.data.categories.length > 0 && !selectedCategoryId) {
+    if (res.data.categories.length > 0) {
       const first = [...res.data.categories].sort((a, b) => a.sortOrder - b.sortOrder)[0]!;
-      setSelectedCategoryId(first.id);
+      setValues((v) => (v.categoryId ? v : { ...v, categoryId: first.id }));
     }
 
     if (auth.user) {
       const profRes = await apiListPlayerProfiles();
       if (profRes.ok && profRes.data.profiles.length > 0) {
         setProfiles(profRes.data.profiles);
-        const primary =
-          profRes.data.profiles.find((p) => p.isPrimary) ?? profRes.data.profiles[0]!;
+        const primary = profRes.data.profiles.find((p) => p.isPrimary) ?? profRes.data.profiles[0]!;
         applyProfileAutofill(primary, res.data.categories);
       } else if (auth.user.email) {
-        setEmail(auth.user.email);
+        const email = auth.user.email;
+        setValues((v) => ({ ...v, email }));
       }
     }
     setLoading(false);
-  }, [slug, auth.user, applyProfileAutofill, selectedCategoryId]);
+  }, [slug, auth.user, applyProfileAutofill]);
 
   useEffect(() => {
     void loadEventAndProfiles();
   }, [loadEventAndProfiles]);
 
-  function handleReceiptFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) {
-      setReceiptDataUrl(null);
-      setReceiptFileName(null);
+  const event = detail?.event ?? null;
+  const form = useMemo(() => asPublicForm(event?.registrationFormSchema), [event?.registrationFormSchema]);
+
+  // Suggestions come from this organizer's own earlier entries, as the parent types.
+  const schoolQuery = values.school.trim();
+  const canSuggestSchools = Boolean(event?.registrationOpen && form.collectSchool);
+  useEffect(() => {
+    if (!slug || !canSuggestSchools || schoolQuery.length < 2) {
+      setSchoolOptions([]);
       return;
     }
-    if (file.size > 3.5 * 1024 * 1024) {
-      setSubmitError('Receipt file must be under 3.5 MB.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setReceiptDataUrl(reader.result);
-        setReceiptFileName(file.name);
-        setSubmitError(null);
-      }
+    let stale = false;
+    const timer = setTimeout(() => {
+      void apiSchoolSuggestions(slug, schoolQuery).then((res) => {
+        if (!stale && res.ok) setSchoolOptions(res.data.schools);
+      });
+    }, 200);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
     };
-    reader.readAsDataURL(file);
+  }, [slug, canSuggestSchools, schoolQuery]);
+
+  async function chooseFile(field: string, file: File | null) {
+    if (!file) {
+      setFiles((prev) => {
+        const { [field]: _removed, ...rest } = prev;
+        return rest;
+      });
+      return;
+    }
+    const read = await readUpload(file);
+    if ('error' in read) {
+      setSubmitError(read.error);
+      return;
+    }
+    setSubmitError(null);
+    setFiles((prev) => ({ ...prev, [field]: { dataUrl: read.dataUrl, name: file.name } }));
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!slug || !detail) return;
-    if (!name.trim()) {
+    if (!values.name.trim()) {
       setSubmitError('Player full name is required.');
       return;
     }
-
-    const yobNum = yearOfBirth.trim() ? Number(yearOfBirth.trim()) : null;
-    const ageNum =
-      yobNum != null ? Math.max(0, new Date().getFullYear() - yobNum) : null;
+    const yobNum = values.yearOfBirth.trim() ? Number(values.yearOfBirth.trim()) : null;
+    const ageNum = yobNum != null ? Math.max(0, new Date().getFullYear() - yobNum) : null;
+    const customFiles = Object.fromEntries(
+      form.questions
+        .filter((q) => q.type === 'file' && files[q.id])
+        .map((q) => [q.id, files[q.id]!.dataUrl]),
+    );
 
     setSubmitting(true);
     setSubmitError(null);
-
     const res = await apiSubmitEventRegistration(slug, {
       playerProfileId: selectedProfileId,
-      selectedCategoryId: selectedCategoryId || null,
-      name: name.trim(),
+      selectedCategoryId: values.categoryId || null,
+      name: values.name.trim(),
       age: ageNum,
       yearOfBirth: yobNum,
-      gender: gender.trim() || null,
-      fideId: fideId.trim() ? Number(fideId.trim()) : null,
-      rating: rating.trim() ? Number(rating.trim()) : null,
-      school: school.trim() || null,
-      club: club.trim() || null,
-      city: city.trim() || null,
-      state: stateName.trim() || null,
-      email: email.trim() || null,
-      phone: phone.trim() || null,
-      customAnswers,
-      receiptDataUrl,
+      gender: values.gender.trim() || null,
+      fideId: values.fideId.trim() ? Number(values.fideId.trim()) : null,
+      rating: values.rating.trim() ? Number(values.rating.trim()) : null,
+      school: values.school.trim() || null,
+      club: values.club.trim() || null,
+      city: values.city.trim() || null,
+      state: values.state.trim() || null,
+      email: values.email.trim() || null,
+      phone: values.phone.trim() || null,
+      customAnswers: values.answers,
+      ...(Object.keys(customFiles).length ? { customFiles } : {}),
+      ...(form.collectNric ? { nricNumber: values.nricNumber.trim() } : {}),
+      ...(form.collectAgeProof && files[AGE_PROOF_FIELD]
+        ? { ageProofDataUrl: files[AGE_PROOF_FIELD]!.dataUrl }
+        : {}),
+      receiptDataUrl: files.receipt?.dataUrl ?? null,
       // The notice sits by the button, so submitting is the acceptance.
       guardianConsent: true,
     });
@@ -205,516 +242,299 @@ export default function EventRegistrationPage() {
       return;
     }
     setSubmittedReg(res.data.registration);
+    window.scrollTo?.({ top: 0 });
   }
 
-  const event = detail?.event ?? null;
+  /** A sibling shares contact details and school, but never a name, an ID or a file. */
+  function registerAnother() {
+    setSubmittedReg(null);
+    setFiles({});
+    setSelectedProfileId(null);
+    setValues((v) => ({
+      ...EMPTY_PARENT_FORM,
+      categoryId: v.categoryId,
+      school: v.school,
+      club: v.club,
+      city: v.city,
+      state: v.state,
+      email: v.email,
+      phone: v.phone,
+    }));
+  }
+
   const categories = [...(detail?.categories ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
   const participants = detail?.participants ?? [];
-  const formSchema = event?.registrationFormSchema;
   const mapsHref =
     event?.latitude != null && event?.longitude != null
       ? `https://www.google.com/maps/search/?api=1&query=${event.latitude},${event.longitude}`
       : event?.venueAddress || event?.venueName
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-            [event.venueName, event.venueAddress, event.city, event.state]
-              .filter(Boolean)
-              .join(', '),
+            [event.venueName, event.venueAddress, event.city, event.state].filter(Boolean).join(', '),
           )}`
         : null;
+  const deadlinePassed =
+    event?.registrationDeadline != null && new Date(event.registrationDeadline).getTime() < Date.now();
+  const acceptingEntries = Boolean(event?.registrationOpen) && !deadlinePassed;
+  const full = event?.maxParticipants != null && (event.registeredCount ?? 0) >= event.maxParticipants;
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <Link to="/discover" className="brand">
-          <span className="brand-knight" aria-hidden>
+    <Surface name="family">
+      <div className="rg-page">
+        <header className="rg-top">
+          <Link to="/discover" className="rg-brand">
             <BrandCrown />
-          </span>
-          <span className="brand-name">Chess Alokas</span>
-        </Link>
-        <div className="sync-bar">
-          <Link to="/discover" className="btn btn-sm btn-ghost">
-            ← All Events
+            Chess Alokas
           </Link>
-          {auth.user ? (
-            <Link to="/player" className="btn btn-sm btn-outline">
-              ♟ Player Portal
+          <nav aria-label="Account">
+            <Link to="/discover" className={buttonClass({ size: 'sm', variant: 'quiet' })}>
+              All events
             </Link>
-          ) : (
-            <Link to="/login" className="btn btn-sm btn-outline">
-              Sign in for 1-Click Autofill
-            </Link>
-          )}
-        </div>
-      </header>
-
-      <main className="page-content">
-        <div className="page-container event-register-page">
-          {loading ? (
-            <p className="loading-row">Loading tournament details…</p>
-          ) : error || !event ? (
-            <div className="empty-state">
-              <h1>Tournament Not Found</h1>
-              <p className="form-hint">{error ?? 'This registration link is no longer valid.'}</p>
-              <Link to="/discover" className="btn btn-primary">
-                Explore Events
+            {auth.user ? (
+              <Link to="/player" className={buttonClass({ size: 'sm' })}>
+                Player portal
               </Link>
-            </div>
+            ) : (
+              <Link to="/login" className={buttonClass({ size: 'sm' })}>
+                Sign in to fill from a saved player
+              </Link>
+            )}
+          </nav>
+        </header>
+
+        <main className="rg-main">
+          {loading ? (
+            <p role="status">Loading the event…</p>
+          ) : error || !event ? (
+            <section className="ui-card rg-card">
+              <h1>Event not found</h1>
+              <p>{error ?? 'This registration link is no longer valid.'}</p>
+              <Link to="/discover" className={buttonClass({ variant: 'primary' })}>
+                Explore events
+              </Link>
+            </section>
           ) : (
             <>
-              {/* Event Hero Card */}
-              <section className="admin-panel event-hero-card">
-                <div className="discover-card-top">
+              <section className="ui-card rg-hero">
+                {event.organizationName && <span className="rg-org">{event.organizationName}</span>}
+                <h1>{event.name}</h1>
+                <p className="rg-where">
+                  {[event.venueName, event.venueAddress, event.city, event.state].filter(Boolean).join(' · ') ||
+                    'Venue to be announced by the organizer'}
+                </p>
+                <dl className="rg-facts">
                   <div>
-                    {event.organizationName && (
-                      <span className="discover-org-label">{event.organizationName}</span>
-                    )}
-                    <h1>{event.name}</h1>
-                    <p className="page-subtitle">
-                      {[event.venueName, event.venueAddress, event.city, event.state]
-                        .filter(Boolean)
-                        .join(' · ') || 'Venue details announced by organizer'}
-                    </p>
-                  </div>
-                  <div className="discover-badges">
-                    <span
-                      className={`org-status-badge ${
-                        event.registrationOpen ? 'is-verified' : 'is-pending_review'
-                      }`}
-                    >
-                      {event.registrationOpen ? 'Registration Open' : 'Registration Closed'}
-                    </span>
-                    {event.publicToken && (
-                      <Link
-                        to={`/live/${encodeURIComponent(event.publicToken)}`}
-                        className="btn btn-sm btn-outline"
-                      >
-                        Live Standings →
-                      </Link>
-                    )}
-                  </div>
-                </div>
-
-                <div className="discover-meta-grid" style={{ marginTop: '1rem' }}>
-                  <div>
-                    <span className="admin-metric-label">Date</span>
-                    <strong>{event.date ?? 'TBA'}</strong>
+                    <dt>Date</dt>
+                    <dd>{event.date ?? 'To be announced'}</dd>
                   </div>
                   <div>
-                    <span className="admin-metric-label">Format &amp; Rounds</span>
-                    <strong>
-                      {event.style.toUpperCase()} · {event.rounds} Rounds
-                      {event.timeControl ? ` (${event.timeControl})` : ''}
-                    </strong>
+                    <dt>Format</dt>
+                    <dd>
+                      {event.style === 'dutch' ? 'FIDE Dutch Swiss' : 'Swiss'}, {event.rounds} rounds
+                      {event.timeControl ? `, ${event.timeControl}` : ''}
+                    </dd>
                   </div>
                   <div>
-                    <span className="admin-metric-label">Entry Fee</span>
-                    <strong>{formatFee(event.entryFeeCents, event.currency)}</strong>
+                    <dt>Entry fee</dt>
+                    <dd>{formatFee(event.entryFeeCents, event.currency)}</dd>
                   </div>
                   <div>
-                    <span className="admin-metric-label">Approved Roster</span>
-                    <strong>
+                    <dt>On the roster</dt>
+                    <dd>
                       {event.registeredCount}
-                      {event.maxParticipants ? ` / ${event.maxParticipants}` : ''} players
-                    </strong>
+                      {event.maxParticipants ? ` of ${event.maxParticipants}` : ''}
+                    </dd>
                   </div>
-                </div>
-
-                {mapsHref && (
-                  <div style={{ marginTop: '0.85rem' }}>
-                    <a
-                      href={mapsHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn btn-sm btn-outline"
-                    >
-                      📍 Open Venue in Google Maps ↗
+                  {event.registrationDeadline && (
+                    <div>
+                      <dt>{deadlinePassed ? 'Registration closed' : 'Registration closes'}</dt>
+                      <dd>{formatDeadline(event.registrationDeadline)}</dd>
+                    </div>
+                  )}
+                </dl>
+                <div className="rg-links">
+                  {mapsHref && (
+                    <a href={mapsHref} target="_blank" rel="noopener noreferrer" className={buttonClass({ size: 'sm' })}>
+                      Open venue in Google Maps
                     </a>
-                  </div>
-                )}
-
-                {event.descriptionMd && (
-                  <div className="event-description-box" style={{ marginTop: '1rem' }}>
-                    <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{event.descriptionMd}</p>
-                  </div>
-                )}
+                  )}
+                  {event.publicToken && (
+                    <Link to={`/live/${encodeURIComponent(event.publicToken)}`} className={buttonClass({ size: 'sm' })}>
+                      Live standings
+                    </Link>
+                  )}
+                </div>
+                {event.descriptionMd && <p className="rg-text">{event.descriptionMd}</p>}
                 {event.rulesMd && (
-                  <details style={{ marginTop: '0.75rem' }}>
-                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-                      Tournament Rules &amp; Regulations
-                    </summary>
-                    <p className="form-hint" style={{ whiteSpace: 'pre-wrap', marginTop: '0.5rem' }}>
-                      {event.rulesMd}
-                    </p>
+                  <details className="rg-rules">
+                    <summary>Rules</summary>
+                    <p className="rg-text">{event.rulesMd}</p>
                   </details>
                 )}
               </section>
 
-              {/* Registration Form or Confirmation Card */}
               {submittedReg ? (
-                <section className="admin-panel" aria-live="polite">
-                  <span className="org-status-badge is-verified">Registration Submitted</span>
-                  <h2 style={{ marginTop: '0.5rem' }}>
-                    You’re in the queue, {submittedReg.playerSnapshot.name}!
-                  </h2>
-                  <p className="form-hint">
-                    Your registration status is <strong>{submittedReg.status.toUpperCase()}</strong>
-                    {submittedReg.paymentStatus !== 'not_required'
-                      ? ` · Payment: ${submittedReg.paymentStatus.replace('_', ' ')}`
-                      : ''}
-                    . Once the tournament organizer verifies your entry, you will appear in the
-                    official tournament roster and receive live board pairings on matchday.
+                <section className="ui-card rg-card" aria-live="polite">
+                  <h2>Entry sent for {submittedReg.playerSnapshot.name}</h2>
+                  <p>
+                    Your entry is {STATUS_SENTENCE[submittedReg.status] ?? submittedReg.status}. Once the
+                    organizer approves it, the player joins the roster.
                   </p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', marginTop: '1rem' }}>
+                  <div className="rg-links">
+                    <Button variant="primary" onClick={registerAnother}>
+                      Register another player
+                    </Button>
                     {auth.user ? (
-                      <Link to="/player" className="btn btn-primary">
-                        Open Player &amp; Family Portal →
+                      <Link to="/player" className={buttonClass()}>
+                        Open player portal
                       </Link>
                     ) : (
-                      <Link to="/signup" className="btn btn-primary">
-                        Create Free Player Account to Track Live Pairings →
+                      <Link to="/signup" className={buttonClass()}>
+                        Create an account to follow pairings
                       </Link>
                     )}
-                    <button
-                      type="button"
-                      className="btn btn-outline"
-                      onClick={() => {
-                        setSubmittedReg(null);
-                        setReceiptDataUrl(null);
-                        setReceiptFileName(null);
-                      }}
-                    >
-                      + Register Another Child / Player
-                    </button>
                   </div>
                 </section>
-              ) : !event.registrationOpen ? (
-                <section className="admin-panel">
-                  <h3>Online Registration Closed</h3>
-                  <p className="form-hint">
-                    Online registration is currently closed for this tournament. Contact the
-                    organizer for late entry availability.
-                  </p>
+              ) : !acceptingEntries ? (
+                <section className="ui-card rg-card">
+                  <h2>Registration is closed</h2>
+                  <p>Contact the organizer about late entries.</p>
                 </section>
               ) : (
-                <section className="admin-panel" aria-label="Player registration form">
-                  <h2>Player Registration Form</h2>
+                <section className="ui-card rg-card" aria-label="Player registration form">
+                  <h2>Register a player</h2>
+                  {full && <p className="rf-note rf-note--warn">The roster is full. New entries join the waitlist.</p>}
 
-                  {/* 1-Click Family / Student Profile Selector */}
                   {auth.user && profiles.length > 0 && (
-                    <div className="player-switcher-bar" style={{ marginTop: '0.75rem' }}>
-                      <p className="admin-metric-label" style={{ marginBottom: '0.5rem' }}>
-                        ⚡ 1-Click Autofill from your Player &amp; Family Profiles:
-                      </p>
-                      <div className="player-chips">
-                        {profiles.map((p) => {
-                          const active = selectedProfileId === p.id;
-                          return (
-                            <button
-                              key={p.id}
-                              type="button"
-                              className={`player-profile-chip ${active ? 'active' : ''}`}
-                              onClick={() => applyProfileAutofill(p, categories)}
-                            >
-                              <span className="player-chip-name">{p.fullName}</span>
-                              <span className="player-chip-badge">
-                                {RELATIONSHIP_LABELS[p.relationship] ?? p.relationship}
-                              </span>
-                            </button>
-                          );
-                        })}
+                    <div>
+                      <p className="rf-note">Fill from a saved player</p>
+                      <div className="rg-profiles">
+                        {profiles.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            className={`rg-profile${selectedProfileId === p.id ? ' is-on' : ''}`}
+                            aria-pressed={selectedProfileId === p.id}
+                            onClick={() => applyProfileAutofill(p, categories)}
+                          >
+                            {p.fullName} ({RELATIONSHIP_LABELS[p.relationship] ?? p.relationship})
+                          </button>
+                        ))}
                         <button
                           type="button"
-                          className={`player-profile-chip ${selectedProfileId === null ? 'active' : ''}`}
+                          className={`rg-profile${selectedProfileId === null ? ' is-on' : ''}`}
+                          aria-pressed={selectedProfileId === null}
                           onClick={() => {
                             setSelectedProfileId(null);
-                            setName('');
-                            setYearOfBirth('');
-                            setGender('');
-                            setFideId('');
-                            setRating('');
-                            setSchool('');
-                            setClub('');
+                            onChange({
+                              name: '',
+                              yearOfBirth: '',
+                              gender: '',
+                              fideId: '',
+                              rating: '',
+                              school: '',
+                              club: '',
+                            });
                           }}
                         >
-                          + Enter Manually
+                          Someone else
                         </button>
                       </div>
                     </div>
                   )}
 
-                  <form className="auth-form" onSubmit={(e) => void handleSubmit(e)}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.75rem' }}>
-                      <label>
-                        Player Full Name *
-                        <input
-                          className="input"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          placeholder="e.g. Aarav Ashwanth"
-                          required
-                        />
-                      </label>
-                      <label>
-                        Year of Birth
-                        <input
-                          className="input"
-                          type="number"
-                          min={1920}
-                          max={new Date().getFullYear()}
-                          value={yearOfBirth}
-                          onChange={(e) => setYearOfBirth(e.target.value)}
-                          placeholder="2015"
-                        />
-                      </label>
-                      <label>
-                        Gender
-                        <select
-                          className="input"
-                          value={gender}
-                          onChange={(e) => setGender(e.target.value)}
-                        >
-                          <option value="">—</option>
-                          <option value="M">Male (M)</option>
-                          <option value="F">Female (F)</option>
-                        </select>
-                      </label>
-                    </div>
+                  <form onSubmit={(e) => void handleSubmit(e)}>
+                    <ParentFormFields
+                      form={form}
+                      categories={categories}
+                      values={values}
+                      onChange={onChange}
+                      fileNames={Object.fromEntries(Object.entries(files).map(([k, v]) => [k, v.name]))}
+                      onFile={(field, file) => void chooseFile(field, file)}
+                      schoolOptions={schoolOptions}
+                    />
 
-                    {categories.length > 0 && (
-                      <label>
-                        Category / Section
-                        <select
-                          className="input"
-                          value={selectedCategoryId}
-                          onChange={(e) => setSelectedCategoryId(e.target.value)}
-                        >
-                          {categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                      {(formSchema?.collectFideId ?? true) && (
-                        <label>
-                          FIDE ID (optional)
-                          <input
-                            className="input"
-                            type="number"
-                            value={fideId}
-                            onChange={(e) => setFideId(e.target.value)}
-                            placeholder="5820001"
-                          />
-                        </label>
-                      )}
-                      <label>
-                        Rating (FIDE / National, optional)
-                        <input
-                          className="input"
-                          type="number"
-                          value={rating}
-                          onChange={(e) => setRating(e.target.value)}
-                          placeholder="1450"
-                        />
-                      </label>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                      {(formSchema?.collectSchool ?? true) && (
-                        <label>
-                          School / Institution
-                          <input
-                            className="input"
-                            value={school}
-                            onChange={(e) => setSchool(e.target.value)}
-                            placeholder="SJK(C) Chung Kwo"
-                          />
-                        </label>
-                      )}
-                      <label>
-                        Chess Club / Academy
-                        <input
-                          className="input"
-                          value={club}
-                          onChange={(e) => setClub(e.target.value)}
-                          placeholder="KL Junior Chess Academy"
-                        />
-                      </label>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                      <label>
-                        City
-                        <input
-                          className="input"
-                          value={city}
-                          onChange={(e) => setCity(e.target.value)}
-                          placeholder="Kuala Lumpur"
-                        />
-                      </label>
-                      <label>
-                        State
-                        <input
-                          className="input"
-                          value={stateName}
-                          onChange={(e) => setStateName(e.target.value)}
-                          placeholder="WP Kuala Lumpur"
-                        />
-                      </label>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                      <label>
-                        Contact email (for the organizer and your digital certificate)
-                        <input
-                          className="input"
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="parent@example.com"
-                        />
-                      </label>
-                      {(formSchema?.collectPhone ?? true) && (
-                        <label>
-                          Phone / WhatsApp
-                          <input
-                            className="input"
-                            value={phone}
-                            onChange={(e) => setPhone(e.target.value)}
-                            placeholder="+60 12-345 6789"
-                          />
-                        </label>
-                      )}
-                    </div>
-
-                    {/* Organizer Custom Questions */}
-                    {(formSchema?.customQuestions ?? []).map((q) => (
-                      <label key={q.id}>
-                        {q.label} {q.required ? '*' : ''}
-                        {q.type === 'select' && q.options?.length ? (
-                          <select
-                            className="input"
-                            required={q.required}
-                            value={customAnswers[q.id] ?? ''}
-                            onChange={(e) =>
-                              setCustomAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
-                            }
-                          >
-                            <option value="">Select…</option>
-                            {q.options.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            className="input"
-                            required={q.required}
-                            value={customAnswers[q.id] ?? ''}
-                            onChange={(e) =>
-                              setCustomAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
-                            }
-                          />
-                        )}
-                      </label>
-                    ))}
-
-                    {/* Paid Entry Fee & Receipt Upload */}
                     {event.entryFeeCents > 0 && (
-                      <div className="payment-box">
-                        <h4>
-                          Entry Fee Payment: {formatFee(event.entryFeeCents, event.currency)}
-                        </h4>
-                        {event.paymentInstructions && (
-                          <p className="form-hint" style={{ whiteSpace: 'pre-wrap' }}>
-                            {event.paymentInstructions}
-                          </p>
-                        )}
-                        {event.paymentQrUrl && (
-                          <div style={{ margin: '0.75rem 0' }}>
-                            <img
-                              src={event.paymentQrUrl}
-                              alt="Organizer payment QR code"
-                              style={{
-                                maxWidth: '220px',
-                                borderRadius: '8px',
-                                border: '1px solid var(--color-border)',
-                              }}
+                      <div className="rg-payment">
+                        <h3>Entry fee: {formatFee(event.entryFeeCents, event.currency)}</h3>
+                        {event.paymentInstructions && <p className="rg-text">{event.paymentInstructions}</p>}
+                        {event.paymentQrUrl && <img src={event.paymentQrUrl} alt="Organizer payment QR code" />}
+                        <Field
+                          label="Payment receipt"
+                          optional
+                          hint={
+                            files.receipt
+                              ? `Attached: ${files.receipt.name}`
+                              : 'Screenshot or PDF, up to 5 MB. You can also send it later from your account.'
+                          }
+                        >
+                          {(control) => (
+                            <input
+                              {...control}
+                              type="file"
+                              accept={UPLOAD_ACCEPT}
+                              onChange={(e) => void chooseFile('receipt', e.target.files?.[0] ?? null)}
                             />
-                          </div>
-                        )}
-                        <label>
-                          Upload Payment Receipt (Screenshot / Image / PDF)
-                          <input
-                            className="input"
-                            type="file"
-                            accept="image/*,application/pdf"
-                            onChange={handleReceiptFileChange}
-                          />
-                        </label>
-                        {receiptFileName && (
-                          <p className="form-hint">Attached: {receiptFileName}</p>
-                        )}
+                          )}
+                        </Field>
                       </div>
                     )}
 
-                    {submitError && <div className="form-error">{submitError}</div>}
+                    {submitError && (
+                      <p className="rg-error" role="alert">
+                        {submitError}
+                      </p>
+                    )}
 
                     <GuardianConsentNotice />
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                      <button
-                        type="submit"
-                        className="btn btn-primary"
-                        disabled={submitting}
-                      >
-                        {submitting ? 'Submitting Registration…' : 'Submit Registration →'}
-                      </button>
+                    <div className="rg-submit">
+                      <Button type="submit" variant="primary" disabled={submitting}>
+                        {submitting ? 'Sending…' : 'Submit entry'}
+                      </Button>
                     </div>
                   </form>
                 </section>
               )}
 
-              {/* Registered Roster Preview */}
-              <section className="admin-panel" aria-label="Approved participants">
-                <h3>Confirmed Roster ({participants.length})</h3>
+              <section className="ui-card rg-card" aria-label="Players on the roster">
+                <h2>Roster ({participants.length})</h2>
                 {participants.length === 0 ? (
-                  <p className="form-hint">No confirmed players on the roster yet.</p>
+                  <p>No confirmed players yet.</p>
                 ) : (
-                  <div className="table-scroll" style={{ marginTop: '0.75rem' }}>
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>Name</th>
-                          <th>Rating</th>
-                          <th>FIDE ID</th>
+                  <table className="rg-roster">
+                    <thead>
+                      <tr>
+                        <th scope="col" className="rg-num">
+                          No.
+                        </th>
+                        <th scope="col">Name</th>
+                        <th scope="col" className="rg-data">
+                          Rating
+                        </th>
+                        <th scope="col" className="rg-data">
+                          FIDE ID
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {participants.map((p, idx) => (
+                        <tr key={p.id}>
+                          <td>{idx + 1}</td>
+                          <td>
+                            <PlayerName name={p.name} />
+                          </td>
+                          <td className="rg-data">{p.rating ?? 'None'}</td>
+                          <td className="rg-data">{p.fideId ?? 'None'}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {participants.map((p, idx) => (
-                          <tr key={p.id}>
-                            <td>{idx + 1}</td>
-                            <td>
-                              <strong>{p.name}</strong>
-                            </td>
-                            <td>{p.rating ?? '—'}</td>
-                            <td>{p.fideId ?? '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
               </section>
             </>
           )}
-        </div>
-      </main>
-    </div>
+        </main>
+      </div>
+    </Surface>
   );
 }

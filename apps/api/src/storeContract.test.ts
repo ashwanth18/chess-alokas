@@ -692,6 +692,807 @@ describe.each([
     });
   });
 
+  describe('registration form builder', () => {
+    const DAY = 24 * HOUR;
+    const PNG =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const SVG = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')}`;
+    const HTML_AS_PNG = `data:image/png;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`;
+    const NRIC = '140305-14-5678';
+    const SECRET_ANSWER = 'Answer-Only-For-The-Organizer';
+
+    const QUESTIONS = [
+      { id: 'q_shirt', label: 'T-shirt size', labelMs: 'Saiz baju', type: 'select', required: true, options: ['S', 'M', 'L'] },
+      { id: 'q_diet', label: 'Dietary needs', type: 'text', required: false },
+      { id: 'q_photo', label: 'Photo permission', labelMs: 'Kebenaran foto', type: 'checkbox', required: true },
+      { id: 'q_letter', label: 'School letter', type: 'file', required: false },
+    ];
+
+    beforeAll(() => {
+      process.env['RECEIPTS_DIR'] = path.join(certDir, 'form-receipts');
+    });
+    afterAll(() => {
+      delete process.env['RECEIPTS_DIR'];
+    });
+
+    const publishing = (user: string, id: string, payload: unknown) =>
+      call(user, 'PATCH', `/tournaments/${id}/publishing`, payload);
+
+    async function formEvent(form: Record<string, unknown> = {}, patch: Record<string, unknown> = {}) {
+      const owner = await newUser();
+      const t = await seedTournament(owner);
+      const saved = await publishing(owner, t.id, {
+        registrationOpen: true,
+        registrationFormSchema: { customQuestions: QUESTIONS, ...form },
+        ...patch,
+      });
+      expect(saved.status).toBe(200);
+      return { owner, t, orgId: t.organizationId! };
+    }
+
+    const goodEntry = (extra: Record<string, unknown> = {}) => ({
+      name: 'Aina Tester',
+      email: `${crypto.randomUUID()}@example.test`,
+      customAnswers: { q_shirt: 'M', q_diet: SECRET_ANSWER, q_photo: true },
+      ...extra,
+    });
+
+    const privateEntry = (extra: Record<string, unknown> = {}) =>
+      goodEntry({ nricNumber: NRIC, ageProofDataUrl: PNG, customFiles: { q_letter: PNG }, ...extra });
+
+    const register = (id: string, body: unknown, user: string | null = null) =>
+      call(user, 'POST', `/public/events/${id}/register`, body);
+
+    describe('the form as public pages and the apps see it', () => {
+      it('sends every visible question to current clients and only text and select to older builds', async () => {
+        const { t } = await formEvent();
+        const res = await call(null, 'GET', `/public/events/${t.id}`);
+        const form = res.body.event.registrationFormSchema;
+        expect(form.questions.map((q: { id: string }) => q.id)).toEqual([
+          'q_shirt',
+          'q_diet',
+          'q_photo',
+          'q_letter',
+        ]);
+        expect(form.questions[0]).toMatchObject({ label: 'T-shirt size', labelMs: 'Saiz baju' });
+        // An older build reads customQuestions and would draw anything else as a text box.
+        expect(form.customQuestions).toEqual([
+          { id: 'q_shirt', label: 'T-shirt size / Saiz baju', type: 'select', required: true, options: ['S', 'M', 'L'] },
+          { id: 'q_diet', label: 'Dietary needs', type: 'text', required: false },
+        ]);
+      });
+
+      it('leaves NRIC and age proof off by default', async () => {
+        const owner = await newUser();
+        const t = await seedTournament(owner);
+        await publishing(owner, t.id, { registrationOpen: true });
+        const res = await call(null, 'GET', `/public/events/${t.id}`);
+        const form = res.body.event.registrationFormSchema;
+        expect(form).toMatchObject({
+          collectSchool: true,
+          collectFideId: true,
+          collectPhone: true,
+          collectNric: false,
+          collectAgeProof: false,
+        });
+      });
+
+      it('refuses a broken form when an organizer saves it', async () => {
+        const owner = await newUser();
+        const t = await seedTournament(owner);
+        const bad = [
+          [{ id: 'a', label: 'No options', type: 'select', options: [] }],
+          [{ id: 'a', label: 'One' }, { id: 'a', label: 'Two' }],
+          [{ id: 'checkedIn', label: 'Collides with roll call' }],
+          [{ id: 'bad id!', label: 'Bad id' }],
+          [{ id: 'a', label: '' }],
+          [{ id: 'a', label: 'Unknown type', type: 'video' }],
+          ['f1', 'f2', 'f3', 'f4'].map((id) => ({ id, label: id, type: 'file' })),
+        ];
+        for (const customQuestions of bad) {
+          const res = await publishing(owner, t.id, { registrationFormSchema: { customQuestions } });
+          expect(res.status).toBe(400);
+        }
+      });
+    });
+
+    describe('questions and options that already have answers', () => {
+      it('hides a removed question with answers, and really removes one without', async () => {
+        const { owner, t } = await formEvent();
+        const entry = await register(t.id, goodEntry());
+        expect(entry.status).toBe(201);
+
+        const res = await publishing(owner, t.id, {
+          registrationFormSchema: {
+            customQuestions: [QUESTIONS[0], QUESTIONS[2]],
+          },
+        });
+        expect(res.status).toBe(200);
+        const questions = res.body.tournament.registrationFormSchema.customQuestions;
+        expect(questions.find((q: { id: string }) => q.id === 'q_diet').hidden).toBe(true);
+        expect(questions.some((q: { id: string }) => q.id === 'q_letter')).toBe(false);
+
+        const shown = await call(null, 'GET', `/public/events/${t.id}`);
+        expect(JSON.stringify(shown.body)).not.toContain('Dietary');
+
+        const queue = await call(owner, 'GET', `/tournaments/${t.id}/registrations`);
+        expect(queue.body.registrations[0].customAnswers.q_diet).toBe(SECRET_ANSWER);
+
+        const later = await register(t.id, goodEntry({ customAnswers: { q_shirt: 'S', q_photo: true, q_diet: 'dropped' } }));
+        expect(later.status).toBe(201);
+        expect(later.body.registration.customAnswers).not.toHaveProperty('q_diet');
+      });
+
+      it('retires a removed dropdown option with answers, off the form and still accepted from an open page', async () => {
+        const { owner, t } = await formEvent();
+        expect((await register(t.id, goodEntry())).status).toBe(201);
+
+        const res = await publishing(owner, t.id, {
+          registrationFormSchema: {
+            customQuestions: [{ ...QUESTIONS[0], options: ['S', 'XL'] }, QUESTIONS[1], QUESTIONS[2], QUESTIONS[3]],
+          },
+        });
+        const shirt = res.body.tournament.registrationFormSchema.customQuestions[0];
+        expect(shirt.options).toEqual(['S', 'XL']);
+        expect(shirt.retiredOptions).toEqual(['M']);
+
+        const shown = await call(null, 'GET', `/public/events/${t.id}`);
+        const publicShirt = shown.body.event.registrationFormSchema.questions[0];
+        expect(publicShirt.options).toEqual(['S', 'XL']);
+        expect(JSON.stringify(shown.body.event.registrationFormSchema)).not.toContain('retiredOptions');
+
+        expect((await register(t.id, goodEntry())).status).toBe(201);
+        // L had no answers, so it is simply gone.
+        const gone = await register(t.id, goodEntry({ customAnswers: { q_shirt: 'L', q_photo: true } }));
+        expect(gone.status).toBe(400);
+        expect(gone.body.error).toContain('“L”');
+      });
+
+      it('brings a retired option back when the organizer adds it again', async () => {
+        const { owner, t } = await formEvent();
+        await register(t.id, goodEntry());
+        await publishing(owner, t.id, {
+          registrationFormSchema: { customQuestions: [{ ...QUESTIONS[0], options: ['S'] }, QUESTIONS[2]] },
+        });
+        const res = await publishing(owner, t.id, {
+          registrationFormSchema: { customQuestions: [{ ...QUESTIONS[0], options: ['S', 'M'] }, QUESTIONS[2]] },
+        });
+        const shirt = res.body.tournament.registrationFormSchema.customQuestions[0];
+        expect(shirt.options).toEqual(['S', 'M']);
+        expect(shirt.retiredOptions).toBeUndefined();
+      });
+
+      it('refuses to change the type of a question with answers', async () => {
+        const { owner, t } = await formEvent();
+        await register(t.id, goodEntry());
+        const res = await publishing(owner, t.id, {
+          registrationFormSchema: {
+            customQuestions: [{ ...QUESTIONS[1], type: 'checkbox' }, QUESTIONS[0], QUESTIONS[2]],
+          },
+        });
+        expect(res.status).toBe(409);
+        expect(res.body.error).toContain('Dietary needs');
+      });
+
+      it('counts answers for the organizer, without the answers themselves', async () => {
+        const { owner, t } = await formEvent();
+        await register(t.id, privateEntry());
+        const res = await call(owner, 'GET', `/tournaments/${t.id}/publishing`);
+        expect(res.status).toBe(200);
+        expect(res.body.answerCounts.q_shirt.answers).toBe(1);
+        expect(res.body.answerCounts.q_letter.answers).toBe(1);
+        expect(res.body.answerCounts.q_shirt.options.M).toBe(1);
+      });
+
+      it('keeps the form when the desk syncs an older copy of the tournament', async () => {
+        const { owner, t } = await formEvent();
+        const pushed = await push(owner, [
+          tournamentItem(t.id, { name: 'Renamed at the desk', status: 'draft', rounds: 5 }, iso(60_000)),
+        ]);
+        expect(pushed.status).toBe(200);
+        const after = await store.getTournament(t.id);
+        expect(after?.name).toBe('Renamed at the desk');
+        expect(after?.registrationFormSchema?.customQuestions.map((q) => q.id)).toContain('q_letter');
+      });
+    });
+
+    describe('what the server checks', () => {
+      it.each([
+        ['a required dropdown left empty', { customAnswers: { q_photo: true } }, 'T-shirt size / Saiz baju'],
+        ['a value not in the dropdown', { customAnswers: { q_shirt: 'XXL', q_photo: true } }, '“XXL”'],
+        ['a required tick left off', { customAnswers: { q_shirt: 'M', q_photo: false } }, 'Kebenaran foto'],
+        ['an object for a text answer', { customAnswers: { q_shirt: 'M', q_photo: true, q_diet: { a: 1 } } }, 'Dietary needs'],
+        ['an over-long answer', { customAnswers: { q_shirt: 'M', q_photo: true, q_diet: 'x'.repeat(1001) } }, 'too long'],
+        ['a number for a tick', { customAnswers: { q_shirt: 'M', q_photo: 7 } }, 'tick'],
+      ])('refuses %s, naming the question', async (_label, body, expected) => {
+        const { t } = await formEvent();
+        const res = await register(t.id, goodEntry(body));
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain(expected);
+        expect(typeof res.body.error).toBe('string');
+      });
+
+      it('drops answers to unknown questions and stores none of them', async () => {
+        const { owner, t } = await formEvent();
+        const res = await register(
+          t.id,
+          goodEntry({
+            customAnswers: { q_shirt: 'M', q_photo: true, ghost: 'not on the form' },
+          }),
+        );
+        expect(res.status).toBe(201);
+        const queue = await call(owner, 'GET', `/tournaments/${t.id}/registrations`);
+        expect(queue.body.registrations[0].customAnswers).toEqual({ q_shirt: 'M', q_photo: true });
+      });
+
+      it.each([
+        ['SVG', SVG],
+        ['HTML posing as a PNG', HTML_AS_PNG],
+        ['more than 5 MB', `data:image/png;base64,${Buffer.alloc(5 * 1024 * 1024 + 1, 0x89).toString('base64')}`],
+      ])('refuses %s as an upload, in each place a file goes', async (_label, file) => {
+        const { t } = await formEvent({ collectAgeProof: true });
+        const asAnswer = await register(
+          t.id,
+          goodEntry({ ageProofDataUrl: PNG, customFiles: { q_letter: file } }),
+        );
+        expect(asAnswer.status).toBe(400);
+        expect(asAnswer.body.error).toContain('School letter');
+        const asProof = await register(t.id, goodEntry({ ageProofDataUrl: file }));
+        expect(asProof.status).toBe(400);
+        expect(asProof.body.error).toContain('Age proof');
+      });
+
+      it('takes an entry carrying a receipt, age proof and file answers at the size limit', async () => {
+        const { t } = await formEvent({ collectAgeProof: true });
+        const bytes = Buffer.alloc(5 * 1024 * 1024);
+        Buffer.from('89504e47', 'hex').copy(bytes);
+        const big = `data:image/png;base64,${bytes.toString('base64')}`;
+        const res = await register(t.id, goodEntry({ ageProofDataUrl: big, customFiles: { q_letter: big } }));
+        expect(res.status).toBe(201);
+        expect(res.body.registration.files).toHaveLength(2);
+      }, 60_000);
+
+      it('removes files already saved when the entry is refused as a duplicate', async () => {
+        const { t } = await formEvent({ collectAgeProof: true });
+        const email = 'twin@example.test';
+        expect((await register(t.id, goodEntry({ email, ageProofDataUrl: PNG }))).status).toBe(201);
+        const countFiles = () => {
+          const dir = path.join(process.env['RECEIPTS_DIR']!, t.id);
+          return readdirSync(dir).length;
+        };
+        const before = countFiles();
+        const again = await register(t.id, goodEntry({ email, ageProofDataUrl: PNG }));
+        expect(again.status).toBe(409);
+        expect(countFiles()).toBe(before);
+      });
+
+      it('takes only what the form asks for', async () => {
+        const { owner, t } = await formEvent();
+        const res = await register(t.id, privateEntry());
+        expect(res.status).toBe(201);
+        const [stored] = await store.listTournamentRegistrations(t.id);
+        expect(stored?.nricNumber).toBeNull();
+        expect(stored?.privateFiles?.map((f) => f.field)).toEqual(['q_letter']);
+        const queue = await call(owner, 'GET', `/tournaments/${t.id}/registrations`);
+        expect(queue.body.registrations[0].nricMasked).toBeNull();
+      });
+
+      it('checks an NRIC number when the form collects one', async () => {
+        const { t } = await formEvent({ collectNric: true });
+        const short = await register(t.id, goodEntry({ nricNumber: '987' }));
+        expect(short.status).toBe(400);
+        expect(short.body.error).not.toContain('987');
+        const typedPlain = await register(t.id, goodEntry({ nricNumber: '140305145678' }));
+        expect(typedPlain.status).toBe(201);
+        const passport = await register(t.id, goodEntry({ nricNumber: 'A12345678' }));
+        expect(passport.status).toBe(201);
+        const rows = await store.listTournamentRegistrations(t.id);
+        expect(rows.map((r) => r.nricNumber).sort()).toEqual([NRIC, 'A12345678'].sort());
+      });
+    });
+
+    describe('older app builds', () => {
+      const oldBody = (extra: Record<string, unknown> = {}) => ({
+        name: 'Old App Player',
+        email: `${crypto.randomUUID()}@example.test`,
+        guardianConsent: true,
+        ...extra,
+      });
+
+      it('still works when the form asks nothing it can’t send', async () => {
+        const owner = await newUser();
+        const t = await seedTournament(owner);
+        await publishing(owner, t.id, {
+          registrationOpen: true,
+          registrationFormSchema: {
+            customQuestions: [
+              QUESTIONS[0],
+              { id: 'q_opt_file', label: 'Optional file', type: 'file' },
+              { id: 'q_opt_tick', label: 'Optional tick', type: 'checkbox' },
+            ],
+          },
+        });
+        const res = await register(t.id, oldBody({ customAnswers: { q_shirt: 'M' } }));
+        expect(res.status).toBe(201);
+      });
+
+      it('passes a typed answer through a checkbox', async () => {
+        const { t } = await formEvent();
+        const res = await register(t.id, oldBody({ customAnswers: { q_shirt: 'M', q_photo: 'yes' } }));
+        expect(res.status).toBe(201);
+        expect(res.body.registration.customAnswers.q_photo).toBe(true);
+      });
+
+      it.each([
+        ['a required tick', {}, 'Kebenaran foto'],
+        ['NRIC', { collectNric: true }, 'NRIC number'],
+        ['age proof', { collectAgeProof: true }, 'age proof'],
+      ])('is told plainly when %s is truly missing', async (_label, form, expected) => {
+        const { t } = await formEvent(form);
+        const res = await register(
+          t.id,
+          oldBody({ customAnswers: { q_shirt: 'M', ...('collectNric' in form || 'collectAgeProof' in form ? { q_photo: 'yes' } : {}) } }),
+        );
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain(expected);
+        expect(res.body.error).toMatch(/update it or register on the event’s web link/);
+      });
+    });
+
+    describe('one form, used by link and by account', () => {
+      it('works by direct link when registration is open and the event is not listed', async () => {
+        const { owner, t } = await formEvent();
+        const feed = await call(null, 'GET', '/public/events');
+        expect(feed.body.events.map((e: { id: string }) => e.id)).not.toContain(t.id);
+        const page = await call(null, 'GET', `/public/events/${t.id}`);
+        expect(page.status).toBe(200);
+        expect((await register(t.id, goodEntry())).status).toBe(201);
+        const queue = await call(owner, 'GET', `/tournaments/${t.id}/registrations`);
+        expect(queue.body.registrations).toHaveLength(1);
+      });
+
+      it('puts entries by link and by signed-in account in the same queue', async () => {
+        const { owner, t } = await formEvent();
+        const parent = await newUser();
+        const profile = await call(parent, 'POST', '/player/profiles', {
+          fullName: 'Profile Child',
+          relationship: 'child',
+          guardianConsent: true,
+        });
+        const byAccount = await register(
+          t.id,
+          { playerProfileId: profile.body.profile.id, customAnswers: { q_shirt: 'S', q_photo: true } },
+          parent,
+        );
+        expect(byAccount.status).toBe(201);
+        expect((await register(t.id, goodEntry())).status).toBe(201);
+        const queue = await call(owner, 'GET', `/tournaments/${t.id}/registrations`);
+        const bySignIn = queue.body.registrations.map((r: { submittedByUserId: string | null }) =>
+          Boolean(r.submittedByUserId),
+        );
+        expect(bySignIn.sort()).toEqual([false, true]);
+      });
+    });
+
+    describe('what an unverified organization can do', () => {
+      async function trialOwner() {
+        const owner = await newUser();
+        const org = await makeOrg(owner);
+        return { owner, org };
+      }
+
+      it('can open a free event by link and take entries, with no organization at all too', async () => {
+        const { owner } = await trialOwner();
+        const created = await call(owner, 'POST', '/tournaments', {
+          name: 'Trial Open',
+          date: '2030-01-01',
+          style: 'swiss',
+          rounds: 5,
+          categories: [],
+        });
+        expect(created.status).toBe(201);
+        const opened = await publishing(owner, created.body.id, { registrationOpen: true });
+        expect(opened.status).toBe(200);
+        expect(opened.body.tournament.publicSlug).toBeTruthy();
+        const page = await call(null, 'GET', `/public/events/${opened.body.tournament.publicSlug}`);
+        expect(page.status).toBe(200);
+        const entry = await register(opened.body.tournament.publicSlug, goodEntry({ customAnswers: {} }));
+        expect(entry.status).toBe(201);
+
+        const loner = await newUser();
+        const own = await call(loner, 'POST', '/tournaments', {
+          name: 'No Org Open',
+          date: '2030-01-01',
+          style: 'swiss',
+          rounds: 5,
+          categories: [],
+        });
+        const open2 = await publishing(loner, own.body.id, { registrationOpen: true });
+        expect(open2.status).toBe(200);
+        expect((await register(own.body.id, goodEntry({ customAnswers: {} }))).status).toBe(201);
+      });
+
+      it('cannot list the event or charge an entry fee', async () => {
+        const { owner, org } = await trialOwner();
+        const t = await store.createTournament(tournamentRow(owner, { organizationId: org.id }));
+        expect((await publishing(owner, t.id, { isPublishedGlobal: true })).status).toBe(403);
+        expect((await publishing(owner, t.id, { entryFeeCents: 1000 })).status).toBe(403);
+        const status = await call(owner, 'GET', `/tournaments/${t.id}/publishing`);
+        expect(status.body.can).toEqual({ listPublicly: false, takePaidEntries: false });
+      });
+
+      it('takes entries past its trial player limit, and stops approving them at the limit', async () => {
+        const { owner, org } = await trialOwner();
+        await store.adminUpdateOrganization(org.id, { maxPlayersPerTournament: 1 });
+        const t = await store.createTournament(
+          tournamentRow(owner, { organizationId: org.id, registrationOpen: true }),
+        );
+        const a = await register(t.id, goodEntry({ customAnswers: {} }));
+        const b = await register(t.id, goodEntry({ customAnswers: {} }));
+        expect([a.status, b.status]).toEqual([201, 201]);
+        const review = (id: string) =>
+          call(owner, 'POST', `/tournaments/${t.id}/registrations/${id}/review`, { action: 'approve' });
+        expect((await review(a.body.registration.id)).status).toBe(200);
+        const over = await review(b.body.registration.id);
+        expect(over.status).toBe(403);
+        expect(over.body.error).toMatch(/quota/i);
+      });
+
+      it('a suspended organization’s link stops working', async () => {
+        const { t, orgId } = await formEvent();
+        await store.adminUpdateOrganization(orgId, { verificationStatus: 'suspended' });
+        expect((await call(null, 'GET', `/public/events/${t.id}`)).status).toBe(404);
+        expect((await register(t.id, goodEntry())).status).toBe(404);
+      });
+    });
+
+    describe('NRIC numbers and private files', () => {
+      const privateForm = { collectNric: true, collectAgeProof: true };
+
+      async function entryWithPrivateData() {
+        const event = await formEvent(privateForm);
+        const res = await register(event.t.id, privateEntry());
+        expect(res.status).toBe(201);
+        return { ...event, regId: res.body.registration.id as string, created: res.body.registration };
+      }
+
+      it('shows the queue a mask and file details, never the number or a storage path', async () => {
+        const { owner, t, created } = await entryWithPrivateData();
+        for (const body of [
+          created,
+          (await call(owner, 'GET', `/tournaments/${t.id}/registrations`)).body.registrations[0],
+        ]) {
+          expect(body.nricMasked).toBe('******-**-5678');
+          expect(body).not.toHaveProperty('nricNumber');
+          expect(body).not.toHaveProperty('privateFiles');
+          expect(JSON.stringify(body)).not.toContain(NRIC);
+          expect(JSON.stringify(body)).not.toContain('storagePath');
+          expect(body.files.map((f: { field: string }) => f.field).sort()).toEqual(['ageProof', 'q_letter']);
+          expect(body.files[0]).toMatchObject({ contentType: 'image/png' });
+          expect(body.files[0]).not.toHaveProperty('storagePath');
+        }
+      });
+
+      it('opens the full number and the files for an owner, admin and director only', async () => {
+        const { owner, t, regId, orgId, created } = await entryWithPrivateData();
+        const nric = `/tournaments/${t.id}/registrations/${regId}/nric`;
+        const file = `/tournaments/${t.id}/registrations/${regId}/files/${created.files[0].id}`;
+        const list = `/tournaments/${t.id}/registrations`;
+        const del = `/tournaments/${t.id}/registrations/delete-age-proofs`;
+
+        const shown = await call(owner, 'GET', nric);
+        expect(shown.status).toBe(200);
+        expect(shown.body.nricNumber).toBe(NRIC);
+
+        for (const role of ['admin', 'director']) {
+          const member = await newUser();
+          await backend.addMember(orgId, member, role);
+          expect((await call(member, 'GET', nric)).status).toBe(200);
+          const fileRes = await app.inject({ method: 'GET', url: file, headers: { 'x-test-user-id': member } });
+          expect(fileRes.statusCode).toBe(200);
+          expect(fileRes.headers['x-content-type-options']).toBe('nosniff');
+          expect(fileRes.headers['content-type']).toBe('image/png');
+          expect(fileRes.headers['cache-control']).toContain('no-store');
+          expect(fileRes.rawPayload.subarray(1, 4).toString()).toBe('PNG');
+        }
+
+        const arbiter = await newUser();
+        await backend.addMember(orgId, arbiter, 'arbiter');
+        const otherOrganizer = await newUser();
+        await makeOrg(otherOrganizer);
+        for (const outsider of [arbiter, otherOrganizer, await newUser()]) {
+          expect((await call(outsider, 'GET', nric)).status).toBe(403);
+          expect((await call(outsider, 'GET', file)).status).toBe(403);
+          expect((await call(outsider, 'GET', list)).status).toBe(403);
+          expect((await call(outsider, 'POST', del, { confirm: true })).status).toBe(403);
+        }
+        const [stored] = await store.listTournamentRegistrations(t.id);
+        expect(stored?.nricNumber).toBe(NRIC);
+      });
+
+      it('refuses the creator of a tournament who has since become an arbiter', async () => {
+        const owner = await newUser();
+        const org = await verifiedOrg(owner);
+        const director = await newUser();
+        await backend.addMember(org.id, director, 'arbiter');
+        const t = await store.createTournament(
+          tournamentRow(director, { organizationId: org.id, registrationOpen: true, registrationFormSchema: {
+            collectSchool: true, collectFideId: true, collectPhone: true, collectNric: true,
+            collectAgeProof: false, malayLabels: false, customQuestions: [],
+          } }),
+        );
+        const res = await register(t.id, { name: 'Kid', nricNumber: NRIC });
+        expect(res.status).toBe(201);
+        const regId = res.body.registration.id;
+        expect((await call(director, 'GET', `/tournaments/${t.id}/registrations/${regId}/nric`)).status).toBe(403);
+        expect((await call(director, 'GET', `/tournaments/${t.id}/registrations`)).status).toBe(403);
+      });
+
+      it('won’t serve a file through another tournament’s id', async () => {
+        const first = await entryWithPrivateData();
+        const second = await entryWithPrivateData();
+        const res = await call(
+          second.owner,
+          'GET',
+          `/tournaments/${second.t.id}/registrations/${first.regId}/files/${first.created.files[0].id}`,
+        );
+        expect(res.status).toBe(404);
+      });
+
+      it('keeps them off every public page, participants, sync and the player’s own list', async () => {
+        const { owner, t, regId, orgId } = await entryWithPrivateData();
+        await publishing(owner, t.id, { publicSlug: `leak-${crypto.randomUUID().slice(0, 8)}` });
+        const approved = await call(owner, 'POST', `/tournaments/${t.id}/registrations/${regId}/review`, {
+          action: 'approve',
+        });
+        expect(approved.status).toBe(200);
+        // Answers still copy to the participant, as before.
+        expect(approved.body.participant.customFields).toMatchObject({ q_shirt: 'M', q_diet: SECRET_ANSWER });
+
+        const enabled = await call(owner, 'POST', `/tournaments/${t.id}/public-live/enable`);
+        const stored = (await store.listTournamentRegistrations(t.id))[0]!;
+        const paths = stored.privateFiles!.map((f) => f.storagePath);
+        expect(paths).toHaveLength(2);
+
+        const parent = await newUser();
+        const asParent = await register(t.id, privateEntry({ email: 'p@example.test' }), parent);
+        expect(asParent.status).toBe(201);
+
+        const arbiter = await newUser();
+        await backend.addMember(orgId, arbiter, 'arbiter');
+        const looks = [
+          await call(null, 'GET', `/public/events/${t.id}`),
+          await call(null, 'GET', '/public/events'),
+          await call(null, 'GET', `/public/live/${enabled.body.publicToken}`),
+          await call(owner, 'GET', `/tournaments/${t.id}`),
+          await call(owner, 'GET', `/tournaments/${t.id}/certificates`),
+          await call(owner, 'GET', '/sync/pull'),
+          await call(arbiter, 'GET', '/sync/pull'),
+          await call(parent, 'GET', '/player/registrations'),
+          approved,
+        ];
+        for (const res of looks) {
+          const text = JSON.stringify(res.body);
+          expect(res.status).toBeLessThan(500);
+          expect(text).not.toContain(NRIC);
+          expect(text).not.toContain('140305');
+          expect(text).not.toContain('nricNumber');
+          expect(text).not.toContain('storagePath');
+          for (const file of paths) expect(text).not.toContain(file);
+        }
+        // The rest are public pages, where answers don't belong either.
+        for (const res of looks.slice(0, 3)) {
+          expect(JSON.stringify(res.body)).not.toContain(SECRET_ANSWER);
+        }
+        const roster = await store.listParticipants(t.id);
+        expect(JSON.stringify(roster)).not.toContain(NRIC);
+        for (const file of paths) expect(JSON.stringify(roster)).not.toContain(file);
+      });
+    });
+
+    describe('deleting age proofs for an event', () => {
+      it('removes those files and NRIC numbers, and leaves receipts, file answers and other events', async () => {
+        const owner = await newUser();
+        const t = await seedTournament(owner);
+        await publishing(owner, t.id, {
+          registrationOpen: true,
+          entryFeeCents: 1000,
+          registrationFormSchema: {
+            collectNric: true,
+            collectAgeProof: true,
+            customQuestions: [QUESTIONS[3]],
+          },
+        });
+        const entry = await register(t.id, {
+          name: 'Delete Me',
+          nricNumber: NRIC,
+          ageProofDataUrl: PNG,
+          customFiles: { q_letter: PNG },
+          receiptDataUrl: PNG,
+        });
+        expect(entry.status).toBe(201);
+        const other = await formEvent({ collectNric: true, collectAgeProof: true });
+        await register(other.t.id, privateEntry());
+
+        const before = (await store.listTournamentRegistrations(t.id))[0]!;
+        const proof = before.privateFiles!.find((f) => f.field === 'ageProof')!;
+        const letter = before.privateFiles!.find((f) => f.field === 'q_letter')!;
+
+        const url = `/tournaments/${t.id}/registrations/delete-age-proofs`;
+        expect((await call(owner, 'POST', url, {})).status).toBe(400);
+        expect(await readReceipt(proof.storagePath)).not.toBeNull();
+
+        const res = await call(owner, 'POST', url, { confirm: true });
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ files: 1, nricNumbers: 1, failed: 0 });
+
+        const after = (await store.listTournamentRegistrations(t.id))[0]!;
+        expect(after.nricNumber).toBeNull();
+        expect(after.privateFiles?.map((f) => f.field)).toEqual(['q_letter']);
+        expect(after.receiptStoragePath).toBe(before.receiptStoragePath);
+        expect(await readReceipt(proof.storagePath)).toBeNull();
+        expect(await readReceipt(letter.storagePath)).not.toBeNull();
+        expect(await readReceipt(before.receiptStoragePath!)).not.toBeNull();
+
+        const reg = entry.body.registration.id;
+        expect((await call(owner, 'GET', `/tournaments/${t.id}/registrations/${reg}/nric`)).status).toBe(404);
+        expect(
+          (await call(owner, 'GET', `/tournaments/${t.id}/registrations/${reg}/files/${proof.id}`)).status,
+        ).toBe(404);
+        const queue = await call(owner, 'GET', `/tournaments/${t.id}/registrations`);
+        expect(queue.body.registrations[0].nricMasked).toBeNull();
+
+        const elsewhere = (await store.listTournamentRegistrations(other.t.id))[0]!;
+        expect(elsewhere.nricNumber).toBe(NRIC);
+        expect(elsewhere.privateFiles).toHaveLength(2);
+
+        expect((await call(owner, 'POST', url, { confirm: true })).body).toEqual({
+          files: 0,
+          nricNumbers: 0,
+          failed: 0,
+        });
+      });
+    });
+
+    describe('account deletion', () => {
+      const purgeAt = (offsetMs: number, files: string[] = []) =>
+        runPrivacyPurge(store, {
+          now: new Date(Date.now() + offsetMs),
+          deleteReceiptFile: async (f) => void files.push(f),
+          deleteCertificateFile: async (f) => void files.push(f),
+        });
+
+      it('clears the NRIC at once and takes the files through the existing grace period', async () => {
+        const { t } = await formEvent({ collectNric: true, collectAgeProof: true });
+        const user = await newUser();
+        const res = await register(t.id, privateEntry(), user);
+        expect(res.status).toBe(201);
+        const regId = res.body.registration.id;
+        expect((await call(user, 'DELETE', '/me')).status).toBe(204);
+
+        const during = (await store.listTournamentRegistrations(t.id)).find((r) => r.id === regId)!;
+        expect(during.nricNumber).toBeNull();
+        expect(during.privateFiles).toHaveLength(2);
+        const paths = during.privateFiles!.map((f) => f.storagePath);
+
+        const early: string[] = [];
+        await purgeAt(29 * DAY, early);
+        for (const file of paths) expect(early).not.toContain(file);
+
+        const removed: string[] = [];
+        await purgeAt(31 * DAY, removed);
+        for (const file of paths) expect(removed).toContain(file);
+        const after = (await store.listTournamentRegistrations(t.id)).find((r) => r.id === regId)!;
+        expect(after.privateFiles).toEqual([]);
+      });
+
+      it('tries again when a file could not be removed', async () => {
+        const { t } = await formEvent({ collectAgeProof: true });
+        const user = await newUser();
+        const res = await register(t.id, privateEntry(), user);
+        await call(user, 'DELETE', '/me');
+        const failed = await runPrivacyPurge(store, {
+          now: new Date(Date.now() + 31 * DAY),
+          deleteReceiptFile: async () => {
+            throw new Error('storage down');
+          },
+        });
+        expect(failed.failed).toBeGreaterThanOrEqual(1);
+        const row = (await store.listTournamentRegistrations(t.id)).find(
+          (r) => r.id === res.body.registration.id,
+        )!;
+        expect(row.privateFiles).toHaveLength(2);
+        await purgeAt(31 * DAY);
+      });
+
+      it('removes the files of a deleted owner’s own tournament with it', async () => {
+        const owner = await newUser();
+        const t = await store.createTournament(
+          tournamentRow(owner, {
+            organizationId: null,
+            registrationOpen: true,
+            registrationFormSchema: {
+              collectSchool: true,
+              collectFideId: true,
+              collectPhone: true,
+              collectNric: false,
+              collectAgeProof: true,
+              malayLabels: false,
+              customQuestions: [],
+            },
+          }),
+        );
+        expect((await register(t.id, { name: 'Kid', ageProofDataUrl: PNG })).status).toBe(201);
+        const [row] = await store.listTournamentRegistrations(t.id);
+        const path0 = row!.privateFiles![0]!.storagePath;
+        expect((await call(owner, 'DELETE', '/me')).status).toBe(204);
+        const removed: string[] = [];
+        await purgeAt(31 * DAY, removed);
+        expect(removed).toContain(path0);
+      });
+    });
+
+    describe('school suggestions', () => {
+      const lookup = (id: string, q: string) => call(null, 'GET', `/public/events/${id}/schools?q=${encodeURIComponent(q)}`);
+
+      it('offers the organizer’s own schools that more than one entry used, most used first', async () => {
+        const { t, owner, orgId } = await formEvent();
+        const second = await store.createTournament(tournamentRow(owner, { organizationId: orgId, registrationOpen: true }));
+        for (const school of ['SK Cempaka', 'sk cempaka ', 'SK Cempaka', 'SMK Damai', 'SMK Damai', 'SK Sendirian']) {
+          expect((await register(t.id, goodEntry({ school }))).status).toBe(201);
+        }
+        await seedPlayer(second.id, { school: 'SMK Damai' } as Partial<Participant>);
+
+        const res = await lookup(second.id, 's');
+        expect(res.body.schools).toEqual([]);
+        const found = await lookup(second.id, 'sk');
+        expect(found.body.schools).toEqual(['SK Cempaka']);
+        const ranked = await lookup(t.id, 'da');
+        expect(ranked.body.schools).toEqual(['SMK Damai']);
+      });
+
+      it('counts an approved entry once, not as both an entry and a player', async () => {
+        const { t, owner } = await formEvent();
+        const res = await register(t.id, goodEntry({ school: 'SK Tunggal' }));
+        await call(owner, 'POST', `/tournaments/${t.id}/registrations/${res.body.registration.id}/review`, {
+          action: 'approve',
+        });
+        expect((await lookup(t.id, 'tunggal')).body.schools).toEqual([]);
+      });
+
+      it('doesn’t cross to another organization, treats wildcards as text, and needs an open event', async () => {
+        const mine = await formEvent();
+        const theirs = await formEvent();
+        for (let i = 0; i < 2; i += 1) {
+          await register(theirs.t.id, goodEntry({ school: 'SK Rahsia' }));
+        }
+        expect((await lookup(mine.t.id, 'rahsia')).body.schools).toEqual([]);
+        expect((await lookup(theirs.t.id, 'rahsia')).body.schools).toEqual(['SK Rahsia']);
+        expect((await lookup(theirs.t.id, '%%')).body.schools).toEqual([]);
+        await store.updateTournament(theirs.t.id, { registrationOpen: false, updatedAt: iso() });
+        expect((await lookup(theirs.t.id, 'rahsia')).status).toBe(404);
+      });
+    });
+
+    it('refuses a link name another event uses', async () => {
+      const slug = `taken-${crypto.randomUUID().slice(0, 8)}`;
+      const first = await formEvent({}, { publicSlug: slug });
+      expect((await call(null, 'GET', `/public/events/${slug}`)).body.event.id).toBe(first.t.id);
+      const second = await formEvent();
+      const res = await publishing(second.owner, second.t.id, { publicSlug: slug });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('taken');
+    });
+
+    it('saves a deadline and a player limit, and the public page reports them', async () => {
+      const deadline = iso(7 * DAY);
+      const { t } = await formEvent({}, { registrationDeadline: deadline, maxParticipants: 40, rulesMd: 'Rules', country: 'Singapore' });
+      const page = await call(null, 'GET', `/public/events/${t.id}`);
+      expect(page.body.event).toMatchObject({ maxParticipants: 40, rulesMd: 'Rules', country: 'Singapore' });
+      expect(Date.parse(page.body.event.registrationDeadline)).toBe(Date.parse(deadline));
+    });
+  });
+
   describe('account deletion', () => {
     const DAY = 24 * HOUR;
     const deleteAccount = (user: string) => call(user, 'DELETE', '/me');

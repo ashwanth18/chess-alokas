@@ -95,6 +95,17 @@ describe('what reaches logs, statistics and error reports', () => {
     expect(JSON.stringify(event)).not.toMatch(/someone@|1\.2\.3\.4|3\.14|Kid|Bearer abc/);
   });
 
+  it('error reports carry no registration body and no NRIC-like number', () => {
+    const event = scrubServerEvent({
+      user: { id: 'u1' },
+      message: 'Failed for 140305-14-5678',
+      exception: { values: [{ value: 'Bad value 140305145678' }] },
+      request: { url: 'https://x.test/public/events/a/register', data: { nricNumber: '140305-14-5678' } },
+    });
+    expect(JSON.stringify(event)).not.toMatch(/140305/);
+    expect(event.request?.data).toBeUndefined();
+  });
+
   it('the API sets no email on error reports', () => {
     const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/setUser\([^)]*email/s);

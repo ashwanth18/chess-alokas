@@ -18,6 +18,7 @@ function scrubValue(value: unknown): unknown {
   next = next.replace(/arbiter[_-]?pin["']?\s*[:=]\s*["']?[^"'&\s]+/gi, 'arbiter_pin=[Filtered]');
   next = next.replace(/password["']?\s*[:=]\s*["']?[^"'&\s]+/gi, 'password=[Filtered]');
   next = next.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[email]');
+  next = next.replace(/\b\d{6}-?\d{2}-?\d{4}\b/g, '[nric]');
   // Windows / macOS / Linux home folders carry the person's account name.
   next = next.replace(/([A-Za-z]:[\\/]+Users[\\/]+)[^\\/\s"')]+/gi, '$1[user]');
   next = next.replace(/(\/(?:Users|home)\/)[^/\s"')]+/g, '$1[user]');

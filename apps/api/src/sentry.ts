@@ -7,8 +7,19 @@ const isProd = process.env['NODE_ENV'] === 'production';
 
 export const sentryEnabled = Boolean(dsn);
 
+const NRIC_LIKE = /\b\d{6}-?\d{2}-?\d{4}\b/g;
+
 /** Removes what identifies or places a person, whatever the SDK collected by itself. */
-export function scrubServerEvent<T extends Pick<ErrorEvent, 'request' | 'user'>>(event: T): T {
+export function scrubServerEvent<T extends Pick<ErrorEvent, 'request' | 'user'> & {
+  message?: ErrorEvent['message'];
+  exception?: ErrorEvent['exception'];
+}>(event: T): T {
+  // Registration bodies hold NRIC numbers, file contents and children's details.
+  if (event.request?.data) delete event.request.data;
+  if (event.message) event.message = event.message.replace(NRIC_LIKE, '[nric]');
+  for (const ex of event.exception?.values ?? []) {
+    if (ex.value) ex.value = ex.value.replace(NRIC_LIKE, '[nric]');
+  }
   if (event.request?.headers) {
     const headers = { ...event.request.headers } as Record<string, string>;
     for (const key of Object.keys(headers)) {

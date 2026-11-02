@@ -38,6 +38,7 @@ export async function runPrivacyPurge(store: Store, options: PurgeOptions = {}):
   for (const due of await store.listDueReceiptPurges(nowIso)) {
     try {
       if (due.storagePath) await removeReceipt(due.storagePath);
+      for (const file of due.filePaths) await removeReceipt(file);
       await store.clearPurgedReceipt(due.registrationId);
       result.receipts += 1;
     } catch {

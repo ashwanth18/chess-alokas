@@ -58,12 +58,12 @@ test('the PWA manifest uses the brand green', async ({ request }) => {
 
 test('registration labels pass contrast', async ({ page }) => {
   await page.goto(`/register/${EVENT_SLUG}`);
-  const label = page.locator('.admin-panel .auth-form label').first();
+  const label = page.locator('.ui-card form .ui-field__label').first();
   await label.waitFor();
   const color = await label.evaluate((el) => getComputedStyle(el).color);
-  // The panel is translucent over the page, so test against the lightest thing behind it:
-  // the plan measured the composite at #285748.
-  expect(contrast(color, 'rgb(40, 87, 72)')).toBeGreaterThanOrEqual(4.5);
+  const card = page.locator('.ui-card').first();
+  const background = await card.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(contrast(color, background)).toBeGreaterThanOrEqual(4.5);
 });
 
 for (const [width, height] of [

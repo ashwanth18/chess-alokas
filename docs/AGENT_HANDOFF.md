@@ -42,6 +42,10 @@ Offline-first chess tournament manager with **per-manager accounts**:
 
 - [x] **Team (`030`)**: invites, members, roles, last-owner protection, `/team`, `/invite/:token`. Rules and the role table are in `docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md` section 4b
 
+- [x] **Registration form builder (`034`)**: per-event form, Malay labels, checkbox and file questions, NRIC and age proof, deadline and limit screens. See `docs/FEATURES_REGISTRATION_AND_DISCOVERY.md`, "The form builder". UI in `apps/web/src/pages/registration-form/`
+
+- [x] **Registration form builder (`034`)**: per-event form, Malay labels, checkbox and file questions, NRIC and age proof, deadline and limit screens. See `docs/FEATURES_REGISTRATION_AND_DISCOVERY.md`, "The form builder". UI in `apps/web/src/pages/registration-form/`
+
 ## Not done / known gaps
 
 - **`sample-registrations-*.csv` and `scripts/arcc-*.json` are in a PUBLIC repo** and may hold real minors' data. Founder must confirm; see the founder's decision before pushing anything
