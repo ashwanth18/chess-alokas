@@ -183,12 +183,12 @@ export function OfflinePhone() {
 
 export function DiscoverPhone() {
   return (
-    <Phone tab="Discover" label="Discover screen: tournaments sorted by distance from Kuala Lumpur, with search, distance and section filters.">
+    <Phone tab="Discover" label="Discover screen: tournaments sorted by distance from you, with search, Near me and section filters.">
       <div className="ps-pad-top" />
       <div className="ps-near">
         <div className="ps-field">
-          <small>Search near</small>
-          <b>Near: Kuala Lumpur</b>
+          <small>Near me</small>
+          <b>Near you · Kuala Lumpur</b>
         </div>
         <i className="ps-gps">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.700" strokeLinecap="round">
@@ -197,26 +197,26 @@ export function DiscoverPhone() {
           </svg>
         </i>
       </div>
-      <div className="ps-field ps-search">Search tournament, city, venue</div>
+      <div className="ps-field ps-search">Tournament, city or venue</div>
       <div className="ps-chips">
-        <span>10 km</span>
-        <span>25 km</span>
-        <span>50 km</span>
-        <span className="is-on">Any distance</span>
+        <span className="is-on">List</span>
+        <span>Map</span>
+        <span>All sections</span>
+        <span>U12</span>
       </div>
       <div className="ps-h">Tournaments (6)</div>
-      <p className="ps-dim ps-indent">By distance from Kuala Lumpur</p>
+      <p className="ps-dim ps-indent">Nearest first</p>
       <div className="ps-card">
-        <span className="ps-dist">1.9 km from Kuala Lumpur</span>
+        <span className="ps-dist">1.9 km away</span>
         <p className="ps-ev">{EVENT}</p>
         <p className="ps-org">Akademi Catur Fianchetto</p>
         <p className="ps-dim">Dewan Fianchetto, Kuala Lumpur</p>
-        <p className="ps-meta">14 Dec 2026 · 15+5 · 64 players · RM 50</p>
+        <p className="ps-meta">14 Dec 2026 · 15+5 · 64 places · Entry RM 50</p>
         <p className="ps-dim">Under 12 · Under 18 · Open</p>
         <div className="ps-btn">View &amp; Register</div>
       </div>
       <div className="ps-card">
-        <span className="ps-dist">8.4 km from Kuala Lumpur</span>
+        <span className="ps-dist">8.4 km away</span>
         <p className="ps-ev">Kejohanan Rook Lift Junior</p>
       </div>
     </Phone>
@@ -279,11 +279,11 @@ export function AccountPhone() {
       <div className="ps-regs">
         <div>
           <Name n={PLAYER} />
-          <small>Born 2009 · Primary · Self</small>
+          <small>Primary · Self</small>
         </div>
         <div>
           <Name n={['Lim Gambit Ling', '']} />
-          <small>Born 2012 · Child</small>
+          <small>Child</small>
         </div>
       </div>
     </Phone>
@@ -315,9 +315,9 @@ export function CareerPhone() {
       <div className="ps-card">
         <div className="ps-h ps-h-in">Tournaments</div>
         <p className="ps-ev ps-ev-s">Kejohanan Rook Lift Junior</p>
-        <p className="ps-dim">9 Aug 2026 · 4 / 6 · W3 D2 L1</p>
+        <p className="ps-dim">9 Aug 2026 · 4.0 / 6 · W3 D2 L1</p>
         <p className="ps-ev ps-ev-s">Piala Zugzwang Rapid</p>
-        <p className="ps-dim">21 Jun 2026 · 3½ / 7 · W3 D1 L3</p>
+        <p className="ps-dim">21 Jun 2026 · 3.5 / 7 · W3 D1 L3</p>
       </div>
       <div className="ps-card">
         <div className="ps-row">

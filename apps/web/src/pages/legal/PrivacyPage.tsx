@@ -194,6 +194,7 @@ const SECTIONS: LegalSection[] = [
           event&apos;s age proofs and NRIC numbers at any time.
         </p>
         <p>
+          If a roster import has a column that looks like an ID number, we keep only a masked copy.
           We don&apos;t check that a number or document is genuine. Our database and server also have a
           field that can hold a national ID on a player profile, and our forms don&apos;t ask for it.
           Please don&apos;t put an ID number in any name, note or answer box.

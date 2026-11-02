@@ -43,6 +43,7 @@ import {
   normalizeExcludedRounds,
   DELETED_PLAYER_NAME,
   PRIVACY_NOTICE_VERSION,
+  maskNricFields,
   defaultTournamentOrganization,
   inviteStatus,
   roleRank,
@@ -503,7 +504,8 @@ function syncPullCursor(since: string): string {
   return new Date(Date.parse(since) - SYNC_PULL_OVERLAP_MS).toISOString();
 }
 
-function playerLimitFor(
+/** The most players a plan allows on one tournament, or null for no limit. */
+export function playerLimitFor(
   org: Organization | null,
   t: { ownerId?: string | null },
 ): number | null {
@@ -1471,7 +1473,7 @@ export class MemoryStore implements Store {
         yearOfBirth:
           payload['yearOfBirth'] != null ? Number(payload['yearOfBirth']) : null,
         email: (payload['email'] as string | null | undefined) || null,
-        customFields: (payload['customFields'] as Record<string, unknown>) ?? {},
+        customFields: maskNricFields(payload['customFields'] as Record<string, unknown>),
         categoryIds: (payload['categoryIds'] as string[]) ?? [],
         seed: payload['seed'] != null ? Number(payload['seed']) : undefined,
         excludedRounds: Array.isArray(payload['excludedRounds'])
@@ -2671,7 +2673,7 @@ export class MemoryStore implements Store {
         yearOfBirth: snap.yearOfBirth ?? null,
         email: snap.email || null,
         customFields: {
-          ...(reg.customAnswers ?? {}),
+          ...maskNricFields(reg.customAnswers),
           ...(snap.phone ? { phone: snap.phone } : {}),
         },
         categoryIds: assignedCatIds,
@@ -4673,7 +4675,7 @@ export class PostgresStore implements Store {
 
   private async writeSyncParticipant(s: Sql, item: SyncPushItem): Promise<void> {
     const { id, payload: p, updatedAt, deletedAt } = item;
-    const customFields = (p['customFields'] as Record<string, unknown>) ?? {};
+    const customFields = maskNricFields(p['customFields'] as Record<string, unknown>);
     const categoryIds = (p['categoryIds'] as string[]) ?? [];
     const { excluded, withdrawn } = exclusionFields({
       excludedRounds: p['excludedRounds'] as number[] | null | undefined,
@@ -6302,7 +6304,7 @@ export class PostgresStore implements Store {
           yearOfBirth: snap.yearOfBirth ?? null,
           email: snap.email || null,
           customFields: {
-            ...(reg.customAnswers ?? {}),
+            ...maskNricFields(reg.customAnswers),
             ...(snap.phone ? { phone: snap.phone } : {}),
           },
           categoryIds: assignedCatIds,

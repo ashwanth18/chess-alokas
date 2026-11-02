@@ -83,7 +83,7 @@ const STEPS = [
   {
     who: 'Desk',
     title: 'Pair the round',
-    body: 'Generate the round, category by category. Boards are numbered, byes are assigned, and a new floor PIN is issued for arbiters.',
+    body: 'Generate the round. Each category pairs on its own unless you mix them. Boards are numbered, byes are assigned, and a new floor PIN is issued for arbiters.',
   },
   {
     who: 'Floor',
@@ -118,7 +118,7 @@ const FLOOR_FACTS = [
   ['One PIN per round', 'A six-digit PIN unlocks every board for that round. Changing the PIN ends older sessions.'],
   ['Single board or zone', 'Switch to the zone view to score all boards, a range such as 1 to 15, or only the pending ones.'],
   ['First result stands', 'If two arbiters score the same board, the second is refused and told so. The director can still make a correction.'],
-  ['Call the chief', 'One tap sends an illegal move dispute, clock problem, missing player or a custom note to a banner on the desk.'],
+  ['Call the chief', 'A few taps send an illegal move dispute, clock problem, missing player or a custom note to a banner on the desk.'],
   ['Wi-Fi drops', 'A result confirmed with no connection stays on the phone and sends itself when the connection returns.'],
 ];
 
@@ -159,7 +159,8 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
     a: (
       <>
         The trial is free and sign-up does not ask for a card. It allows one tournament and up to 24
-        players, and new tournaments can be started for 14 days. Larger events, public listing and
+        players, and new tournaments can be started for 14 days after you register your academy.
+        Larger events, public listing and
         paid entries need your academy to be verified by our team. See{' '}
         <a href="#pricing">trial and verification</a>.
       </>
@@ -365,8 +366,7 @@ export default function LandingPage() {
               <h2 id="lp-h-pairing">Pairings you can defend.</h2>
               <p className="lp-lede">
                 Choose the system when you create the tournament. FIDE Dutch Swiss rounds come from
-                bbpPairings v6, the Dutch-system pairing program, written to the 2025 Dutch rules in
-                the FIDE handbook that took effect in 2026.
+                bbpPairings v6, a Dutch-system pairing program.
               </p>
               <dl className="lp-facts">
                 <div>
@@ -484,7 +484,7 @@ export default function LandingPage() {
                   <li>Money goes straight to you. Chess Alokas has no payment gateway and holds no funds.</li>
                   <li>Choose what the form asks and add your own questions, in English and Malay.</li>
                   <li>Set a deadline and a roster cap.</li>
-                  <li>Approve, waitlist or reject, one at a time, or approve all pending.</li>
+                  <li>Approve, waitlist or reject one at a time, or approve every clear entry at once.</li>
                   <li>Likely duplicate entries are flagged for you to check.</li>
                   <li>Parents with an account fill the form from a saved profile and can register siblings quickly.</li>
                   <li>Paid entries and listing on Find a tournament need a verified academy.</li>
@@ -532,8 +532,8 @@ export default function LandingPage() {
               <ul className="lp-list">
                 <li>Download a print pack for the people you select.</li>
                 <li>Issue digital copies with serial numbers.</li>
-                <li>Email them to players. Bulk email needs a verified academy.</li>
-                <li>Players with an account find theirs in the portal when their confirmed email matches.</li>
+                <li>Email them to players, with a verified academy. On a trial, send test copies to yourself.</li>
+                <li>Players find theirs in the portal through a linked entry, or when their profile and confirmed email match.</li>
               </ul>
             </div>
           </div>
@@ -597,7 +597,7 @@ export default function LandingPage() {
                 </tr>
                 <tr>
                   <th scope="row">Tournaments</th>
-                  <td>1 active, started within 14 days</td>
+                  <td>1 at a time, until deleted. New ones for 14 days</td>
                   <td>More, by plan</td>
                 </tr>
                 <tr>
@@ -611,8 +611,8 @@ export default function LandingPage() {
                   <td>Yes</td>
                 </tr>
                 <tr>
-                  <th scope="row">Bulk certificate email</th>
-                  <td>No</td>
+                  <th scope="row">Certificate email</th>
+                  <td>Test copies to yourself</td>
                   <td>Yes</td>
                 </tr>
               </tbody>

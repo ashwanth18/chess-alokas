@@ -15,7 +15,7 @@ import {
   type TournamentRegistration,
 } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
-import { registrationTakesReceipt } from '../db.js';
+import { playerLimitFor, registrationTakesReceipt } from '../db.js';
 import { optionalAuth, requireAuth } from '../auth.js';
 import { rateLimit, type RateLimitBucket } from '../lib/rateLimit.js';
 import {
@@ -302,7 +302,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         currency: tournament.currency ?? 'MYR',
         paymentInstructions:
           tournament.paymentInstructions ?? org?.paymentInstructions ?? null,
-        paymentQrUrl: tournament.paymentQrUrl ?? org?.paymentQrStoragePath ?? null,
+        paymentQrUrl: tournament.paymentQrUrl ?? null,
         registrationFormSchema: publicRegistrationForm(
           tournament.registrationFormSchema ?? DEFAULT_REGISTRATION_FORM_CONFIG,
         ),
@@ -511,11 +511,14 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
             : 'pending_receipt'
           : 'not_required';
 
-      const participantCount = tournament.maxParticipants
-        ? (await store.listParticipants(tournament.id)).length
-        : 0;
-      const isFull =
-        tournament.maxParticipants != null && participantCount >= tournament.maxParticipants;
+      // The plan's limit counts too, so a trial's extra entries wait rather than fail at approval.
+      const planLimit = playerLimitFor(eventOrg, tournament);
+      const rosterCap =
+        tournament.maxParticipants != null && planLimit != null
+          ? Math.min(tournament.maxParticipants, planLimit)
+          : (tournament.maxParticipants ?? planLimit);
+      const participantCount = rosterCap != null ? (await store.listParticipants(tournament.id)).length : 0;
+      const isFull = rosterCap != null && participantCount >= rosterCap;
 
       const nowIso = new Date().toISOString();
       const registrationId = crypto.randomUUID();
@@ -620,6 +623,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         can: {
           listPublicly: org?.verificationStatus === 'verified' && Boolean(org.canPublishGlobal),
           takePaidEntries: Boolean(org?.canAcceptPaidRegistrations),
+          maxPlayers: playerLimitFor(org, existing),
         },
       };
     },
@@ -726,6 +730,14 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
         }
       }
 
+      // A limit above the plan's would only fail later, at approval, so it is held to the plan here.
+      const planLimit = playerLimitFor(org, existing);
+      const askedLimit = data.maxParticipants;
+      const cappedLimit =
+        askedLimit !== undefined && planLimit != null && (askedLimit == null || askedLimit > planLimit)
+          ? planLimit
+          : undefined;
+
       // An Event Pass pays for one published event. Republishing doesn't charge again.
       const chargeCredit =
         nextPublishedGlobal &&
@@ -748,7 +760,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
           ? { registrationDeadline: data.registrationDeadline || null }
           : {}),
         ...(data.maxParticipants !== undefined
-          ? { maxParticipants: data.maxParticipants }
+          ? { maxParticipants: cappedLimit ?? data.maxParticipants }
           : {}),
         ...(data.venueName !== undefined ? { venueName: data.venueName } : {}),
         ...(data.venueAddress !== undefined ? { venueAddress: data.venueAddress } : {}),
@@ -776,6 +788,7 @@ export const registrationsPlugin: FastifyPluginAsync<PluginOptions> = async (app
       const form = updated.registrationFormSchema ?? DEFAULT_REGISTRATION_FORM_CONFIG;
       return {
         tournament: updated,
+        ...(cappedLimit !== undefined ? { playerLimitCapped: cappedLimit } : {}),
         answerCounts: countRegistrationAnswers(
           form.customQuestions ?? [],
           await store.listTournamentRegistrations(id),

@@ -47,7 +47,20 @@ function formatFee(cents: number, currency = 'MYR'): string {
 }
 
 function formatDeadline(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return new Date(iso).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** The event's own calendar date, so "2 Mar 2030" doesn't move with the reader's time zone. */
+export function formatEventDate(date: string): string {
+  const parsed = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
 
 export default function EventRegistrationPage() {
@@ -324,7 +337,7 @@ export default function EventRegistrationPage() {
                 <dl className="rg-facts">
                   <div>
                     <dt>Date</dt>
-                    <dd>{event.date ?? 'To be announced'}</dd>
+                    <dd>{event.date ? formatEventDate(event.date) : 'To be announced'}</dd>
                   </div>
                   <div>
                     <dt>Format</dt>
@@ -338,10 +351,10 @@ export default function EventRegistrationPage() {
                     <dd>{formatFee(event.entryFeeCents, event.currency)}</dd>
                   </div>
                   <div>
-                    <dt>On the roster</dt>
+                    <dt>Players</dt>
                     <dd>
-                      {event.registeredCount}
-                      {event.maxParticipants ? ` of ${event.maxParticipants}` : ''}
+                      {event.registeredCount} confirmed
+                      {event.maxParticipants ? ` · ${event.maxParticipants} places` : ''}
                     </dd>
                   </div>
                   {event.registrationDeadline && (

@@ -146,3 +146,7 @@ Those private routes, the registrations list and the receipt route refuse an arb
 **Who can open a link:** any account, verified or not, for a free event. Listing on `/discover` needs a verified academy with `canPublishGlobal`, and a fee needs `canAcceptPaidRegistrations`. A suspended or rejected organization's link stops working.
 
 **Exports.** The queue's "Download CSV" has answers and whether each file was attached, never NRIC numbers. It is the only registration export.
+
+**Player limit.** A limit above the plan's, or an empty one on a capped plan, is saved as the plan's limit, and the response says so with `playerLimitCapped`. New entries past either go on the waitlist.
+
+**ID numbers on rosters.** `maskNricFields` keeps a mask of any custom field that looks like an ID, by column name or by shape, on CSV import, sync and approval. Rows already in the database are untouched. Arbiters can't read participants' custom fields at all: not by sync, by `GET /tournaments/:id`, or by RLS.

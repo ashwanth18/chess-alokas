@@ -157,6 +157,8 @@
   align-items: end;
 }
 
+.tm-form-stack { grid-template-columns: minmax(0, 32rem); }
+.tm-form-stack textarea.tm-input { height: auto; padding-block: 0.5rem; }
 .tm-form label {
   display: grid;
   gap: 0.2rem;

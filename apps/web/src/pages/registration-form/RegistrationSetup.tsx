@@ -110,7 +110,11 @@ export function RegistrationSetup({
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(local));
   const [baseline, setBaseline] = useState<string>(() => JSON.stringify(draftFrom(local)));
-  const [can, setCan] = useState({ listPublicly: false, takePaidEntries: false });
+  const [can, setCan] = useState<{ listPublicly: boolean; takePaidEntries: boolean; maxPlayers: number | null }>({
+    listPublicly: false,
+    takePaidEntries: false,
+    maxPlayers: null,
+  });
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'forbidden' | 'offline'>('loading');
   const [editing, setEditing] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -221,7 +225,11 @@ export function RegistrationSetup({
       setBaseline(JSON.stringify(next));
       onFormChange?.(next.form);
       await onSaved(res.data.tournament);
-      setNotice('Saved.');
+      setNotice(
+        res.data.playerLimitCapped != null
+          ? `Saved. Player limit is ${res.data.playerLimitCapped}, the most your plan allows.`
+          : 'Saved.',
+      );
     } finally {
       setSaving(false);
     }
@@ -290,9 +298,14 @@ export function RegistrationSetup({
           />
           <Field
             label="Player limit"
-            hint="Everyone on the roster counts. Once full, new entries go on the waitlist. Leave empty for no limit."
+            hint={
+              can.maxPlayers != null
+                ? `Your plan allows up to ${can.maxPlayers}. Everyone on the roster counts. Once full, new entries go on the waitlist.`
+                : 'Everyone on the roster counts. Once full, new entries go on the waitlist. Leave empty for no limit.'
+            }
             type="number"
             min={1}
+            {...(can.maxPlayers != null ? { max: can.maxPlayers } : {})}
             inputMode="numeric"
             {...text('maxParticipants')}
           />

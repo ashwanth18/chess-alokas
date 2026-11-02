@@ -1233,7 +1233,7 @@ export async function apiGetTournamentPublishing(tournamentId: string) {
     tournament: Tournament;
     form: RegistrationFormConfig;
     answerCounts: Record<string, { answers: number; options: Record<string, number> }>;
-    can: { listPublicly: boolean; takePaidEntries: boolean };
+    can: { listPublicly: boolean; takePaidEntries: boolean; maxPlayers: number | null };
   }>(`/tournaments/${encodeURIComponent(tournamentId)}/publishing`);
 }
 
@@ -1311,6 +1311,7 @@ export async function apiUpdateTournamentPublishing(
 ) {
   return req<{
     tournament: Tournament;
+    playerLimitCapped?: number;
     answerCounts?: Record<string, { answers: number; options: Record<string, number> }>;
   }>(
     `/tournaments/${encodeURIComponent(tournamentId)}/publishing`,

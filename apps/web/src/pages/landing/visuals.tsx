@@ -96,13 +96,9 @@ export function PairingSheet() {
         </tbody>
       </table>
       <div className="lp-sheet-foot">
-        <span className="lp-status lp-status-go">
-          <i className="lp-dot" aria-hidden="true" />
-          Saved on this laptop
-        </span>
         <span className="lp-status lp-status-wait">
           <i className="lp-dot lp-dot-hollow" aria-hidden="true" />
-          No Wi-Fi: 2 results waiting to sync
+          Offline
         </span>
       </div>
       <figcaption className="lp-cap">Illustration with invented names and event.</figcaption>
@@ -201,7 +197,7 @@ export function FloorVisual() {
           <svg viewBox={`0 0 ${QR_SIZE} ${QR_SIZE}`} aria-hidden="true" shapeRendering="crispEdges">
             <path d={qrPath()} fill="currentColor" />
           </svg>
-          <span className="lp-sticker-f">Scan to enter the result</span>
+          <span className="lp-sticker-f">Scan to score · PIN required</span>
         </div>
         <div className="lp-phone">
           <div className="lp-phone-head">
@@ -362,7 +358,7 @@ export function CertificateVisual() {
         <span className="lp-cert-n">Wan Rookiah Fianchetta binti Wan Back Rank</span>
         <span className="lp-cert-p">2nd place, Under 12</span>
         <span className="lp-cert-e">Piala Zugzwang Rapid</span>
-        <span className="lp-cert-s">No. PZR-00042</span>
+        <span className="lp-cert-s">No. PZR/042/2026</span>
       </div>
       <figcaption className="lp-cap">
         Illustration. Your own PDF template sets the real design.

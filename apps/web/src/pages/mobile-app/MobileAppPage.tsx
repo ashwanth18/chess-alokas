@@ -149,9 +149,9 @@ export default function MobileAppPage() {
         </section>
 
         <Story id="ma-find" flip title="Find your next tournament." phone={<DiscoverPhone />}>
-          <p>Search by name, city or venue. See events by distance from your city, or from your phone if you allow it.</p>
+          <p>Search by name, city or venue. Turn on Near me to see events by distance from your phone.</p>
           <ul>
-            <li>Narrow to 10, 25 or 50 km</li>
+            <li>See events on a map</li>
             <li>Filter by section</li>
             <li>See the date, time control and entry fee</li>
           </ul>
@@ -161,7 +161,6 @@ export default function MobileAppPage() {
           <p>Save your player profile once, and add your children if you have them. Then choose who&apos;s playing and send your entry.</p>
           <ul>
             <li>Register more than one player at a time</li>
-            <li>Switch between players at the top of the screen</li>
             <li>The section is suggested from age, for you to check</li>
             <li>Leave halfway and your draft waits on the phone</li>
           </ul>
@@ -176,12 +175,13 @@ export default function MobileAppPage() {
         </Story>
 
         <Story id="ma-match" title="Follow every round." phone={<MatchdayPhone />}>
-          <p>Your board, your colour and your opponent, on one card. The card is white if you play White, black if you play Black.</p>
+          <p>Your board, your colour and your opponent, on one card. The board panel is white if you play White, black if you play Black.</p>
           <ul>
-            <li>See your score and earlier rounds</li>
+            <li>See your score</li>
+            <li>Switch players at the top of Matchday and Career</li>
             <li>An open Matchday updates by itself when new pairings are posted</li>
             <li>A high-contrast Sunlight display for bright venues</li>
-            <li>If the organizer turns on the live page, also rank, all pairings and full standings</li>
+            <li>If the organizer turns on the live page, also rank, earlier rounds, all pairings and full standings</li>
           </ul>
         </Story>
 
@@ -194,7 +194,7 @@ export default function MobileAppPage() {
         </Story>
 
         <Story id="ma-signal" title="Weak signal in the hall? Still there." phone={<OfflinePhone />}>
-          <p>The app keeps the last information it loaded, and tells you exactly how old it is. When the signal returns, tap Retry or pull to refresh.</p>
+          <p>The app keeps events, players and rounds as last loaded, and tells you exactly how old they are. When the signal returns, tap Retry or pull to refresh.</p>
           <p className="ma-fine">It can only show what it has already loaded once, and new pairings wait for a connection.</p>
         </Story>
 

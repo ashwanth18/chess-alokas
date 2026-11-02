@@ -26,13 +26,17 @@
   .rf .ui-field { margin-bottom: var(--s4); }
 
   /* A file box reads as a control, not as text in a box. */
-  input[type="file"].ui-input { height: auto; padding-block: var(--s2); cursor: pointer; }
-  input[type="file"].ui-input::file-selector-button {
-    margin-right: var(--s3); padding: var(--s1) var(--s3); cursor: pointer;
-    background: var(--paper3); color: var(--ink);
-    border: 1px solid var(--rule-strong); border-radius: var(--r-sm);
-    font: 500 var(--t-sm)/1.4 var(--font-text);
+  input[type="file"].ui-input {
+    height: auto; padding-block: var(--s2); padding-inline: var(--s2); cursor: pointer;
+    color: var(--ink2); font-size: var(--t-sm);
   }
+  input[type="file"].ui-input::file-selector-button {
+    margin-right: var(--s3); min-height: 36px; padding: 0 var(--s4); cursor: pointer;
+    background: transparent; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: var(--r);
+    font: 600 var(--t-sm)/1 var(--font-text);
+  }
+  input[type="file"].ui-input:hover::file-selector-button { background: var(--paper3); }
 
   .rf-more { margin-bottom: var(--s4); }
   .rf-more summary { cursor: pointer; min-height: 32px; color: var(--ink); font-weight: 600; }

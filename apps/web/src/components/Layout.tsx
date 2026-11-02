@@ -412,6 +412,10 @@ export default function Layout() {
               type="button"
               className="btn btn-sm btn-outline"
               onClick={() => {
+                if (primaryOrg) {
+                  navigate(`/team?org=${encodeURIComponent(primaryOrg.id)}`);
+                  return;
+                }
                 setOrgError(null);
                 setOrgModalOpen(true);
               }}

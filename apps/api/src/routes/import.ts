@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyPluginOptions } from 'fastify';
-import { ColumnMappingSchema, assignCategories } from '@chess-alokas/shared';
+import { ColumnMappingSchema, assignCategories, maskNricFields } from '@chess-alokas/shared';
 import type { ParticipantFields } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { parseParticipantsFile } from '../import.js';
@@ -106,7 +106,7 @@ export const importPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts)
         gender: row.gender,
         rating: row.rating,
         club: row.club,
-        customFields: row.customFields,
+        customFields: maskNricFields(row.customFields),
         categoryIds: categoryMap.get(idx) ?? [],
         updatedAt: now,
       }));

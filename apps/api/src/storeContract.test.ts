@@ -886,8 +886,9 @@ describe.each([
 
       it('keeps the form when the desk syncs an older copy of the tournament', async () => {
         const { owner, t } = await formEvent();
+        await tick();
         const pushed = await push(owner, [
-          tournamentItem(t.id, { name: 'Renamed at the desk', status: 'draft', rounds: 5 }, iso(60_000)),
+          tournamentItem(t.id, { name: 'Renamed at the desk', status: 'draft', rounds: 5 }),
         ]);
         expect(pushed.status).toBe(200);
         const after = await store.getTournament(t.id);
@@ -1118,7 +1119,7 @@ describe.each([
         expect((await publishing(owner, t.id, { isPublishedGlobal: true })).status).toBe(403);
         expect((await publishing(owner, t.id, { entryFeeCents: 1000 })).status).toBe(403);
         const status = await call(owner, 'GET', `/tournaments/${t.id}/publishing`);
-        expect(status.body.can).toEqual({ listPublicly: false, takePaidEntries: false });
+        expect(status.body.can).toEqual({ listPublicly: false, takePaidEntries: false, maxPlayers: 24 });
       });
 
       it('takes entries past its trial player limit, and stops approving them at the limit', async () => {
@@ -1266,14 +1267,14 @@ describe.each([
           await call(null, 'GET', `/public/live/${enabled.body.publicToken}`),
           await call(owner, 'GET', `/tournaments/${t.id}`),
           await call(owner, 'GET', `/tournaments/${t.id}/certificates`),
-          await call(owner, 'GET', '/sync/pull'),
-          await call(arbiter, 'GET', '/sync/pull'),
+          await call(owner, 'GET', '/sync/pull?since=1970-01-01T00:00:00.000Z'),
+          await call(arbiter, 'GET', '/sync/pull?since=1970-01-01T00:00:00.000Z'),
           await call(parent, 'GET', '/player/registrations'),
           approved,
         ];
         for (const res of looks) {
           const text = JSON.stringify(res.body);
-          expect(res.status).toBeLessThan(500);
+          expect(res.status).toBeLessThan(400);
           expect(text).not.toContain(NRIC);
           expect(text).not.toContain('140305');
           expect(text).not.toContain('nricNumber');

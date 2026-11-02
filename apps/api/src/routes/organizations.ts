@@ -35,7 +35,12 @@ const CreateOrganizationBodySchema = z.object({
     .optional(),
   logoUrl: z.string().url().nullable().optional().or(z.literal('')).optional(),
   description: z.string().max(1000).nullable().optional(),
-  website: z.string().max(255).nullable().optional(),
+  website: z
+    .string()
+    .max(255)
+    .regex(/^(https?:\/\/.+)?$/i, 'Website must start with http:// or https://')
+    .nullable()
+    .optional(),
   contactEmail: z.string().email().nullable().optional().or(z.literal('')).optional(),
   contactPhone: z.string().max(64).nullable().optional(),
   city: z.string().max(100).nullable().optional(),
@@ -55,7 +60,12 @@ const UpdateOrganizationBodySchema = z.object({
     .optional(),
   logoUrl: z.string().nullable().optional(),
   description: z.string().max(1000).nullable().optional(),
-  website: z.string().max(255).nullable().optional(),
+  website: z
+    .string()
+    .max(255)
+    .regex(/^(https?:\/\/.+)?$/i, 'Website must start with http:// or https://')
+    .nullable()
+    .optional(),
   contactEmail: z.string().email().nullable().optional().or(z.literal('')).optional(),
   contactPhone: z.string().max(64).nullable().optional(),
   city: z.string().max(100).nullable().optional(),

@@ -2152,9 +2152,32 @@ export default function TournamentPage() {
             </div>
             <div className="settings-modal-body">
             <dl className="settings-list">
-              <div className="settings-row">
+              <div className="settings-row settings-row-block">
                 <dt>Name</dt>
-                <dd>{tournament.name}</dd>
+                <dd>
+                  <input
+                    key={tournament.name}
+                    className="input"
+                    aria-label="Tournament name"
+                    defaultValue={tournament.name}
+                    maxLength={200}
+                    onBlur={(e) => {
+                      const next = e.target.value.trim();
+                      if (!next) {
+                        e.target.value = tournament.name;
+                      } else if (next !== tournament.name) {
+                        void db.tournaments.update(tournament.id, {
+                          name: next,
+                          updatedAt: nowIso(),
+                          dirty: 1,
+                        });
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                  />
+                </dd>
               </div>
               <div className="settings-row settings-row-block">
                 <dt>Date</dt>

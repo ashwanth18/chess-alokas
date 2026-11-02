@@ -24,6 +24,7 @@ import {
 } from '../../api/client';
 import ArbiterFloorPanel from './ArbiterFloorPanel';
 import { ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS } from './roles';
+import OrganizationDetails from './OrganizationDetails';
 import './team.css';
 
 type IssuedLink = { email: string; url: string; emailStatus: InviteEmailStatus };
@@ -267,6 +268,8 @@ export default function TeamPage() {
       )}
 
       {yourRole === 'arbiter' && <ArbiterFloorPanel organizationId={org.id} />}
+
+      {manages && <OrganizationDetails organization={org} onSaved={loadOrgs} />}
 
       {manages && (
         <section className="tm-section" aria-labelledby="tm-invite-heading">

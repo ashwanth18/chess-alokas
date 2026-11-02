@@ -73,6 +73,25 @@ export function normalizeNric(raw: string): string | null {
   return /^[A-Z0-9][A-Z0-9 -]{4,18}[A-Z0-9]$/.test(trimmed) ? trimmed : null;
 }
 
+const ID_COLUMN = /(^|[^a-z])(nric|ic|i\/c|mykad|mykid|passport|pasport|kad pengenalan|identification|no\.?\s*kp)([^a-z]|$)/i;
+const NOT_AN_ID_COLUMN = /phone|tel|contact|whatsapp|mobile|\bhp\b/i;
+const NRIC_SHAPE = /^\d{6}[-\s]?\d{2}[-\s]?\d{4}$/;
+
+/**
+ * Roster custom fields keep a masked copy of anything that looks like an ID number: by its column
+ * name, or by its shape. Imported spreadsheets carry them, and rosters reach more people than entries.
+ */
+export function maskNricFields(fields: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields ?? {})) {
+    const text = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+    const looksLikeId =
+      text !== '' && !NOT_AN_ID_COLUMN.test(key) && (ID_COLUMN.test(key) || NRIC_SHAPE.test(text));
+    out[key] = looksLikeId ? maskNric(text) : value;
+  }
+  return out;
+}
+
 /** What public pages and the apps get: no hidden questions, no retired options. */
 export function publicRegistrationForm(config: RegistrationFormConfig): PublicRegistrationForm {
   const visible = (config.customQuestions ?? []).filter((q) => !q.hidden);

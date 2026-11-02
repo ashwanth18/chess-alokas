@@ -17,6 +17,7 @@ import {
   resolveImportAge,
   resolveYearOfBirth,
 } from '../lib/importParse';
+import { maskNricFields } from '@chess-alokas/shared';
 
 interface RawRow {
   [key: string]: unknown;
@@ -155,7 +156,8 @@ function parseRows(raw: RawRow[], mapping: Record<string, string>): MappedPartic
         yearOfBirth,
         email,
         ageCategoryLabel,
-        customFields,
+        // Age and year of birth were read from any NRIC above; the roster keeps only a mask.
+        customFields: maskNricFields(customFields),
       };
     });
 }
