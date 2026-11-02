@@ -5,6 +5,7 @@ import {
   FilterGroupSchema,
   TournamentStyleSchema,
 } from '@chess-alokas/shared';
+import type { Tournament } from '@chess-alokas/shared';
 import type { Store } from '../db.js';
 import { getDatabaseSql, requireAuth } from '../auth.js';
 import { generatePublicLiveToken } from '../floor/pin.js';
@@ -29,11 +30,43 @@ async function assertOwner(
   return true;
 }
 
+/**
+ * What floor duty needs (ArbiterFloorPanel). A list, not exclusions, so a column added to tournaments
+ * stays away from arbiters until someone decides: no payment settings, live link or email text.
+ */
+function floorDutyView(t: Tournament) {
+  return {
+    id: t.id,
+    name: t.name,
+    date: t.date ?? null,
+    status: t.status,
+    rounds: t.rounds,
+    currentRound: t.currentRound,
+    confirmedRounds: t.confirmedRounds,
+    tableCount: t.tableCount,
+    arbiterPinRound: t.arbiterPinRound ?? null,
+    organizationId: t.organizationId ?? null,
+    updatedAt: t.updatedAt,
+  };
+}
+
 export const tournamentsPlugin: FastifyPluginAsync<PluginOptions> = async (app, opts) => {
   const { store } = opts;
 
   app.get('/tournaments', { preHandler: requireAuth }, async (request) => {
-    return store.listTournaments(request.userId ?? null);
+    const { userId } = request;
+    const tournaments = await store.listTournaments(userId ?? null);
+    if (!userId) return tournaments;
+    const organizations = await store.listUserOrganizations(userId);
+    const arbiterOf = new Set(
+      organizations.filter((o) => o.memberRole === 'arbiter').map((o) => o.id),
+    );
+    // Your own tournament stays yours, whatever your role in its organization.
+    return tournaments.map((t) =>
+      t.ownerId !== userId && t.organizationId && arbiterOf.has(t.organizationId)
+        ? floorDutyView(t)
+        : t,
+    );
   });
 
   app.post<{ Body: unknown }>('/tournaments', { preHandler: requireAuth }, async (request, reply) => {

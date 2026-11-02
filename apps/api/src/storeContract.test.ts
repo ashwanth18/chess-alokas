@@ -176,7 +176,7 @@ async function postgresBackend(): Promise<Backend> {
 
 const iso = (offsetMs = 0) => new Date(Date.now() + offsetMs).toISOString();
 const HOUR = 3_600_000;
-/** MemoryStore can finish two writes in one millisecond, and an equal timestamp is a no-op. */
+/** MemoryStore can finish two writes in one millisecond. For tests where their order shows. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
 const PDF = Buffer.from('%PDF-1.4 test').toString('base64');
 
@@ -669,7 +669,6 @@ describe.each([
         tournamentItem(id, { organizationId: org.id, rosterConsentConfirmedAt: confirmedAt }),
       ]);
       expect(first.body.rejected).toEqual([]);
-      await tick();
       await push(owner, [tournamentItem(id, { rosterConsentConfirmedAt: confirmedAt }, iso())]);
       const records = await store.listRosterConsents(id);
       expect(records).toHaveLength(1);
@@ -886,7 +885,6 @@ describe.each([
 
       it('keeps the form when the desk syncs an older copy of the tournament', async () => {
         const { owner, t } = await formEvent();
-        await tick();
         const pushed = await push(owner, [
           tournamentItem(t.id, { name: 'Renamed at the desk', status: 'draft', rounds: 5 }),
         ]);
@@ -2066,7 +2064,6 @@ describe.each([
 
       expect((await call(director, 'GET', `/tournaments/${id}`)).status).toBe(200);
       expect((await call(director, 'GET', `/tournaments/${id}/floor/tables`)).status).toBe(200);
-      await tick();
       const pushed = await push(director, [tournamentItem(id, { name: 'Renamed' }, iso())]);
       expect(pushed.body.accepted).toBe(1);
       expect((await store.getTournament(id))?.name).toBe('Renamed');
@@ -2228,7 +2225,6 @@ describe.each([
       it('sync never moves an existing tournament to the other organization', async () => {
         const { person, club, own } = await inTwoOrgs();
         const id = await orgTournament(person, own.id);
-        await tick();
         const pushed = await push(person, [tournamentItem(id, { organizationId: club.id }, iso())]);
         expect(pushed.body.accepted).toBe(1);
         expect((await store.getTournament(id))?.organizationId).toBe(own.id);
@@ -2278,7 +2274,6 @@ describe.each([
         const { owner, org } = await orgWithOwner();
         const kept = await orgTournament(owner, org.id);
         const gone = await orgTournament(owner, org.id);
-        await tick();
         const deleted = { ...tournamentItem(gone, {}, iso()), deletedAt: iso() };
         expect((await push(owner, [deleted])).body.accepted).toBe(1);
         const removed = await join(owner, org.id, 'director');
@@ -2677,7 +2672,6 @@ describe.each([
       const { owner, t, game, syncPayload } = await board();
       await store.recordGameResult(game.id, { result: '1-0', actorRole: 'director' });
       await store.updateTournament(t.id, { confirmedRounds: 1, updatedAt: iso(-HOUR) });
-      await tick();
 
       const res = await push(owner, [
         { entity: 'game', id: game.id, payload: { ...syncPayload, result: '0-1' }, updatedAt: iso(1000) },
@@ -2697,7 +2691,6 @@ describe.each([
         onlyIfOpen: true,
       });
       const before = (await backend.auditEvents(game.id)).length;
-      await tick();
       const res = await push(owner, [
         { entity: 'game', id: game.id, payload: syncPayload, updatedAt: iso(300_000) },
       ]);
@@ -2711,7 +2704,6 @@ describe.each([
     it('a director correction made offline replaces a locked result, keeps the lock, and is audited', async () => {
       const { owner, game, syncPayload } = await board();
       await store.recordGameResult(game.id, { result: '1-0', actorRole: 'floor', lock: true });
-      await tick();
       const res = await push(owner, [
         {
           entity: 'game',
@@ -2755,7 +2747,6 @@ describe.each([
       const { owner, t, game, syncPayload } = await board();
       await store.recordGameResult(game.id, { result: '1-0', actorRole: 'director' });
       await store.updateTournament(t.id, { confirmedRounds: 1, updatedAt: iso(-HOUR) });
-      await tick();
       const res = await push(owner, [
         tournamentItem(t.id, { confirmedRounds: 0 }),
         {
@@ -2777,7 +2768,6 @@ describe.each([
       expect(res.body.accepted).toBe(1);
       const stored = await store.getGame(game.id);
       expect(Date.parse(stored!.updatedAt)).toBeLessThanOrEqual(Date.now());
-      await new Promise((r) => setTimeout(r, 5));
       const later = await push(owner, [
         { entity: 'game', id: game.id, payload: { ...syncPayload, result: '0-1' }, updatedAt: iso() },
       ]);
@@ -3217,7 +3207,6 @@ describe.each([
         await call(user, 'POST', '/player/profiles', { guardianConsent: true, fullName: 'Linked Kid', relationship: 'self' })
       ).body.profile;
       await call(user, 'POST', `/player/profiles/${profile.id}/claim`, {}, { 'x-test-user-email': email });
-      await tick();
       await push(owner, [
         {
           entity: 'participant',
@@ -3286,7 +3275,6 @@ describe.each([
       await call(user, 'DELETE', `/tournaments/${a.body.id}`);
       const b = await call(user, 'POST', '/tournaments', { name: 'B', organizationId: org.id });
       expect(b.status).toBe(201);
-      await tick();
       const res = await push(user, [tournamentItem(a.body.id, {}, iso(1000))]);
       expect(res.body.rejected[0].code).toBe('quota');
       expect((await store.getTournament(a.body.id))?.deletedAt).toBeTruthy();

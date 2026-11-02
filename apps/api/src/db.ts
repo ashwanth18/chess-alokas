@@ -1348,7 +1348,7 @@ export class MemoryStore implements Store {
         ),
       childMeta: async (entity, id) => {
         const row = entity === 'category' ? this.categories.get(id) : this.participants.get(id);
-        return row ? { tournamentId: row.tournamentId, updatedAt: row.updatedAt } : null;
+        return row ? { tournamentId: row.tournamentId, updatedAt: row.updatedAt, row } : null;
       },
       getGame: async (id) => this.games.get(id) ?? null,
       countGameCards: async (gameId) => (await this.listGameCards(gameId)).length,
@@ -4592,16 +4592,20 @@ export class PostgresStore implements Store {
         return new Set(rows.map((r) => r.id));
       },
       childMeta: async (entity, id) => {
-        const rows =
-          entity === 'category'
-            ? await s<{ tournament_id: string; updated_at: Date | string }[]>`
-                SELECT tournament_id, updated_at FROM categories WHERE id = ${id}
-              `
-            : await s<{ tournament_id: string; updated_at: Date | string }[]>`
-                SELECT tournament_id, updated_at FROM participants WHERE id = ${id}
-              `;
-        const row = rows[0];
-        return row ? { tournamentId: row.tournament_id, updatedAt: toIso(row.updated_at)! } : null;
+        if (entity === 'category') {
+          const [row] = await s<CategoryRow[]>`SELECT * FROM categories WHERE id = ${id}`;
+          if (!row) return null;
+          const category = rowToCategory(row);
+          return { tournamentId: category.tournamentId, updatedAt: category.updatedAt, row: category };
+        }
+        const [row] = await s<ParticipantRow[]>`SELECT * FROM participants WHERE id = ${id}`;
+        if (!row) return null;
+        const participant = rowToParticipant(row);
+        return {
+          tournamentId: participant.tournamentId,
+          updatedAt: participant.updatedAt,
+          row: participant,
+        };
       },
       // Locked until the batch ends. Floor entry locks only this row, so no deadlock can form.
       getGame: async (id) => {

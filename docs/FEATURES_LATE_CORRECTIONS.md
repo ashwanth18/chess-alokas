@@ -16,6 +16,7 @@ The API connects as table owner and bypasses row level security, so these rules 
 - **Platform admins** read no tournament data directly. None of today's rules gave them any, and their dashboard uses API aggregates.
 - **`tournaments`** can't be read with `select *`: `arbiter_pin_hash` and `public_token` aren't granted to clients, and a column added later starts ungranted.
 - **Signed-out clients** have no select on any table.
+- **Arbiters through the API:** `GET /tournaments` gives them only id, name, date, status, round counts, table count, PIN round, organization and update time. Not payment settings, the live token or email text. A tournament they own themselves stays whole.
 - **Storage:** clients get no policy on `certificates` or `registration-receipts`. The API reads both with the service key, and 033 sets both private.
 
 `apps/api/src/migrations.test.ts` lists every public table in `ACCESS`. A new table fails until someone decides who may read it. `apps/api/src/crossTenant.test.ts` takes its routes from Fastify, so a new route is swept without being added.
@@ -52,3 +53,5 @@ If a later round is paired, the dialog says `Round 4 was paired using the old sc
 The server refuses with a 409 if the round isn't the newest, is confirmed, is Round 1, or has a result, a floor lock or a card. A card means the game has started. Games are locked first, so a floor result either lands and refuses the undo, or waits and finds its game gone.
 
 Undo needs a connection, because only the server knows whether the floor has entered a result. A device that was offline can't bring removed games back: its push gets `game_removed`.
+
+The admin dashboard's result-event numbers leave these rows out, because nobody entered a result.

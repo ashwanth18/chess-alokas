@@ -85,7 +85,7 @@ export interface SyncBackend {
   childMeta(
     entity: 'category' | 'participant',
     id: string,
-  ): Promise<{ tournamentId: string; updatedAt: string } | null>;
+  ): Promise<{ tournamentId: string; updatedAt: string; row: { updatedAt: string } } | null>;
   /** In Postgres, also locks the row, so a floor result can't land between the check and the write. */
   getGame(id: string): Promise<Game | null>;
   /** Live cards on this game. A game with cards was played, so it can't become an absence. */
@@ -105,6 +105,70 @@ export interface SyncBackend {
   writeChild(entity: 'category' | 'participant', item: SyncPushItem): Promise<void>;
   writeGame(item: SyncPushItem, decision: GameWriteApply): Promise<void>;
   insertResultEvent(event: SyncResultEvent): Promise<void>;
+}
+
+/**
+ * What people edit on each kind of row. Columns the server owns are left out on purpose: a tournament
+ * goes up with every batch that touches its children, and this device's copy of those may lag behind.
+ */
+const EDITED_FIELDS: Record<SyncPushItem['entity'], readonly string[]> = {
+  tournament: [
+    'name',
+    'date',
+    'style',
+    'rounds',
+    'status',
+    'currentRound',
+    'confirmedRounds',
+    'mixCategories',
+    'prizePlaces',
+    'awardScope',
+    'tiebreakOrder',
+    'sharedPlaces',
+  ],
+  category: ['name', 'filter', 'sortOrder', 'prizePlaces'],
+  participant: [
+    'name',
+    'age',
+    'gender',
+    'rating',
+    'fideId',
+    'club',
+    'school',
+    'city',
+    'state',
+    'country',
+    'yearOfBirth',
+    'email',
+    'customFields',
+    'categoryIds',
+    'seed',
+    'excludedRounds',
+    'withdrawnFromRound',
+  ],
+  game: ['categoryId', 'round', 'board', 'whiteId', 'blackId', 'result', 'isBye'],
+};
+
+/** Text to compare by: key order doesn't matter, and null means the same as missing. */
+function canonical(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== null && v !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Whether a pushed row says what the stored one says. Fields a client didn't send don't count. */
+export function sameContent(stored: object, item: SyncPushItem): boolean {
+  const row = stored as Record<string, unknown>;
+  if (Boolean(row['deletedAt']) !== Boolean(item.deletedAt)) return false;
+  return EDITED_FIELDS[item.entity].every(
+    (field) => !(field in item.payload) || canonical(row[field]) === canonical(item.payload[field]),
+  );
 }
 
 /** A clock ahead of the server must not win every later edit, so it stops at server time. */
@@ -457,8 +521,17 @@ export async function runSyncPush(
     cached(activeSets, id, (tid) => backend.activeParticipantIds(tid));
 
   for (const original of sorted) {
-    const updatedAt = clampSyncTimestamp(original.updatedAt, now);
-    const item: SyncPushItem = { ...original, updatedAt };
+    let updatedAt = clampSyncTimestamp(original.updatedAt, now);
+    let item: SyncPushItem = { ...original, updatedAt };
+    // A tie on the clock proves nothing about the content. The same row again stays a no-op, which is
+    // how a retry behaves. A different row in the same millisecond is a real edit, whether the times
+    // met by chance or through clamping, so it goes just past the stored row instead of being dropped.
+    const settleTie = (stored: { updatedAt: string } | null | undefined): void => {
+      if (!stored || Date.parse(stored.updatedAt) !== Date.parse(updatedAt)) return;
+      if (sameContent(stored, item)) return;
+      updatedAt = new Date(Date.parse(stored.updatedAt) + 1).toISOString();
+      item = { ...item, updatedAt };
+    };
 
     const invalid = validateSyncPayload(item);
     if (invalid) {
@@ -472,6 +545,7 @@ export async function runSyncPush(
         reject(item, 'forbidden', 'This account does not own that tournament.');
         continue;
       }
+      settleTie(existing);
 
       const consentAt = rosterConsentTime(item, now);
       // Before the checks below: a confirmation still happened if this edit lost to a newer one.
@@ -590,6 +664,7 @@ export async function runSyncPush(
         confirmedBefore.get(tid) ?? parent.confirmedRounds ?? 0,
         parent.confirmedRounds ?? 0,
       );
+      settleTie(existing);
       const decision = decideGameWrite(existing, item, updatedAt, confirmed);
       if (decision.kind === 'noop') {
         accepted++;
@@ -680,6 +755,7 @@ export async function runSyncPush(
       reject(item, 'forbidden', 'This row id belongs to another tournament.');
       continue;
     }
+    settleTie(meta?.row);
     if (meta) {
       const incomingTime = Date.parse(updatedAt);
       const existingTime = Date.parse(meta.updatedAt);

@@ -84,6 +84,10 @@ describe.each(TEST_STORES)('cross-tenant sweep: %s', (_name, makeBackend) => {
       publicEnabled: true,
       publicToken: `live-${crypto.randomUUID()}`,
       registrationOpen: true,
+      paymentInstructions: 'Pay to account 000-111',
+      paymentQrUrl: 'https://example.test/qr.png',
+      entryFeeCents: 5000,
+      certEmailSubject: 'Your certificate',
     });
     tournamentId = tournament.id;
     const category = await store.createCategory({
@@ -169,6 +173,7 @@ describe.each(TEST_STORES)('cross-tenant sweep: %s', (_name, makeBackend) => {
     expect(issued.status).toBe(201);
 
     params = {
+      orgId: org.id,
       id: tournamentId,
       round: '1',
       gameId: game.id,
@@ -345,6 +350,55 @@ describe.each(TEST_STORES)('cross-tenant sweep: %s', (_name, makeBackend) => {
       expect(res.status).toBe(200);
       expect(JSON.stringify(res.body)).not.toContain(tournamentId);
       expect(res.body.participants.map((p: { name: string }) => p.name)).not.toContain('White Player');
+    });
+  });
+
+  describe('the tournament list for an arbiter', () => {
+    const FLOOR_DUTY_FIELDS = [
+      'arbiterPinRound',
+      'confirmedRounds',
+      'currentRound',
+      'date',
+      'id',
+      'name',
+      'organizationId',
+      'rounds',
+      'status',
+      'tableCount',
+      'updatedAt',
+    ];
+    const rowFor = async (user: string, id: string) =>
+      (await t.call(user, 'GET', '/tournaments')).body.find((row: { id: string }) => row.id === id);
+
+    it('has only what floor duty needs', async () => {
+      const row = await rowFor(arbiter, tournamentId);
+      expect(Object.keys(row).sort()).toEqual(FLOOR_DUTY_FIELDS);
+      const text = JSON.stringify(row);
+      for (const secret of ['000-111', 'qr.png', 'live-', 'Your certificate', '5000']) {
+        expect(text).not.toContain(secret);
+      }
+    });
+
+    it('still has what the floor panel reads', async () => {
+      expect(await rowFor(arbiter, tournamentId)).toMatchObject({
+        id: tournamentId,
+        name: 'Seeded',
+        status: 'in_progress',
+        currentRound: 1,
+      });
+    });
+
+    it('managers still get the whole row', async () => {
+      const row = await rowFor(owner, tournamentId);
+      expect(row.paymentInstructions).toBe('Pay to account 000-111');
+      expect(row.publicToken).toMatch(/^live-/);
+    });
+
+    it('an arbiter keeps their own tournament whole', async () => {
+      const mine = await t.seedTournament(arbiter, params['orgId']!, {
+        paymentInstructions: 'My own account',
+      });
+      expect((await rowFor(arbiter, mine.id)).paymentInstructions).toBe('My own account');
     });
   });
 

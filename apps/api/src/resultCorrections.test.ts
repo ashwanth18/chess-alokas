@@ -658,8 +658,6 @@ describe.each(TEST_STORES)('late corrections: %s', (_name, makeBackend) => {
     it('a device that was offline can\'t bring the games back', async () => {
       const { tournament, roundFour } = await pairedRound();
       await undo(director, tournament.id);
-      // An equal timestamp would be a no-op, and MemoryStore can finish both in one millisecond.
-      await new Promise((resolve) => setTimeout(resolve, 3));
       const res = await push(admin, [rowFor(roundFour, '1-0')]);
       expect(res.body.rejected[0]).toMatchObject({ code: 'game_removed' });
       const saved = await reload(roundFour);

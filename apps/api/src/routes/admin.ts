@@ -305,6 +305,8 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
           SELECT actor_role, COUNT(*)::text AS count
           FROM game_result_events
           WHERE created_at >= now() - interval '7 days'
+            -- Undoing a round logs a row per game (lib/roundUndo.ts). Nobody entered a result.
+            AND NOT (previous_result IS NOT DISTINCT FROM result AND note LIKE 'Round % undone%')
             AND tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
           GROUP BY actor_role
         `;
@@ -338,6 +340,7 @@ export const adminPlugin: FastifyPluginAsync = async (app) => {
               SELECT COUNT(*)::text
               FROM game_result_events e
               WHERE date_trunc('week', e.created_at)::date = w.week_start
+                AND NOT (e.previous_result IS NOT DISTINCT FROM e.result AND e.note LIKE 'Round % undone%')
                 AND e.tournament_id NOT IN (SELECT id FROM demo_tournament_ids)
             ) AS result_events,
             (
