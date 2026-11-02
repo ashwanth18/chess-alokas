@@ -239,8 +239,8 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (app, opt
     if (authEnabled() && (!request.userId || !request.user)) {
       return reply.code(401).send({ error: 'Unauthorized' });
     }
-    if (!request.userId || !request.user) {
-      return { id: null, email: null, displayName: null };
+    if (!request.userId) {
+      return { id: null, email: null, displayName: null, accountRole: null };
     }
     const service = getServiceSupabase();
     let displayName: string | null = null;
@@ -254,8 +254,9 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (app, opt
     }
     return {
       id: request.userId,
-      email: request.user.email ?? null,
+      email: request.user?.email ?? null,
       displayName,
+      accountRole: await opts.store.getAccountRole(request.userId),
     };
   });
 

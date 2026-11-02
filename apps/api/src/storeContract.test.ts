@@ -2066,6 +2066,7 @@ describe.each([
 
       expect((await call(director, 'GET', `/tournaments/${id}`)).status).toBe(200);
       expect((await call(director, 'GET', `/tournaments/${id}/floor/tables`)).status).toBe(200);
+      await tick();
       const pushed = await push(director, [tournamentItem(id, { name: 'Renamed' }, iso())]);
       expect(pushed.body.accepted).toBe(1);
       expect((await store.getTournament(id))?.name).toBe('Renamed');
@@ -2389,6 +2390,28 @@ describe.each([
       const own = await verifiedOrg(person);
       const created = await call(person, 'POST', '/tournaments', { name: 'Default org' });
       expect(created.body.organizationId).toBe(own.id);
+    });
+  });
+
+  describe('account role on /me', () => {
+    const roleOf = async (user: string) => (await call(user, 'GET', '/me')).body.accountRole;
+
+    it('starts as participant, and creating an organization makes it both', async () => {
+      const user = await newUser();
+      expect(await roleOf(user)).toBe('participant');
+      const created = await call(user, 'POST', '/organizations', { name: `Role Check ${user}` });
+      expect(created.status).toBe(201);
+      expect(await roleOf(user)).toBe('both');
+    });
+
+    it('stays after leaving, which is why it counts separately from membership', async () => {
+      const owner = await newUser();
+      const created = await call(owner, 'POST', '/organizations', { name: `Role Leave ${owner}` });
+      const member = await newUser();
+      await backend.addMember(created.body.organization.id, member, 'owner');
+      await call(owner, 'POST', `/organizations/${created.body.organization.id}/leave`);
+      expect((await call(owner, 'GET', '/organizations')).body.organizations).toEqual([]);
+      expect(await roleOf(owner)).toBe('both');
     });
   });
 

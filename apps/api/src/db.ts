@@ -1,5 +1,6 @@
 import postgres, { type Sql } from 'postgres';
 import {
+  AccountRole,
   Tournament,
   TournamentTable,
   Category,
@@ -208,6 +209,8 @@ export interface Store {
   listUserOrganizations(
     userId: string,
   ): Promise<Array<Organization & { memberRole: OrganizationMemberRole }>>;
+  /** `profiles.account_role`. It outlives a membership: leaving an organization doesn't reset it. */
+  getAccountRole(userId: string): Promise<AccountRole | null>;
   getOrganization(id: string): Promise<Organization | null>;
   getOrganizationBySlug(slug: string): Promise<Organization | null>;
   isOrganizationMember(
@@ -680,6 +683,8 @@ export class MemoryStore implements Store {
   private gameCards = new Map<string, GameCard>();
   private pinMeta = new Map<string, { hash: string; round: number }>();
   private organizations = new Map<string, Organization>();
+  /** Stands in for `profiles.account_role`: set the way createOrganization and invites set it there. */
+  private accountRoles = new Map<string, AccountRole>();
   private organizationMembers = new Map<
     string,
     {
@@ -1598,7 +1603,15 @@ export class MemoryStore implements Store {
       email: ownerEmail?.toLowerCase() ?? null,
       accessChangedAt: created.createdAt,
     });
+    this.accountRoles.set(
+      ownerUserId,
+      (this.accountRoles.get(ownerUserId) ?? 'participant') === 'participant' ? 'both' : 'organizer',
+    );
     return created;
+  }
+
+  async getAccountRole(userId: string): Promise<AccountRole | null> {
+    return this.accountRoles.get(userId) ?? 'participant';
   }
 
   async updateOrganization(
@@ -1776,6 +1789,9 @@ export class MemoryStore implements Store {
     }
     row.acceptedAt = nowIso;
     row.acceptedBy = input.userId;
+    if ((this.accountRoles.get(input.userId) ?? 'participant') === 'participant') {
+      this.accountRoles.set(input.userId, 'both');
+    }
     return {
       ok: true,
       organizationId: row.organizationId,
@@ -4792,6 +4808,13 @@ export class PostgresStore implements Store {
   }
 
   // ---- Organizations (B2B) ----
+
+  async getAccountRole(userId: string): Promise<AccountRole | null> {
+    const rows = await this.sql<{ account_role: AccountRole }[]>`
+      SELECT account_role FROM profiles WHERE id = ${userId}
+    `;
+    return rows[0]?.account_role ?? null;
+  }
 
   async listUserOrganizations(
     userId: string,
