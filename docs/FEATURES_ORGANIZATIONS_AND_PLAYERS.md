@@ -205,7 +205,7 @@ Web shows the profile notice where `guardianConsentRequired` says so: a child, o
 The rules live in `apps/api/src/lib/syncEngine.ts`, shared by both stores. A batch runs in one transaction.
 
 - **Ownership**: a caller writes only tournaments they own or manage through an organization (`owner`, `admin`, `director`). This includes soft-deleted rows: only the owner can revive one. Rows with no owner can't be claimed through sync.
-- **Results**: a game in a confirmed round can't be changed unless the same batch undoes the confirmation. A floor-locked result can be replaced only by a director result, and the lock stays. Each result change writes a `game_result_events` row. Corrections through `PATCH /games/:id/result` work as before.
+- **Results**: a game in a confirmed round can't be changed unless the same batch undoes the confirmation. A floor-locked result can be replaced only by a director result, and the lock stays. Each result change writes a `game_result_events` row. Corrections through `PATCH /games/:id/result` work as before. A late correction with a reason can change a confirmed round: see `docs/FEATURES_LATE_CORRECTIONS.md`.
 - **Timestamps**: an `updatedAt` ahead of the server's clock is clamped to server time.
 - **Pull cursor**: `server_updated_at`, set by a database trigger, decides what a pull returns, so an edit made offline and pushed late still reaches other devices. Each pull re-reads the last minute. Request and response shapes are unchanged.
 - **Response**: `{ accepted, rejected: [{ entity, id, code, reason }], serverTime }`. `accepted` counts rows actually saved.

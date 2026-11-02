@@ -45,7 +45,9 @@ function rowToLocalGame(row: GameRow): LocalGame {
 async function upsertFromRemote(row: GameRow) {
   const remote = rowToLocalGame(row);
   const local = await db.games.get(remote.id);
-  if (local?.dirty === 1 && local.updatedAt > remote.updatedAt) return;
+  if (local?.dirty === 1 && (local.updatedAt > remote.updatedAt || local.pendingCorrections?.length)) {
+    return;
+  }
   await db.games.put(remote);
 }
 

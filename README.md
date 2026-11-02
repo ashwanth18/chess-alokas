@@ -150,6 +150,8 @@ pnpm --filter @chess-alokas/pairing-engine test
 | POST | `/tournaments/:id/import` | Multipart CSV/XLSX import |
 | POST | `/tournaments/:id/rounds/:n/pair` | Generate pairings |
 | PATCH | `/games/:id/result` | Set result |
+| GET | `/games/:id/history` | A game's result history, for managers |
+| POST | `/tournaments/:id/rounds/:round/undo` | Remove the newest round's unplayed games and end its floor PIN |
 | GET | `/tournaments/:id/standings` | Standings |
 | GET | `/sync/pull?since=` | Pull LWW sync (server-assigned cursor) |
 | POST | `/sync/push` | Push LWW sync; returns `accepted` and per-row `rejected` reasons |

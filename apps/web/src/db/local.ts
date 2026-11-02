@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import type { GameCorrection } from '@chess-alokas/shared';
 import type { FilterGroup, RegistrationFormConfig } from '@chess-alokas/shared';
 
 export interface LocalTournament {
@@ -133,6 +134,8 @@ export interface LocalGame {
   resultEnteredByName?: string | null;
   resultEnteredByRole?: 'floor' | 'director' | null;
   resultOverrideCount?: number;
+  /** Late corrections not yet accepted by the server. Not indexed, so no schema version. */
+  pendingCorrections?: GameCorrection[];
   updatedAt: string;
   deletedAt?: string | null;
   dirty: 1 | 0;

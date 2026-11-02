@@ -89,6 +89,42 @@ curl https://chess-manager.alokas.com/api/health
 
 Sign up on the site → create tournament → Sync → Issue digital.
 
+## 5b. After applying migration 033
+
+Take a backup first. These can't be checked anywhere but real Supabase. In the SQL editor, with real ids:
+
+```sql
+-- Two rows: games and game_cards.
+select tablename from pg_publication_tables
+where pubname = 'supabase_realtime' and tablename in ('games', 'game_cards');
+
+-- Both buckets, public = false.
+select id, public from storage.buckets where id in ('certificates', 'registration-receipts');
+
+-- Nothing here should mention either bucket for anon or authenticated.
+select policyname, roles, cmd, qual from pg_policies
+where schemaname = 'storage' and tablename = 'objects';
+
+-- As an invited director who did not create the tournament: both counts above zero.
+-- Run again with an arbiter's id: games and participants 0, tournaments 1.
+-- Run again with a member of another organization: all 0.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', '<user id>', 'role', 'authenticated')::text, true);
+select count(*) from public.games where tournament_id = '<tournament id>';
+select count(*) from public.participants where tournament_id = '<tournament id>';
+select count(*) from public.tournaments where id = '<tournament id>';
+rollback;
+```
+
+Then the live update itself, with two browsers:
+
+1. Sign in as the invited director. Open the in-progress tournament's Pairings tab, and DevTools, Network, WS, `realtime/v1/websocket`, Messages.
+2. Check the `phx_reply` for `realtime:games-live:<tournament id>` says `ok`.
+3. As the owner in the other browser, enter a result on that round.
+4. The director's browser should show it within about 2 seconds, with a `postgres_changes` message in the socket. If it takes up to 30 seconds with no message, Realtime isn't delivering and only the backup sync is.
+
 ## 6. Desktop
 
 Packaged Electron uses `https://chess-manager.alokas.com/api` by default. Users sign in with password or email code; they never paste secret keys.

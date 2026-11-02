@@ -40,6 +40,8 @@ Offline-first chess tournament manager with **per-manager accounts**:
 
 - [x] **Audit hardening (2026-11-01)**: client writes locked to the API (`028`), trial limits for accounts with no org, org membership checks on create/sync, confirmed-email plus name claiming, private receipt storage, sync rejections reported to clients, server-side sync cursor (`029`), real offline PWA (`apps/web/src/sw.ts`), desktop sandbox/fuses/backups (Electron 45), honest Flutter app with no seed data. `apps/api/src/storeContract.test.ts` runs rules against MemoryStore and real PostgresStore on PGlite; `migrations.test.ts` applies the whole migration chain
 
+- [x] **Database access and late corrections (`033`)**: organization-aware read rules, and corrections to any earlier result, online or queued offline. See `docs/FEATURES_LATE_CORRECTIONS.md`. Realtime and storage must be checked on real Supabase after applying: `deploy/DOKPLOY.md` section 5b
+
 - [x] **Team (`030`)**: invites, members, roles, last-owner protection, `/team`, `/invite/:token`. Rules and the role table are in `docs/FEATURES_ORGANIZATIONS_AND_PLAYERS.md` section 4b
 
 - [x] **Registration form builder (`034`)**: per-event form, Malay labels, checkbox and file questions, NRIC and age proof, deadline and limit screens. See `docs/FEATURES_REGISTRATION_AND_DISCOVERY.md`, "The form builder". UI in `apps/web/src/pages/registration-form/`
@@ -84,6 +86,8 @@ Offline-first chess tournament manager with **per-manager accounts**:
 | `apps/api/src/auth.ts` | JWT + `/me` |
 | `apps/api/src/routes/organizations.ts` | B2B organization CRUD, Sandbox Trial, and admin approvals |
 | `apps/api/src/routes/team.ts` | Members, roles and invites |
+| `apps/api/src/routes/resultCorrections.ts`, `apps/api/src/lib/roundUndo.ts` | Result history and undoing the newest round. Corrections themselves are in `lib/syncEngine.ts` |
+| `apps/web/src/lib/lateCorrection.ts` | Correction rules on the device |
 | `apps/api/src/routes/playerProfiles.ts` | Global player/family profiles, past participation claim, and career dashboard |
 | `apps/api/src/routes/registrations.ts` | Public event discovery, registration submission, publishing settings & organizer approval queue |
 | `apps/api/src/floor/` | PIN/QR floor scoring backend |

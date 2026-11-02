@@ -1,11 +1,15 @@
-import type {
-  Game,
-  GameResult,
-  Organization,
-  SyncPushItem,
-  SyncRejection,
-  SyncRejectionCode,
-  Tournament,
+import {
+  GameCorrectionSchema,
+  isAbsenceResult,
+  isCorrectableResult,
+  type Game,
+  type GameCorrection,
+  type GameResult,
+  type Organization,
+  type SyncPushItem,
+  type SyncRejection,
+  type SyncRejectionCode,
+  type Tournament,
 } from '@chess-alokas/shared';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -13,6 +17,8 @@ const STYLES = new Set(['swiss', 'dutch', 'round_robin']);
 const STATUSES = new Set(['draft', 'ready', 'in_progress', 'completed']);
 const AWARD_SCOPES = new Set(['overall', 'per_category']);
 const RESULTS = new Set(['1-0', '0-1', '1/2-1/2', 'bye', 'pending', '1-0F', '0-1F', '0-0']);
+/** More than this on one game can't come from a director at a desk. */
+const MAX_QUEUED_CORRECTIONS = 20;
 
 /**
  * Codes that fail the whole batch for clients that don't read `rejected`. Those clients
@@ -57,6 +63,10 @@ export interface GameWriteApply {
   resultOverrideCount: number;
   /** Set when the result changes: every such change goes in the audit trail. */
   auditPreviousResult: GameResult | null | undefined;
+  /** Set for a late correction: one audit row per change, in place of the one above. */
+  corrections?: GameCorrection[];
+  /** A result on this device that the server never saw, which the corrections start from. */
+  unsyncedBase?: { from: GameResult | null; to: GameResult };
 }
 
 /** Where the rules touch storage. Each store implements this once, inside one transaction. */
@@ -76,7 +86,10 @@ export interface SyncBackend {
     entity: 'category' | 'participant',
     id: string,
   ): Promise<{ tournamentId: string; updatedAt: string } | null>;
+  /** In Postgres, also locks the row, so a floor result can't land between the check and the write. */
   getGame(id: string): Promise<Game | null>;
+  /** Live cards on this game. A game with cards was played, so it can't become an absence. */
+  countGameCards(gameId: string): Promise<number>;
   /** The organizer confirmed they hold consent for an import. Recorded once per confirmation. */
   recordRosterConsent(input: {
     tournamentId: string;
@@ -146,8 +159,108 @@ export function validateSyncPayload(item: SyncPushItem): string | null {
     for (const key of ['whiteId', 'blackId']) {
       if (p[key] != null && !UUID_RE.test(String(p[key]))) return `${key} is not a valid id.`;
     }
+    if (p['corrections'] != null && !correctionsOf(p)) return 'This correction is not valid.';
   }
   return null;
+}
+
+/**
+ * The queued corrections on a pushed game row, or null if they don't form one unbroken chain ending
+ * at the row's result. A correction needs a reason and can't set "no result".
+ */
+function correctionsOf(payload: Record<string, unknown>): GameCorrection[] | null {
+  const parsed = GameCorrectionSchema.array()
+    .min(1)
+    .max(MAX_QUEUED_CORRECTIONS)
+    .safeParse(payload['corrections']);
+  if (!parsed.success) return null;
+  const chain = parsed.data;
+  const unbroken = chain.every(
+    (c, i) =>
+      isCorrectableResult(c.result) && (i === 0 || c.previousResult === chain[i - 1]!.result),
+  );
+  if (!unbroken || chain.at(-1)!.result !== payload['result']) return null;
+  return chain;
+}
+
+function correctionConflict(reason: string): GameWriteDecision {
+  return { kind: 'reject', code: 'correction_conflict', reason };
+}
+
+/**
+ * A director's late correction. Allowed in a confirmed round, on a completed tournament and with
+ * later rounds paired, because it changes one result and nothing else.
+ *
+ * The stored result, not the clock, decides: a correction applies only to the result the director
+ * was looking at. The one exception is a result on this device that never reached the server: in a
+ * round that isn't frozen, it would have been accepted as an ordinary edit, so it still is.
+ */
+function decideCorrection(
+  existing: Game | null,
+  item: SyncPushItem,
+  updatedAt: string,
+  confirmedRounds: number,
+  corrections: GameCorrection[],
+): GameWriteDecision {
+  const first = corrections[0]!;
+  const last = corrections.at(-1)!;
+  const p = item.payload;
+
+  if (!existing) {
+    return {
+      kind: 'apply',
+      resultLockedAt: (p['resultLockedAt'] as string | null | undefined) ?? null,
+      resultOverrideCount: corrections.length,
+      auditPreviousResult: undefined,
+      corrections,
+      unsyncedBase: isCorrectableResult(first.previousResult)
+        ? { from: null, to: first.previousResult }
+        : undefined,
+    };
+  }
+
+  if (existing.deletedAt) {
+    return correctionConflict(`Round ${existing.round} was undone, so this game is gone.`);
+  }
+  if (existing.isBye || existing.result === 'bye') {
+    return correctionConflict('A bye has no result to correct.');
+  }
+  // Already there, most likely a retry after the answer to the first attempt was lost.
+  if (existing.result === last.result) return { kind: 'noop' };
+
+  const pairingDiffers =
+    existing.round !== Number(p['round'] ?? existing.round) ||
+    existing.board !== Number(p['board'] ?? existing.board) ||
+    (existing.whiteId ?? null) !== ((p['whiteId'] as string | null | undefined) ?? null) ||
+    (existing.blackId ?? null) !== ((p['blackId'] as string | null | undefined) ?? null) ||
+    existing.categoryId !== String(p['categoryId'] ?? existing.categoryId) ||
+    Boolean(item.deletedAt);
+  if (pairingDiffers) {
+    return correctionConflict(
+      `Round ${existing.round}, table ${existing.board} was paired differently on the server.`,
+    );
+  }
+
+  let unsyncedBase: GameWriteApply['unsyncedBase'];
+  if (existing.result !== first.previousResult) {
+    const frozen = existing.round <= confirmedRounds;
+    const older = Date.parse(updatedAt) < Date.parse(existing.updatedAt);
+    if (existing.result !== 'pending' && (frozen || older)) {
+      return correctionConflict(
+        `Round ${existing.round}, table ${existing.board} is now ${existing.result}: someone else changed it. Yours was not saved.`,
+      );
+    }
+    unsyncedBase = { from: existing.result, to: first.previousResult };
+  }
+
+  return {
+    kind: 'apply',
+    resultLockedAt: existing.resultLockedAt ?? null,
+    resultOverrideCount: (existing.resultOverrideCount ?? 0) + corrections.length,
+    auditPreviousResult: undefined,
+    corrections,
+    unsyncedBase,
+  };
 }
 
 /**
@@ -165,6 +278,10 @@ export function decideGameWrite(
   confirmedRounds: number,
 ): GameWriteDecision {
   const p = item.payload;
+  if (p['corrections'] != null) {
+    return decideCorrection(existing, item, updatedAt, confirmedRounds, correctionsOf(p) ?? []);
+  }
+
   const incomingResult = String(p['result'] ?? 'pending') as GameResult;
   const incomingLock = (p['resultLockedAt'] as string | null | undefined) ?? null;
   const incomingOverrides = Number(p['resultOverrideCount'] ?? 0) || 0;
@@ -187,6 +304,15 @@ export function decideGameWrite(
       kind: 'reject',
       code: 'stale',
       reason: 'A newer version of this game is on the server.',
+    };
+  }
+
+  // A device that was offline when a round was undone must not bring its games back.
+  if (existing.deletedAt && !item.deletedAt) {
+    return {
+      kind: 'reject',
+      code: 'game_removed',
+      reason: `Round ${existing.round} was undone, so this game is gone.`,
     };
   }
 
@@ -471,6 +597,65 @@ export async function runSyncPush(
       }
       if (decision.kind === 'reject') {
         reject(item, decision.code, decision.reason);
+        continue;
+      }
+      if (decision.corrections) {
+        const chain = decision.corrections;
+        if (
+          existing &&
+          chain.some((c) => isAbsenceResult(c.result)) &&
+          (await backend.countGameCards(item.id)) > 0
+        ) {
+          reject(
+            item,
+            'correction_conflict',
+            'This board has cards, so the game started. Use a played result, not an absence.',
+          );
+          continue;
+        }
+        const last = chain.at(-1)!;
+        // Server time, so the corrected row reaches every device whatever the desk's clock said.
+        const writtenAt = new Date(
+          Math.max(now.getTime(), existing ? Date.parse(existing.updatedAt) + 1 : 0),
+        ).toISOString();
+        await backend.writeGame(
+          {
+            ...item,
+            updatedAt: writtenAt,
+            payload: {
+              ...item.payload,
+              resultEnteredByRole: 'director',
+              resultEnteredByName: last.actorName || 'Director',
+            },
+          },
+          decision,
+        );
+        const stamp = (at: string) => clampSyncTimestamp(at, now);
+        if (decision.unsyncedBase) {
+          await backend.insertResultEvent({
+            gameId: item.id,
+            tournamentId: tid,
+            result: decision.unsyncedBase.to,
+            previousResult: decision.unsyncedBase.from,
+            actorName: chain[0]!.actorName ?? null,
+            actorUserId: callerId,
+            note: 'Applied by offline sync',
+            createdAt: new Date(Date.parse(stamp(chain[0]!.at)) - 1).toISOString(),
+          });
+        }
+        for (const correction of chain) {
+          await backend.insertResultEvent({
+            gameId: item.id,
+            tournamentId: tid,
+            result: correction.result,
+            previousResult: correction.previousResult,
+            actorName: correction.actorName ?? null,
+            actorUserId: callerId,
+            note: correction.reason,
+            createdAt: stamp(correction.at),
+          });
+        }
+        accepted++;
         continue;
       }
       await backend.writeGame(item, decision);

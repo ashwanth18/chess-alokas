@@ -325,6 +325,26 @@ export const GameResultEventSchema = z.object({
 });
 export type GameResultEvent = z.infer<typeof GameResultEventSchema>;
 
+/**
+ * A late correction to an entered result, queued on the game row until the server accepts it. Sent
+ * in the row's payload as `corrections`. The server applies it only if `previousResult` is still
+ * what it holds, so a correction made offline can't overwrite someone else's.
+ */
+export const GameCorrectionSchema = z.object({
+  id: z.string().uuid(),
+  previousResult: GameResultSchema,
+  result: GameResultSchema,
+  reason: z.string().trim().min(1).max(200),
+  actorName: z.string().trim().max(80).nullable().optional(),
+  at: z.string().datetime(),
+});
+export type GameCorrection = z.infer<typeof GameCorrectionSchema>;
+
+/** Results a correction may set: anything but no result at all. */
+export function isCorrectableResult(result: string): boolean {
+  return result !== 'pending' && result !== 'bye';
+}
+
 /** Red card = illegal move; yellow card = warning / misconduct. */
 export const GameCardTypeSchema = z.enum(['illegal_move', 'warning']);
 export type GameCardType = z.infer<typeof GameCardTypeSchema>;
@@ -547,6 +567,10 @@ export const SyncRejectionCodeSchema = z.enum([
   'tournament_not_found',
   /** The payload fails validation, or refers to rows outside this tournament. */
   'invalid',
+  /** Someone else changed the result first, or it can't take this one. The server's copy stands. */
+  'correction_conflict',
+  /** The round was undone, so this game no longer exists. The server's copy stands. */
+  'game_removed',
 ]);
 export type SyncRejectionCode = z.infer<typeof SyncRejectionCodeSchema>;
 

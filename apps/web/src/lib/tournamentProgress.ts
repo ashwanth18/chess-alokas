@@ -360,7 +360,7 @@ export function getTournamentInstructions(
     status: fullyDone ? 'done' : 'upcoming',
     title: fullyDone ? 'Tournament complete' : 'Complete tournament',
     description: fullyDone
-      ? 'Pairings and results are locked'
+      ? 'All rounds confirmed'
       : `All ${tournament.rounds} rounds must be paired, scored, and confirmed`,
   });
 

@@ -7,6 +7,7 @@ import {
   Game,
   GameCard,
   GameCardType,
+  GameResultEvent,
   SyncPushItem,
   FilterGroup,
   TournamentStyle,
@@ -58,6 +59,12 @@ import {
   type SyncPushResult,
   type SyncResultEvent,
 } from './lib/syncEngine.js';
+import {
+  roundGamesToUndo,
+  roundUndoNote,
+  type RoundUndoInput,
+  type RoundUndoOutcome,
+} from './lib/roundUndo.js';
 
 // ---------------------------------------------------------------------------
 // Shared result types
@@ -148,6 +155,13 @@ export interface Store {
     },
   ): Promise<Game | null>;
   softDeleteGamesForRound(tournamentId: string, round: number, categoryId: string): Promise<void>;
+  /** Everything that happened to a game's result, newest first. */
+  listGameResultEvents(gameId: string): Promise<GameResultEvent[]>;
+  /**
+   * Removes the newest round's unplayed games, logs it, and ends its floor PIN and sessions, all at
+   * once. Throws a 409 unless the round is the newest and nothing has happened in it.
+   */
+  undoRound(tournamentId: string, round: number, input: RoundUndoInput): Promise<RoundUndoOutcome>;
 
   // Floor arbiter tables
   getTableBySlug(slug: string): Promise<TournamentTable | null>;
@@ -973,7 +987,10 @@ export class MemoryStore implements Store {
   ): Promise<Game | null> {
     const existing = this.games.get(id);
     if (!existing) return null;
-    if (input.onlyIfOpen && (existing.result !== 'pending' || existing.resultLockedAt)) {
+    if (
+      input.onlyIfOpen &&
+      (existing.result !== 'pending' || existing.resultLockedAt || existing.deletedAt)
+    ) {
       throw resultNotOpenConflict();
     }
     const now = new Date().toISOString();
@@ -1022,6 +1039,57 @@ export class MemoryStore implements Store {
         this.games.set(id, { ...g, deletedAt: now, updatedAt: now });
       }
     }
+  }
+
+  async listGameResultEvents(gameId: string): Promise<GameResultEvent[]> {
+    return this.resultEvents
+      .map((e, order) => ({ e, order }))
+      .filter(({ e }) => e.gameId === gameId)
+      .sort((a, b) => b.e.createdAt.localeCompare(a.e.createdAt) || b.order - a.order)
+      .map(({ e }) => e as GameResultEvent);
+  }
+
+  async undoRound(
+    tournamentId: string,
+    round: number,
+    input: RoundUndoInput,
+  ): Promise<RoundUndoOutcome> {
+    const tournament = this.tournaments.get(tournamentId);
+    if (!tournament || tournament.deletedAt) {
+      throw Object.assign(new Error('Tournament not found'), { statusCode: 404 });
+    }
+    const live = [...this.games.values()].filter(
+      (g) => g.tournamentId === tournamentId && !g.deletedAt && g.round >= round,
+    );
+    const cards = await this.listTournamentGameCards(tournamentId, { round });
+    const roundGames = roundGamesToUndo(tournament, live, cards, round);
+    const now = new Date().toISOString();
+    const note = roundUndoNote(round, input.reason);
+    for (const game of roundGames) {
+      this.games.set(game.id, { ...game, deletedAt: now, updatedAt: now });
+      this.resultEvents.push({
+        id: crypto.randomUUID(),
+        gameId: game.id,
+        tournamentId,
+        result: game.result,
+        previousResult: game.result,
+        actorRole: 'director',
+        actorName: input.actorName?.trim() || null,
+        actorUserId: input.actorUserId ?? null,
+        note,
+        createdAt: now,
+      });
+    }
+    this.pinMeta.delete(tournamentId);
+    const updated: Tournament = {
+      ...tournament,
+      currentRound: round - 1,
+      status: 'in_progress',
+      arbiterPinRound: null,
+      updatedAt: now,
+    };
+    this.tournaments.set(tournamentId, updated);
+    return { tournament: updated, removedGameIds: roundGames.map((g) => g.id) };
   }
 
   async getTableBySlug(slug: string): Promise<TournamentTable | null> {
@@ -1261,6 +1329,7 @@ export class MemoryStore implements Store {
         return row ? { tournamentId: row.tournamentId, updatedAt: row.updatedAt } : null;
       },
       getGame: async (id) => this.games.get(id) ?? null,
+      countGameCards: async (gameId) => (await this.listGameCards(gameId)).length,
       recordRosterConsent: (input) => this.recordRosterConsent(input),
       writeTournament: async ({ item, ownerId: owner, organizationId }) => {
         this.applySyncItem(item, { ownerId: owner, organizationId });
@@ -4017,7 +4086,10 @@ export class PostgresStore implements Store {
       const [current] = await s<GameRow[]>`SELECT * FROM games WHERE id = ${id} FOR UPDATE`;
       if (!current) return null;
       const existing = rowToGame(current);
-      if (input.onlyIfOpen && (existing.result !== 'pending' || existing.resultLockedAt)) {
+      if (
+        input.onlyIfOpen &&
+        (existing.result !== 'pending' || existing.resultLockedAt || existing.deletedAt)
+      ) {
         throw resultNotOpenConflict();
       }
       const now = new Date().toISOString();
@@ -4039,7 +4111,8 @@ export class PostgresStore implements Store {
           result_override_count = ${nextOverride},
           updated_at = ${now}
         WHERE id = ${id}
-          AND (NOT ${onlyIfOpen}::boolean OR (result = 'pending' AND result_locked_at IS NULL))
+          AND (NOT ${onlyIfOpen}::boolean
+            OR (result = 'pending' AND result_locked_at IS NULL AND deleted_at IS NULL))
         RETURNING *
       `;
       const row = rows[0];
@@ -4248,6 +4321,99 @@ export class PostgresStore implements Store {
     `;
   }
 
+  async listGameResultEvents(gameId: string): Promise<GameResultEvent[]> {
+    const rows = await this.sql<
+      {
+        id: string;
+        game_id: string;
+        tournament_id: string;
+        result: string;
+        previous_result: string | null;
+        actor_role: string;
+        actor_name: string | null;
+        actor_user_id: string | null;
+        note: string | null;
+        created_at: Date | string;
+      }[]
+    >`
+      SELECT * FROM game_result_events
+      WHERE game_id = ${gameId}
+      ORDER BY created_at DESC, id DESC
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      gameId: r.game_id,
+      tournamentId: r.tournament_id,
+      result: r.result as GameResult,
+      previousResult: r.previous_result as GameResult | null,
+      actorRole: r.actor_role as GameResultEvent['actorRole'],
+      actorName: r.actor_name,
+      actorUserId: r.actor_user_id,
+      note: r.note,
+      createdAt: toIso(r.created_at)!,
+    }));
+  }
+
+  async undoRound(
+    tournamentId: string,
+    round: number,
+    input: RoundUndoInput,
+  ): Promise<RoundUndoOutcome> {
+    return this.tx(async (s) => {
+      const [tournamentRow] = await s<TournamentRow[]>`
+        SELECT * FROM tournaments WHERE id = ${tournamentId} FOR UPDATE
+      `;
+      if (!tournamentRow || tournamentRow.deleted_at) {
+        throw Object.assign(new Error('Tournament not found'), { statusCode: 404 });
+      }
+      // Locked before checking: a floor result either landed already, and refuses this, or waits
+      // and then finds its game gone.
+      const live = await s<GameRow[]>`
+        SELECT * FROM games
+        WHERE tournament_id = ${tournamentId} AND round >= ${round} AND deleted_at IS NULL
+        ORDER BY id
+        FOR UPDATE
+      `;
+      const cards = await s<{ game_id: string }[]>`
+        SELECT c.game_id FROM game_cards c
+        INNER JOIN games g ON g.id = c.game_id
+        WHERE c.tournament_id = ${tournamentId} AND c.deleted_at IS NULL AND g.round = ${round}
+      `;
+      const roundGames = roundGamesToUndo(
+        rowToTournament(tournamentRow),
+        live.map(rowToGame),
+        cards.map((c) => ({ gameId: c.game_id })),
+        round,
+      );
+      const now = new Date().toISOString();
+      const ids = roundGames.map((g) => g.id);
+      const note = roundUndoNote(round, input.reason);
+      await s`
+        UPDATE games SET deleted_at = ${now}, updated_at = ${now} WHERE id IN ${s(ids)}
+      `;
+      for (const game of roundGames) {
+        await s`
+          INSERT INTO game_result_events
+            (id, game_id, tournament_id, result, previous_result, actor_role, actor_name, actor_user_id, note, created_at)
+          VALUES
+            (${crypto.randomUUID()}, ${game.id}, ${tournamentId}, ${game.result}, ${game.result},
+             'director', ${input.actorName?.trim() || null}, ${input.actorUserId ?? null}, ${note}, ${now})
+        `;
+      }
+      const [updated] = await s<TournamentRow[]>`
+        UPDATE tournaments SET
+          current_round = ${round - 1},
+          status = 'in_progress',
+          arbiter_pin_hash = NULL,
+          arbiter_pin_round = NULL,
+          updated_at = ${now}
+        WHERE id = ${tournamentId}
+        RETURNING *
+      `;
+      return { tournament: rowToTournament(updated!), removedGameIds: ids };
+    });
+  }
+
   // ---- Sync ----
 
   async pullSince(since: string, ownerId?: string | null): Promise<SyncPullResult> {
@@ -4393,9 +4559,16 @@ export class PostgresStore implements Store {
         const row = rows[0];
         return row ? { tournamentId: row.tournament_id, updatedAt: toIso(row.updated_at)! } : null;
       },
+      // Locked until the batch ends. Floor entry locks only this row, so no deadlock can form.
       getGame: async (id) => {
-        const [row] = await s<GameRow[]>`SELECT * FROM games WHERE id = ${id}`;
+        const [row] = await s<GameRow[]>`SELECT * FROM games WHERE id = ${id} FOR UPDATE`;
         return row ? rowToGame(row) : null;
+      },
+      countGameCards: async (gameId) => {
+        const [row] = await s<{ n: number }[]>`
+          SELECT COUNT(*)::int AS n FROM game_cards WHERE game_id = ${gameId} AND deleted_at IS NULL
+        `;
+        return row?.n ?? 0;
       },
       recordRosterConsent: (input) => this.recordRosterConsent(input, s),
       writeTournament: ({ item, ownerId, organizationId }) =>

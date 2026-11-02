@@ -4,6 +4,13 @@ import type { LocalTournament, LocalCategory, LocalParticipant, LocalGame } from
 import { repairInvalidGameCategoryIds, softDeleteOrphanGames } from '../lib/poolCategory';
 import { supabase } from '../lib/supabase';
 import { applyRevocations } from './revocation';
+import {
+  correctionConflictKey,
+  correctionsLeftAfterPush,
+  isSupersededRejection,
+  syncPayloadForGame,
+  withConflictMessage,
+} from '../lib/lateCorrection';
 import type { SyncRejection } from '@chess-alokas/shared';
 
 /** A row the server refused, with a name the organizer will recognise. */
@@ -58,7 +65,7 @@ function toSyncItem(
   return {
     entity,
     id: record.id,
-    payload: payload as Record<string, unknown>,
+    payload: (entity === 'game' ? syncPayloadForGame(payload) : payload) as Record<string, unknown>,
     updatedAt: record.updatedAt,
     deletedAt: record.deletedAt ?? null,
   };
@@ -149,6 +156,8 @@ async function syncOnlineImpl(): Promise<SyncOutcome> {
   let pulled = 0;
   let rejected: SyncRejection[] = [];
   let lostToNewerEdit = false;
+  // Refused because the server's copy stands: replaced from the pull below, whatever its timestamp.
+  let superseded = new Map<string, string>();
 
   // Only clear `dirty` on rows whose updatedAt still matches what we just
   // pushed — if the user (or another sync trigger) edited a row again while
@@ -182,7 +191,10 @@ async function syncOnlineImpl(): Promise<SyncOutcome> {
     // Anything else stays dirty, so the work isn't lost, and is shown to the user.
     const refused = pushResult.data.rejected ?? [];
     rejected = refused.filter((r) => r.code !== 'stale');
-    lostToNewerEdit = refused.some((r) => r.code === 'stale');
+    superseded = new Map(
+      refused.filter((r) => isSupersededRejection(r.code)).map((r) => [r.id, r.reason]),
+    );
+    lostToNewerEdit = superseded.size > 0 || refused.some((r) => r.code === 'stale');
     const keepDirty = new Set(rejected.map((r) => r.id));
     const unlessRejected = <T extends { id: string }>(rows: T[]) =>
       rows.filter((row) => !keepDirty.has(row.id));
@@ -194,7 +206,18 @@ async function syncOnlineImpl(): Promise<SyncOutcome> {
     });
     await clearDirtyIfUnchanged(db.categories, unlessRejected(dirtyCategories));
     await clearDirtyIfUnchanged(db.participants, unlessRejected(dirtyParticipants));
-    await clearDirtyIfUnchanged(db.games, unlessRejected(dirtyGames));
+    const acceptedGames = unlessRejected(dirtyGames);
+    const pushedCorrections = new Map(acceptedGames.map((g) => [g.id, g.pendingCorrections]));
+    await db.games
+      .where('id')
+      .anyOf(acceptedGames.filter((g) => g.pendingCorrections?.length).map((g) => g.id))
+      .modify((rec) => {
+        rec.pendingCorrections = correctionsLeftAfterPush(
+          rec.pendingCorrections,
+          pushedCorrections.get(rec.id),
+        );
+      });
+    await clearDirtyIfUnchanged(db.games, acceptedGames);
   }
 
   // A stale row may have been skipped by an earlier pull while it was still dirty, which moved the
@@ -279,7 +302,11 @@ async function syncOnlineImpl(): Promise<SyncOutcome> {
   }
   for (const remote of games) {
     const local = await db.games.get(remote.id);
-    if (!local || (local.dirty !== 1 && remote.updatedAt > local.updatedAt)) {
+    if (
+      !local ||
+      superseded.has(remote.id) ||
+      (local.dirty !== 1 && remote.updatedAt > local.updatedAt)
+    ) {
       await db.games.put({
         ...remote,
         resultLockedAt: remote.resultLockedAt ?? null,
@@ -291,6 +318,14 @@ async function syncOnlineImpl(): Promise<SyncOutcome> {
       } as LocalGame);
       pulled++;
     }
+  }
+
+  for (const [gameId, reason] of superseded) {
+    const row = await db.games.get(gameId);
+    if (!row) continue;
+    const key = correctionConflictKey(row.tournamentId);
+    const held = await db.meta.get(key);
+    await db.meta.put({ key, value: withConflictMessage(held?.value, reason) });
   }
 
   // After the rows above, so a tournament this same response delivered can't be removed.

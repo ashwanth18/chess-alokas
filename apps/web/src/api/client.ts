@@ -27,6 +27,7 @@ import type {
   OrganizationInviteStatus,
   OrganizationTeamMember,
 } from '@chess-alokas/shared';
+import type { GameResultEvent } from '@chess-alokas/shared';
 import { supabase } from '../lib/supabase';
 
 export function resolveApiBaseUrl(): string {
@@ -800,6 +801,22 @@ export async function apiDirectorSetGameResult(
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+export async function apiGameHistory(gameId: string) {
+  return req<{ events: GameResultEvent[] }>(`/games/${gameId}/history`);
+}
+
+/** Removes the newest round's unplayed games and ends its floor PIN. Needs the server. */
+export async function apiUndoRound(
+  tournamentId: string,
+  round: number,
+  body: { reason?: string; actorName?: string },
+) {
+  return req<{ tournament: Tournament; removedGameIds: string[] }>(
+    `/tournaments/${tournamentId}/rounds/${round}/undo`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
 }
 
 // ── Organizations (B2B multi-tenant & Sandbox Trial) ─────────────────────────

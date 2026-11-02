@@ -76,6 +76,8 @@ import {
   apiFloorListAlerts,
   apiFloorResolveAlert,
   apiDirectorSetGameResult,
+  apiListCertificates,
+  apiUndoRound,
   apiDirectorIssueCard,
   apiDirectorRemoveCard,
   apiListGameCards,
@@ -86,6 +88,19 @@ import {
   apiReviewTournamentRegistration,
 } from '../api/client';
 import { syncOnline } from '../sync/sync';
+import CorrectResultModal, { type CorrectionChoice } from '../components/CorrectResultModal';
+import GameHistoryModal from '../components/GameHistoryModal';
+import {
+  canCorrectResult,
+  certificateCheckKey,
+  certificatesNotice,
+  conflictMessages,
+  correctedGameFields,
+  correctionConflictKey,
+  laterPairedRounds,
+  roundToOfferUndo,
+  standingsFingerprint,
+} from '../lib/lateCorrection';
 import { EntryQueue } from './registration-form/EntryQueue';
 import { RegistrationSetup } from './registration-form/RegistrationSetup';
 import { subscribeTournamentGames } from '../lib/gamesRealtime';
@@ -303,6 +318,11 @@ export default function TournamentPage() {
   } | null>(null);
   const [resultNote, setResultNote] = useState('');
   const [resultBusy, setResultBusy] = useState(false);
+  const [correctingGameId, setCorrectingGameId] = useState<string | null>(null);
+  const [historyGameId, setHistoryGameId] = useState<string | null>(null);
+  const [correctionNotice, setCorrectionNotice] = useState<string | null>(null);
+  const [certificateNotice, setCertificateNotice] = useState<string | null>(null);
+  const [repairRound, setRepairRound] = useState<number | null>(null);
   const auth = useAuth();
   const [playerSearch, setPlayerSearch] = useState('');
   const [boardSearch, setBoardSearch] = useState('');
@@ -372,6 +392,10 @@ export default function TournamentPage() {
             .filter((g) => !g.deletedAt)
             .toArray()
         : [],
+    [id],
+  );
+  const storedConflicts = useLiveQuery(
+    () => (id ? db.meta.get(correctionConflictKey(id)) : undefined),
     [id],
   );
   const floorTables = useLiveQuery(
@@ -1825,6 +1849,141 @@ export default function TournamentPage() {
     });
   }, [id, tournament, caps?.canUndoConfirm]);
 
+  const checkCertificates = useCallback(async () => {
+    if (!id) return;
+    const key = certificateCheckKey(id);
+    if (!(await db.meta.get(key))) return;
+    const listed = await apiListCertificates(id);
+    if (!listed.ok) return;
+    await db.meta.delete(key);
+    setCertificateNotice(certificatesNotice(listed.data.issues.length));
+  }, [id]);
+
+  // A correction made offline is checked once the server can answer.
+  useEffect(() => {
+    void checkCertificates();
+    const onOnline = () => void checkCertificates();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [checkCertificates]);
+
+  const saveCorrection = useCallback(
+    async (
+      gameId: string,
+      input: { result: GameResult; reason: string; choice: CorrectionChoice },
+    ) => {
+      if (!id || !tournament) return;
+      const game = (games ?? []).find((g) => g.id === gameId);
+      if (!game || !canCorrectResult(tournament, game, games)) return;
+      const undoRound =
+        input.choice === 'undo' ? roundToOfferUndo(tournament, games, game.round) : null;
+      const actorName = auth.displayName || auth.user?.email?.split('@')[0] || 'Director';
+      setResultBusy(true);
+      setPairError(null);
+      setCorrectionNotice(null);
+      try {
+        const before = standingsFingerprint(tournament, categories, participants, games);
+        await db.games.update(
+          gameId,
+          correctedGameFields(game, {
+            id: crypto.randomUUID(),
+            result: input.result,
+            reason: input.reason,
+            actorName,
+            at: nowIso(),
+          }),
+        );
+        const after = standingsFingerprint(
+          tournament,
+          categories,
+          participants,
+          (games ?? []).map((g) => (g.id === gameId ? { ...g, result: input.result } : g)),
+        );
+        if (after !== before) {
+          await db.meta.put({ key: certificateCheckKey(id), value: '1' });
+        }
+        snapshotAfterResult();
+        setCorrectingGameId(null);
+
+        // The queue goes up with every sync. A sync already running may have missed this row.
+        let sent = false;
+        try {
+          for (let attempt = 0; attempt < 2 && !sent; attempt++) {
+            const outcome = await syncOnline();
+            const refused = outcome.rejected.find((r) => r.id === gameId);
+            if (refused) {
+              setPairError(refused.reason);
+              return;
+            }
+            sent = (await db.games.get(gameId))?.dirty !== 1;
+          }
+        } catch {
+          /* offline: it stays queued */
+        }
+        if (!sent) {
+          setCorrectionNotice(
+            undoRound != null
+              ? `Saved here, and it will sync when you reconnect. Round ${undoRound} kept: undoing it needs internet.`
+              : 'Saved here. It will sync when you reconnect.',
+          );
+          return;
+        }
+        void checkCertificates();
+        if (undoRound == null) return;
+
+        const undone = await apiUndoRound(id, undoRound, {
+          reason: `Round ${game.round} corrected`,
+          actorName,
+        });
+        if (!undone.ok) {
+          setPairError(`Correction saved. Round ${undoRound} kept: ${undone.error}`);
+          return;
+        }
+        const { tournament: server, removedGameIds } = undone.data;
+        await db.transaction('rw', db.games, db.tournaments, async () => {
+          for (const removed of removedGameIds) {
+            await db.games.update(removed, {
+              deletedAt: server.updatedAt,
+              updatedAt: server.updatedAt,
+              dirty: 0,
+            });
+          }
+          await db.tournaments.update(id, {
+            currentRound: server.currentRound,
+            status: server.status,
+            arbiterPin: null,
+            arbiterPinRound: null,
+            updatedAt: server.updatedAt,
+            dirty: 0,
+          });
+        });
+        forgetPendingPin(id);
+        setRepairRound(undoRound);
+      } finally {
+        setResultBusy(false);
+      }
+    },
+    [
+      id,
+      tournament,
+      categories,
+      participants,
+      games,
+      auth.displayName,
+      auth.user?.email,
+      checkCertificates,
+    ],
+  );
+
+  // Once the undo has reached this screen, Generate Round N is available: press it.
+  useEffect(() => {
+    if (repairRound == null || pairing || !caps?.canPair || nextPairingRound !== repairRound) return;
+    setRepairRound(null);
+    void generatePairings();
+    // generatePairings reads this render's state, and these are what decide whether it can run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repairRound, pairing, caps?.canPair, nextPairingRound]);
+
   const standings = useMemo(() => {
     if (!participants || !games) return [];
     const toPast = (list: typeof games) =>
@@ -2165,10 +2324,36 @@ export default function TournamentPage() {
       )}
 
       {caps && <StageStrip stage={caps.stage} />}
+      {conflictMessages(storedConflicts?.value).length > 0 && (
+        <div className="form-error" role="alert">
+          {conflictMessages(storedConflicts?.value).map((message) => (
+            <p key={message}>{message}</p>
+          ))}
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => id && void db.meta.delete(correctionConflictKey(id))}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {certificateNotice && (
+        <p className="form-hint stage-banner-warn" role="status">
+          {certificateNotice} <Link to={`/certificates?tournament=${id}`}>Certificates</Link>{' '}
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => setCertificateNotice(null)}
+          >
+            Dismiss
+          </button>
+        </p>
+      )}
 
       {caps?.stage === 'completed' && (
         <p className="stage-banner stage-banner-done">
-          Tournament complete — pairings and results are locked. View standings below.
+          Tournament complete. View standings below.
         </p>
       )}
       {caps?.importRequiresLateWarning && caps.canImport && (
@@ -3023,19 +3208,23 @@ export default function TournamentPage() {
             </p>
           )}
           {caps?.stage === 'completed' && (
-            <p className="form-hint">Results are locked for this completed tournament.</p>
+            <p className="form-hint">Use Correct on a table to change a result.</p>
           )}
           {tournament &&
             caps?.stage !== 'completed' &&
             displayRound <= resolvedConfirmedRounds(tournament) &&
             boardsForRound.length > 0 && (
               <p className="form-hint">
-                Round {displayRound} is confirmed — results are locked. Undo confirm if you need
-                to change a score (only before the next round is paired).
+                Round {displayRound} is confirmed. Use Correct on a table to change a result.
               </p>
             )}
 
           {pairError && <div className="form-error">{pairError}</div>}
+          {correctionNotice && (games ?? []).some((g) => g.pendingCorrections?.length) && (
+            <p className="form-hint" role="status">
+              {correctionNotice}
+            </p>
+          )}
 
           {(participants ?? []).some(
             (p) => !p.deletedAt && isExcludedFromRound(p, displayRound),
@@ -3131,6 +3320,27 @@ export default function TournamentPage() {
                               ? `Edited by director ×${game.resultOverrideCount}`
                               : 'Director'}
                           </span>
+                        ) : null}
+                        {game.pendingCorrections?.length ? (
+                          <span className="board-attr-tag">Queued</span>
+                        ) : null}
+                        {(game.resultOverrideCount ?? 0) > 0 ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            onClick={() => setHistoryGameId(game.id)}
+                          >
+                            History
+                          </button>
+                        ) : null}
+                        {tournament && canCorrectResult(tournament, game, games) ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            onClick={() => setCorrectingGameId(game.id)}
+                          >
+                            Correct
+                          </button>
                         ) : null}
                       </div>
                     </div>
@@ -3283,7 +3493,9 @@ export default function TournamentPage() {
                         0
                       }
                       readOnly={
-                        !tournament || !canEditRoundResults(tournament, game.round)
+                        !tournament ||
+                        !canEditRoundResults(tournament, game.round) ||
+                        canCorrectResult(tournament, game, games)
                       }
                     />
                   </div>
@@ -3294,6 +3506,43 @@ export default function TournamentPage() {
           )}
         </div>
       )}
+
+      {correctingGameId && tournament && (() => {
+        const game = (games ?? []).find((g) => g.id === correctingGameId);
+        if (!game) return null;
+        const hasCards = roundCards.some((c) => c.gameId === game.id);
+        return (
+          <CorrectResultModal
+            round={game.round}
+            board={game.board}
+            from={game.result}
+            laterRounds={laterPairedRounds(games, game.round)}
+            undoRound={roundToOfferUndo(tournament, games, game.round)}
+            finished={caps?.stage === 'completed'}
+            online={navigator.onLine}
+            busy={resultBusy}
+            renderPicker={(value, onChange) => (
+              <ResultSelector value={value} onChange={onChange} isBye={false} hideAbsence={hasCards} />
+            )}
+            onCancel={() => setCorrectingGameId(null)}
+            onSave={(input) => void saveCorrection(game.id, input)}
+          />
+        );
+      })()}
+
+      {historyGameId && (() => {
+        const game = (games ?? []).find((g) => g.id === historyGameId);
+        if (!game) return null;
+        return (
+          <GameHistoryModal
+            gameId={game.id}
+            round={game.round}
+            board={game.board}
+            queued={game.pendingCorrections ?? []}
+            onClose={() => setHistoryGameId(null)}
+          />
+        );
+      })()}
 
       {resultChange && (
         <div className="modal-backdrop" role="presentation" onClick={() => !resultBusy && setResultChange(null)}>
