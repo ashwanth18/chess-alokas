@@ -187,6 +187,7 @@
   .cw-check:disabled { cursor: not-allowed; }
   .cw-email { overflow-wrap: anywhere; }
   .cw-shared { color: var(--pen); }
+  .cw-newaddr { display: grid; justify-items: start; gap: var(--s1); margin-top: var(--s2); padding-top: var(--s2); border-top: 1px dashed var(--rule); }
   .cw-status { display: inline-flex; align-items: center; gap: var(--s2); }
 
   @container (max-width: 640px) {

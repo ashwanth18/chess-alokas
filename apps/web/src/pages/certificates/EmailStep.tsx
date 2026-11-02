@@ -26,6 +26,7 @@ import {
   type CertType,
   type IssueLike,
   type PlayerInfo,
+  type ReviewRow,
   type SendOutcome,
 } from './reviewLogic';
 
@@ -49,6 +50,9 @@ export function EmailStep({
   onSaveCopy,
   ownEmail,
   onGoToIssue,
+  currentEmails,
+  onReissue,
+  reissueBlocked,
 }: {
   tournamentId: string;
   tournamentName: string;
@@ -64,10 +68,14 @@ export function EmailStep({
   onSaveCopy: () => Promise<void>;
   ownEmail: string | null;
   onGoToIssue: () => void;
+  currentEmails: Map<string, string | null | undefined>;
+  /** Issues this player's certificate again with their current address. Returns an error, or null. */
+  onReissue: (row: ReviewRow) => Promise<string | null>;
+  reissueBlocked: string | null;
 }) {
   const rows = useMemo(
-    () => buildReviewRows(issues, { type: certType, players, categoryNames }),
-    [issues, certType, players, categoryNames],
+    () => buildReviewRows(issues, { type: certType, players, categoryNames, currentEmails }),
+    [issues, certType, players, categoryNames, currentEmails],
   );
   // Ticks go back to the defaults whenever who-can-be-sent-what changes, such as after a send, but
   // anyone the organizer unticked stays unticked: a second Send must never reach them by surprise.
@@ -163,19 +171,35 @@ export function EmailStep({
   }
   const blocked = blockedBecause(summary.willSend);
 
+  const [reissuing, setReissuing] = useState<string | null>(null);
+  async function reissueToNewAddress(row: ReviewRow) {
+    if (reissuing) return;
+    setReissuing(row.issueId);
+    setError(null);
+    const problem = await onReissue(row);
+    setReissuing(null);
+    if (problem) setError(problem);
+  }
+
+  /** Set synchronously, so a double click can't start a second send before React re-renders. */
+  const sendingRef = useRef(false);
+
   async function send(ids: string[]) {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     setConfirmIds(null);
     setError(null);
     setOutcomes(null);
-    await onSaveCopy();
+    setProgress({ done: 0, total: ids.length });
+    // Saving the message locally must never leave the send locked; the server gets it in the body anyway.
+    await onSaveCopy().catch(() => undefined);
     const byId = new Map(rows.map((r) => [r.issueId, r]));
     const done: SendOutcome[] = [];
-    setProgress({ done: 0, total: ids.length });
     for (let i = 0; i < ids.length; i += BATCH) {
       const chunk = ids.slice(i, i + BATCH);
       const res = await apiEmailCertificates(tournamentId, {
         issueIds: chunk,
-        resend: chunk.some((id) => byId.get(id)?.status === 'sent'),
+        resend: chunk.some((id) => ['sent', 'sending'].includes(byId.get(id)?.status ?? '')),
         subject,
         body,
       });
@@ -198,6 +222,7 @@ export function EmailStep({
     setOutcomes([...done].sort((x, y) => rank[x.status] - rank[y.status]));
     setProgress(null);
     await Promise.all([refreshIssues(), loadQuota()]);
+    sendingRef.current = false;
   }
 
   async function sendTest() {
@@ -402,6 +427,9 @@ export function EmailStep({
           disabled={sending}
           onToggle={toggle}
           onSetMany={setMany}
+          onUseNewAddress={(row) => void reissueToNewAddress(row)}
+          reissueBlocked={reissueBlocked}
+          reissuing={reissuing}
         />
       </section>
 
@@ -491,7 +519,7 @@ export function EmailStep({
               <Button variant="quiet" onClick={() => setConfirmIds(null)}>
                 Go back
               </Button>
-              <Button variant="primary" disabled={Boolean(confirmBlocked)} onClick={() => void send(confirmIds)}>
+              <Button variant="primary" disabled={Boolean(confirmBlocked) || sending} onClick={() => void send(confirmIds)}>
                 Send {plural(confirmIds.length, 'email')}
               </Button>
             </div>

@@ -112,6 +112,38 @@ describe('review rows', () => {
     expect(rows[0]!.note).toMatch(/An earlier copy was sent/);
   });
 
+  it('notices when a player\'s address on file is different now, and only then', () => {
+    const { issues } = fixture();
+    const currentEmails = new Map<string, string | null>([
+      [P.gambit, 'PARENT.ALEKHINE@example.invalid'], // same, different case
+      [P.tan, 'tan.parent@example.invalid'], // had none at issue time
+      [P.lim, 'lim.fixed@example.invalid'], // was typed wrong
+      [P.arjun, ''], // removed: nothing to offer
+    ]);
+    const rows = buildReviewRows(issues, { type: 'participation', players, currentEmails });
+    const by = (part: string) => rows.find((r) => r.name.includes(part))!;
+    expect(by('GAMBIT').newEmail).toBeNull();
+    expect(by('Tan')).toMatchObject({ newEmail: 'tan.parent@example.invalid', status: 'no-email', note: 'The player has an address now' });
+    expect(by('Lim')).toMatchObject({ newEmail: 'lim.fixed@example.invalid', status: 'invalid-email' });
+    expect(by('Arjun').newEmail).toBeNull();
+    expect(by('Tan').participantId).toBe(P.tan);
+  });
+
+  it('a copy sent to an old address doesn\'t make the new one "already sent"', () => {
+    const old = issue({ participantId: P.lim, recipientName: 'Lim Gambit Ling', recipientEmail: 'lim.old@example.invalid', status: 'emailed', emailedAt: '2026-07-07T03:00:00.000Z' });
+    const fresh = issue({ participantId: P.lim, recipientName: 'Lim Gambit Ling', recipientEmail: 'lim.new@example.invalid' });
+    const [row] = buildReviewRows([old, fresh], { type: 'participation' });
+    expect(row).toMatchObject({ issueId: fresh.id, status: 'ready', defaultTicked: true, note: 'An earlier copy went to lim.old@example.invalid' });
+  });
+
+  it('shows a certificate another tab is sending, unticked', () => {
+    const [row] = buildReviewRows(
+      [issue({ participantId: P.tan, recipientName: 'Tan Zwischen Zug', recipientEmail: 'tan@example.invalid', status: 'pending' })],
+      { type: 'participation' },
+    );
+    expect(row).toMatchObject({ status: 'sending', defaultTicked: false, selectable: true });
+  });
+
   it('labels a winner certificate with the place', () => {
     const { issues } = fixture();
     const rows = buildReviewRows(issues, { type: 'winner' });
@@ -255,6 +287,35 @@ describe('EmailReview table', () => {
     const t = tickReducer(tickReducer(new Set(), { type: 'reset', rows }), { type: 'set', ids: [rows[0]!.issueId, rows[1]!.issueId], on: false, rows });
     const html = renderToStaticMarkup(<EmailReview rows={rows} ticked={t} onToggle={() => undefined} onSetMany={() => undefined} />);
     expect(html).toMatch(/<strong>\d of 6 will be sent<\/strong>/);
+  });
+
+  it('offers "Use new address" on a row whose address changed, and says why it is off', () => {
+    const { issues } = fixture();
+    const rows = buildReviewRows(issues, {
+      type: 'participation',
+      players,
+      currentEmails: new Map([[P.tan, 'tan.parent@example.invalid']]),
+    });
+    const ticked = tickReducer(new Set(), { type: 'reset', rows });
+    const on = renderToStaticMarkup(
+      <EmailReview rows={rows} ticked={ticked} onToggle={() => undefined} onSetMany={() => undefined} onUseNewAddress={() => undefined} />,
+    );
+    expect(on).toContain('Address on file now: <span class="cw-email">tan.parent@example.invalid</span>');
+    expect(on).toContain('aria-label="Use new address for Tan Zwischen Zug (#4 · U12)"');
+    expect(on).toContain('1 has a different address on file now');
+    expect(on.match(/Use new address</g)).toHaveLength(1);
+    const off = renderToStaticMarkup(
+      <EmailReview
+        rows={rows}
+        ticked={ticked}
+        onToggle={() => undefined}
+        onSetMany={() => undefined}
+        onUseNewAddress={() => undefined}
+        reissueBlocked="load or design the template in step 2 first."
+      />,
+    );
+    expect(off).toContain('To use a new address: load or design the template in step 2 first.');
+    expect(off).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Use new address for Tan/);
   });
 
   it('searches, says how many are shown, and has a way back to everyone', () => {

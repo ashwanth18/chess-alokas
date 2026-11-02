@@ -16,6 +16,7 @@ import {
 const TONE: Record<ReviewStatus, string> = {
   ready: 'plain',
   retry: 'wait',
+  sending: 'wait',
   sent: 'go',
   'no-email': 'flag',
   'invalid-email': 'flag',
@@ -33,6 +34,9 @@ export function EmailReview({
   disabled = false,
   initialQuery = '',
   initialFilter = 'all',
+  onUseNewAddress,
+  reissueBlocked = null,
+  reissuing = null,
 }: {
   rows: ReviewRow[];
   ticked: Set<string>;
@@ -41,6 +45,12 @@ export function EmailReview({
   disabled?: boolean;
   initialQuery?: string;
   initialFilter?: ReviewFilter;
+  /** Re-issues this player's certificate to their current address. */
+  onUseNewAddress?: (row: ReviewRow) => void;
+  /** Why re-issuing can't happen yet, such as no template loaded. */
+  reissueBlocked?: string | null;
+  /** The row being re-issued now, if any. */
+  reissuing?: string | null;
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [filter, setFilter] = useState<ReviewFilter>(initialFilter);
@@ -48,6 +58,8 @@ export function EmailReview({
   const filterId = useId();
   const summary = summarize(rows, ticked);
   const shown = filterRows(rows, ticked, query, filter);
+  const moved = rows.filter((r) => r.newEmail).length;
+  const blockedId = useId();
   const narrowed = shown.length !== rows.length;
 
   const notes = [
@@ -55,6 +67,7 @@ export function EmailReview({
     summary.noEmail > 0 && `${summary.noEmail} with no email`,
     summary.invalidEmail > 0 && `${summary.invalidEmail} with an email that isn't valid`,
     summary.sharedRows > 0 && `${summary.sharedRows} share an address with someone else`,
+    moved > 0 && `${moved} ${moved === 1 ? 'has' : 'have'} a different address on file now`,
   ].filter(Boolean) as string[];
 
   return (
@@ -70,6 +83,11 @@ export function EmailReview({
           )}
         </p>
         {notes.length > 0 && <p className="cw-review__notes">{notes.join('. ')}.</p>}
+        {moved > 0 && reissueBlocked && (
+          <p className="cw-review__notes ui-tone-wait" id={blockedId}>
+            To use a new address: {reissueBlocked}
+          </p>
+        )}
       </div>
 
       <div className="cw-review__tools">
@@ -185,6 +203,24 @@ export function EmailReview({
                     {r.sharedWith > 0 && (
                       <span className="cw-small cw-shared">
                         Shared with {plural(r.sharedWith, 'other player')}
+                      </span>
+                    )}
+                    {r.newEmail && (
+                      <span className="cw-newaddr">
+                        <span className="cw-small">
+                          Address on file now: <span className="cw-email">{r.newEmail}</span>
+                        </span>
+                        {onUseNewAddress && (
+                          <Button
+                            size="sm"
+                            disabled={disabled || Boolean(reissueBlocked) || reissuing !== null}
+                            aria-describedby={reissueBlocked ? blockedId : undefined}
+                            aria-label={`Use new address for ${who}`}
+                            onClick={() => onUseNewAddress(r)}
+                          >
+                            {reissuing === r.issueId ? 'Re-issuing...' : 'Use new address'}
+                          </Button>
+                        )}
                       </span>
                     )}
                   </td>

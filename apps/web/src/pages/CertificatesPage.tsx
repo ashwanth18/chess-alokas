@@ -33,7 +33,7 @@ import { DesignerPanel, FONT_SIZE_MAX, FONT_SIZE_MIN } from './certificates/Desi
 import { EmailStep, emailedSummary } from './certificates/EmailStep';
 import { PdfPreview } from './certificates/PdfPreview';
 import { Steps, type StepInfo } from './certificates/Steps';
-import { plural, type IssueLike, type PlayerInfo } from './certificates/reviewLogic';
+import { plural, type IssueLike, type PlayerInfo, type ReviewRow } from './certificates/reviewLogic';
 import {
   buildTournamentRows,
   csvRows,
@@ -481,6 +481,41 @@ export default function CertificatesPage() {
       setError(`The certificates couldn't be made${err instanceof Error ? `: ${err.message}` : ''}.`);
     } finally {
       setBusy(null);
+    }
+  }
+
+  /* ── A new address for one player ─────────────────────────────────────── */
+
+  const currentEmails = useMemo(
+    () => new Map((participants ?? []).map((p) => [p.id, p.email ?? null])),
+    [participants],
+  );
+  const reissueBlocked = !template || !layout || fields.length === 0
+    ? 'load or design the template in step 2 first, so the certificate can be made again.'
+    : null;
+
+  /** One certificate again, for one player, with the address they have now and a new serial. */
+  async function reissueOne(review: ReviewRow): Promise<string | null> {
+    if (!template || !layout || !tournamentId) return 'Load the template in step 2 first.';
+    const row = rows.find(
+      (r) => r.participantId === review.participantId && (r.categoryId ?? null) === (review.categoryId ?? null),
+    );
+    if (!row) return `${review.name} isn't among this tournament's ${certType} recipients any more, so it can't be issued again here.`;
+    // A new copy needs its own serial: serials are unique per tournament.
+    reservedSerialsRef.current.delete(row.id);
+    try {
+      const [stamped] = await stampReservedSerials([row]);
+      const batch = await generateCertificateBatch(template.bytes, { ...layout, fields }, [
+        { id: stamped!.id, fileName: stamped!.fileName, row: stamped!.row },
+      ]);
+      const res = await apiIssueCertificates(tournamentId, [
+        { ...issueFields(stamped!, certType), pdfBase64: bytesToBase64(batch.digital[0]!.pdf) },
+      ]);
+      if (!res.ok) return plainError(res.error, 'the certificate was not issued again');
+      await refreshIssues();
+      return null;
+    } catch (err) {
+      return `The certificate couldn't be made again${err instanceof Error ? `: ${err.message}` : ''}.`;
     }
   }
 
@@ -1105,6 +1140,9 @@ export default function CertificatesPage() {
                 onSaveCopy={saveEmailCopy}
                 ownEmail={user?.email ?? null}
                 onGoToIssue={() => go(3)}
+                currentEmails={currentEmails}
+                onReissue={reissueOne}
+                reissueBlocked={reissueBlocked}
               />
             ))}
 

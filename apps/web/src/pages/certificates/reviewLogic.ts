@@ -25,7 +25,7 @@ export type IssueLike = {
 /** What the review knows about a player beyond the certificate: start number and sections. */
 export type PlayerInfo = { seed?: number | null; sections: string[] };
 
-export type ReviewStatus = 'ready' | 'retry' | 'sent' | 'no-email' | 'invalid-email';
+export type ReviewStatus = 'ready' | 'retry' | 'sending' | 'sent' | 'no-email' | 'invalid-email';
 
 export type ReviewRow = {
   /** The certificate that would be emailed: the newest one for this person. */
@@ -34,6 +34,13 @@ export type ReviewRow = {
   /** "#12 · U12". Two children with one name are told apart by this, never by school. */
   disambiguator: string | null;
   email: string | null;
+  /**
+   * The player's address now, when it differs from the one this certificate was issued with: the
+   * organizer fixed or added it since. "Use new address" re-issues to it.
+   */
+  newEmail: string | null;
+  participantId: string | null;
+  categoryId: string | null;
   type: CertType;
   typeLabel: string;
   status: ReviewStatus;
@@ -51,6 +58,7 @@ export type ReviewRow = {
 export const STATUS_LABEL: Record<ReviewStatus, string> = {
   ready: 'Ready',
   retry: 'Ready, failed before',
+  sending: 'Being sent now',
   sent: 'Already sent',
   'no-email': 'No email',
   'invalid-email': 'Email not valid',
@@ -78,6 +86,8 @@ export function buildReviewRows(
     type: CertType;
     players?: Map<string, PlayerInfo>;
     categoryNames?: Map<string, string>;
+    /** Each player's address as it is now on this device, by participant id. */
+    currentEmails?: Map<string, string | null | undefined>;
   },
 ): ReviewRow[] {
   const groups = new Map<string, IssueLike[]>();
@@ -93,8 +103,13 @@ export function buildReviewRows(
   for (const group of groups.values()) {
     group.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const latest = group[0]!;
-    const sentCopy = group.find((i) => i.status === 'emailed' || i.emailedAt);
     const email = latest.recipientEmail?.trim() || null;
+    const wasSent = (i: IssueLike) => i.status === 'emailed' || Boolean(i.emailedAt);
+    // Sent to this address counts as sent. A copy that went to an old address doesn't.
+    const sentCopy = group.find((i) => wasSent(i) && normalEmail(i.recipientEmail) === normalEmail(email));
+    const sentElsewhere = group.find((i) => wasSent(i) && normalEmail(i.recipientEmail) !== normalEmail(email));
+    const current = latest.participantId ? opts.currentEmails?.get(latest.participantId)?.trim() : undefined;
+    const newEmail = current && normalEmail(current) !== normalEmail(email) ? current : null;
     const info = latest.participantId ? opts.players?.get(latest.participantId) : undefined;
     const section =
       (latest.categoryId && opts.categoryNames?.get(latest.categoryId)) || info?.sections.join(', ') || null;
@@ -108,19 +123,29 @@ export function buildReviewRows(
       status = 'sent';
       const when = shortDate(sentCopy.emailedAt);
       note = sentCopy === latest ? (when ? `Sent ${when}` : null) : `An earlier copy was sent${when ? ` ${when}` : ''}`;
+    } else if (latest.status === 'pending') {
+      // Claimed by a send that's still running, maybe in another tab.
+      status = 'sending';
+      note = 'Another tab or window is sending this';
     } else if (latest.status === 'failed') {
       status = 'retry';
       note = latest.error ? `Last try: ${latest.error}` : null;
-    } else status = 'ready';
+    } else {
+      status = 'ready';
+      if (sentElsewhere?.recipientEmail) note = `An earlier copy went to ${sentElsewhere.recipientEmail}`;
+    }
 
-    if (status === 'no-email') note = 'Add an email to this player, then issue again';
-    if (status === 'invalid-email') note = 'Fix the address on the player, then issue again';
+    if (status === 'no-email') note = newEmail ? 'The player has an address now' : 'Add an email to this player, then issue again';
+    if (status === 'invalid-email') note = newEmail ? 'The address was fixed on the player' : 'Fix the address on the player, then issue again';
 
     rows.push({
       issueId: latest.id,
       name: latest.recipientName,
       disambiguator: disParts.length ? disParts.join(' · ') : null,
       email,
+      newEmail,
+      participantId: latest.participantId ?? null,
+      categoryId: latest.categoryId ?? null,
       type: latest.type,
       typeLabel:
         latest.type === 'winner'

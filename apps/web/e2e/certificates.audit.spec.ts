@@ -74,7 +74,8 @@ test('issue, review, untick two, send, see results, retry the failure', async ({
   await page.getByRole('button', { name: 'Send 15 emails' }).click();
   const dialog = page.getByRole('dialog', { name: 'Send 15 emails now?' });
   await expect(dialog).toContainText('This uses 15 of the 1,988 emails left today.');
-  await dialog.getByRole('button', { name: 'Send 15 emails' }).click();
+  // A double click on the final button must still send each certificate once.
+  await dialog.getByRole('button', { name: 'Send 15 emails' }).dblclick();
 
   await expect(page.getByRole('heading', { name: 'Last send' })).toBeVisible();
   await expect(page.getByText('14 emails sent. 1 failed.')).toBeVisible();
@@ -111,6 +112,38 @@ test('issue, review, untick two, send, see results, retry the failure', async ({
   await expect(page.getByText('Tick at least one player to send.')).toBeVisible();
 
   expect(mocks.external).toEqual([]);
+});
+
+test('"Use new address" re-issues one certificate to the address on file now', async ({ page }) => {
+  const sibling = players[1]!;
+  const fake = await installCertificatesApi(page, {
+    issues: [
+      ...seededIssues(),
+      {
+        id: 'ffffffff-0000-4000-8000-000000000001',
+        tournamentId: TOURNAMENT_ID,
+        participantId: sibling.id,
+        categoryId: null,
+        recipientName: sibling.name,
+        recipientEmail: 'old.parent@example.invalid',
+        type: 'participation',
+        status: 'stored',
+        serial: 'CERT/003/2026',
+        error: null,
+        emailedAt: null,
+        createdAt: '2026-07-07T02:00:00.000Z',
+      },
+    ],
+  });
+  await openWithTemplate(page);
+  await page.getByRole('navigation', { name: 'Certificate steps' }).getByRole('button', { name: /Email/ }).click();
+  await expect(page.getByText('Address on file now: parent.alekhine@example.invalid')).toBeVisible();
+  await page.getByRole('button', { name: /^Use new address for PUTERI ALEKHINE DAMIA BINTI QUEEN INDIAN/ }).click();
+  await expect(page.getByRole('button', { name: /^Use new address for/ })).toHaveCount(0);
+  const mine = fake.issues.filter((i) => i.participantId === sibling.id);
+  expect(mine).toHaveLength(2);
+  expect(mine.at(-1)).toMatchObject({ recipientEmail: FIXTURE_EMAILS[sibling.id], status: 'stored' });
+  expect(mine.at(-1)!.serial).not.toBe('CERT/003/2026');
 });
 
 test('send stays off, with the reason, when the day\'s limit is too small', async ({ page }) => {
