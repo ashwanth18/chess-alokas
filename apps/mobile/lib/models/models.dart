@@ -29,6 +29,16 @@ String formatDistanceKm(double km) {
   return '$grouped km';
 }
 
+/// "12 km away". An approximate position can't honestly give decimals, or say
+/// how close something very close is.
+String formatDistanceAway(double km, {bool approximate = false}) {
+  if (!approximate) {
+    return km < 0.1 ? 'Under 0.1 km away' : '${formatDistanceKm(km)} away';
+  }
+  if (km < 5) return 'Under 5 km away';
+  return '${formatDistanceKm(km.roundToDouble()).replaceAll('.0', '')} away';
+}
+
 final RegExp _uuidPattern = RegExp(
   r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
   caseSensitive: false,
@@ -95,72 +105,6 @@ List<Map<String, dynamic>> _maps(Object? value) {
   if (value is! List) return const [];
   return value.whereType<Map<String, dynamic>>().toList();
 }
-
-/// The centre of an event search: a city the user picks, or the device's
-/// position when the user asks for it with "Use my location".
-class LocationPreset {
-  final String id;
-  final String city;
-  final String state;
-  final double latitude;
-  final double longitude;
-
-  const LocationPreset({
-    required this.id,
-    required this.city,
-    required this.state,
-    required this.latitude,
-    required this.longitude,
-  });
-
-  String get label => 'Near: $city';
-
-  /// The device's position, rounded to about a kilometre before it leaves the
-  /// phone. Not remembered between launches.
-  factory LocationPreset.device(double latitude, double longitude) {
-    double round(double value) => (value * 100).roundToDouble() / 100;
-    return LocationPreset(
-      id: deviceId,
-      city: 'your location',
-      state: '',
-      latitude: round(latitude),
-      longitude: round(longitude),
-    );
-  }
-
-  static const String deviceId = 'device';
-}
-
-const List<LocationPreset> locationPresets = [
-  LocationPreset(
-    id: 'kl',
-    city: 'Kuala Lumpur',
-    state: 'WP Kuala Lumpur',
-    latitude: 3.1390,
-    longitude: 101.6869,
-  ),
-  LocationPreset(
-    id: 'pj',
-    city: 'Petaling Jaya',
-    state: 'Selangor',
-    latitude: 3.1073,
-    longitude: 101.6067,
-  ),
-  LocationPreset(
-    id: 'penang',
-    city: 'George Town',
-    state: 'Pulau Pinang',
-    latitude: 5.4141,
-    longitude: 100.3288,
-  ),
-  LocationPreset(
-    id: 'jb',
-    city: 'Johor Bahru',
-    state: 'Johor',
-    latitude: 1.4927,
-    longitude: 103.7414,
-  ),
-];
 
 final RegExp _ageBandPattern = RegExp(
   r'(?:^|[^A-Z0-9])(?:U|UNDER[\s-]*)(\d{1,2})(?![0-9])',
@@ -266,7 +210,7 @@ class MobileEventItem {
 
   String get displayName => name ?? 'Unnamed event';
 
-  /// Distance from a chosen city, or null when the event has no coordinates.
+  /// Distance from a position, or null when the event has no coordinates.
   double? distanceFrom(double originLat, double originLng) {
     final lat = latitude;
     final lng = longitude;
@@ -296,12 +240,60 @@ class MobileEventItem {
   /// Why registering is not possible at [now], using the same two rules the
   /// server applies. Null while registration is open.
   String? closedReason(DateTime now) {
-    if (!registrationOpen) return 'Registration is closed for this event.';
+    if (!registrationOpen) return 'Registration closed';
     final deadline = registrationDeadlineAt;
     if (deadline != null && deadline.isBefore(now)) {
-      return 'Registration closed on $registrationDeadlineLabel.';
+      return 'Registration closed';
     }
     return null;
+  }
+
+  /// The banner on the card and event page. Null with no deadline while open:
+  /// nothing is invented. Days are calendar days on this phone.
+  EventDeadline? deadlineAt(DateTime now) {
+    final closed = closedReason(now);
+    if (closed != null) return EventDeadline(closed, DeadlineUrgency.closed);
+    final at = registrationDeadlineAt?.toLocal();
+    if (at == null) return null;
+    final local = now.toLocal();
+    final days = DateTime.utc(
+      at.year,
+      at.month,
+      at.day,
+    ).difference(DateTime.utc(local.year, local.month, local.day)).inDays;
+    if (days <= 0) {
+      return EventDeadline(
+        'Closes today, ${formatTimeForPeople(at)}',
+        DeadlineUrgency.soon,
+      );
+    }
+    final date = at.year == local.year
+        ? '${at.day} ${_monthNames[at.month - 1]}'
+        : _formatDay(at);
+    return EventDeadline(
+      'Closes $date \u00b7 ${pluralize(days, 'day')} left',
+      days < 3 ? DeadlineUrgency.soon : DeadlineUrgency.calm,
+    );
+  }
+
+  /// `registeredCount` counts confirmed players only: a registration joins it
+  /// when the organizer approves, and the server decides "full" from the same
+  /// number. `maxParticipants` is a limit, never a count. Null if neither is
+  /// known.
+  String? get playersLabel {
+    final count = registeredCount;
+    final max = maxParticipants;
+    if (count == null) return max == null ? null : pluralize(max, 'place');
+    if (max == null) return '$count confirmed';
+    return '$count confirmed \u00b7 ${pluralize(max, 'place')}';
+  }
+
+  /// The fee to enter, never a prize: "Entry RM 30" or "Free".
+  String get entryLabel {
+    final cents = entryFeeCents;
+    if (cents == null) return 'Entry not listed';
+    if (cents == 0) return 'Free';
+    return 'Entry ${formatMoney(cents, currency)}';
   }
 
   /// True when every place is taken, so the server would waitlist a new entry.
@@ -314,7 +306,7 @@ class MobileEventItem {
   String feeLabel({int players = 1}) {
     final cents = entryFeeCents;
     if (cents == null) return 'Fee not listed';
-    if (cents == 0) return 'Free entry';
+    if (cents == 0) return 'Free';
     return formatMoney(cents * players, currency);
   }
 
@@ -357,7 +349,18 @@ String formatMoney(int cents, String? currency) {
   final amount = cents % 100 == 0
       ? (cents ~/ 100).toString()
       : (cents / 100).toStringAsFixed(2);
-  return currency == null ? amount : '$currency $amount';
+  if (currency == null) return amount;
+  final symbol = currency.toUpperCase() == 'MYR' ? 'RM' : currency;
+  return '$symbol $amount';
+}
+
+enum DeadlineUrgency { calm, soon, closed }
+
+class EventDeadline {
+  final String text;
+  final DeadlineUrgency urgency;
+
+  const EventDeadline(this.text, this.urgency);
 }
 
 /// A question the organizer added to the registration form.

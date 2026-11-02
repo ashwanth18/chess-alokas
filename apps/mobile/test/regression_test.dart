@@ -351,12 +351,13 @@ void main() {
       await _pump(tester, backend, storage: _signedIn());
 
       expect(find.text('View & Register'), findsNothing);
-      expect(find.text('View Details (Registration Closed)'), findsOneWidget);
-      expect(find.byKey(const Key('event-closed-badge')), findsOneWidget);
+      expect(find.text('View details'), findsOneWidget);
+      expect(find.text('Registration closed'), findsOneWidget);
 
       await _openEvent(tester);
 
-      expect(find.byKey(const Key('event-closed-card')), findsOneWidget);
+      expect(find.text('Registration closed'), findsOneWidget);
+      expect(find.byKey(const Key('start-register-button')), findsNothing);
       expect(find.byKey(const Key('confirm-register-button')), findsNothing);
       expect(find.byKey(const Key('choose-receipt-button')), findsNothing);
       expect(find.textContaining('PAYMENT:'), findsNothing);
@@ -372,7 +373,7 @@ void main() {
       await _pump(tester, backend, storage: _signedIn());
       await _openEvent(tester);
 
-      expect(find.text('Registration is closed for this event.'), findsWidgets);
+      expect(find.text('Registration closed'), findsWidgets);
       expect(find.byKey(const Key('confirm-register-button')), findsNothing);
     });
 
@@ -387,7 +388,7 @@ void main() {
       });
       await _pump(tester, backend, storage: _signedIn());
 
-      expect(find.textContaining('Register by '), findsOneWidget);
+      expect(find.textContaining('2 days left'), findsOneWidget);
       await _openEvent(tester);
       await _startFlow(tester);
       expect(find.byKey(const Key('confirm-register-button')), findsOneWidget);
@@ -467,34 +468,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Fake Open Test Event'), findsOneWidget);
-    });
-
-    testWidgets('the chosen city is remembered', (tester) async {
-      final preferences = MemoryPreferences();
-      final backend = FakeBackend({
-        'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
-      });
-      await _pump(tester, backend, preferences: preferences);
-      await tester.tap(find.text('Near: Kuala Lumpur'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Near: Johor Bahru').last);
-      await tester.pumpAndSettle();
-      expect(preferences.city, 'jb');
-    });
-
-    testWidgets('a remembered city is used for the first request', (
-      tester,
-    ) async {
-      final backend = FakeBackend({
-        'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
-      });
-      await _pump(tester, backend, preferences: MemoryPreferences('jb'));
-
-      expect(find.text('Near: Johor Bahru'), findsOneWidget);
-      expect(
-        backend.sent('GET', _eventsPath).first.url.queryParameters['lat'],
-        '1.4927',
-      );
     });
 
     testWidgets('delete warns about active registrations', (tester) async {

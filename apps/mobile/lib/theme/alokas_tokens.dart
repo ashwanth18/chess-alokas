@@ -33,6 +33,15 @@ class AlokasTokens {
   static const forestWaitWash = Color(0xFF3A3010);
   static const forestShadow = Color(0x66000000);
 
+  // The crown logo, from docs/design/logo. The same in every theme.
+  static const logoGreen = Color(0xFF0F3D2E);
+  static const logoGoldTop = Color(0xFFF0DFB8);
+  static const logoGoldBottom = Color(0xFFC7A56C);
+
+  // The map. Blue is the convention for "you are here", so it stays blue.
+  static const mapUserDot = Color(0xFF3D8BFF);
+  static const mapUserRing = Color(0xFFFFFFFF);
+
   static const sunPaper = Color(0xFFFFFFFF);
   static const sunPaper2 = Color(0xFFF2F2F2);
   static const sunPaper3 = Color(0xFFE0E0E0);

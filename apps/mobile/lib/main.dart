@@ -7,6 +7,7 @@ import 'models/live.dart';
 import 'models/models.dart';
 import 'screens/career_screen.dart';
 import 'screens/discover_screen.dart';
+import 'screens/events_map.dart';
 import 'screens/matchday_screen.dart';
 import 'screens/profiles_screen.dart';
 import 'screens/register_screen.dart';
@@ -14,6 +15,7 @@ import 'services/alokas_api.dart';
 import 'services/device_location.dart' as device;
 import 'services/file_gateway.dart';
 import 'services/local_store.dart';
+import 'services/map_style.dart';
 import 'services/preferences.dart';
 import 'theme/alokas_theme.dart';
 import 'widgets/message_card.dart';
@@ -30,6 +32,11 @@ class ChessAlokasMobileApp extends StatefulWidget {
   final LocalStore localStore;
   final device.DeviceLocator locateDevice;
   final device.SettingsOpener openLocationSettings;
+  final device.SettingsOpener openDeviceLocationSettings;
+  final device.SettingsOpener requestPreciseLocation;
+  final device.PlaceNamer namePlace;
+  final MapStyleLoader loadMapStyle;
+  final MapSurfaceBuilder mapSurfaceBuilder;
 
   /// How often an open Matchday or live page checks for news.
   final Duration pollInterval;
@@ -43,6 +50,11 @@ class ChessAlokasMobileApp extends StatefulWidget {
     this.localStore = const FileLocalStore(),
     this.locateDevice = device.locateDevice,
     this.openLocationSettings = device.openLocationSettings,
+    this.openDeviceLocationSettings = device.openDeviceLocationSettings,
+    this.requestPreciseLocation = device.requestPreciseLocation,
+    this.namePlace = device.nameDevicePlace,
+    this.loadMapStyle = loadOpenFreeMapStyle,
+    this.mapSurfaceBuilder = buildMapLibreSurface,
     this.pollInterval = const Duration(seconds: 30),
   });
 
@@ -65,7 +77,7 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
   bool _inForeground = true;
   Timer? _pollTimer;
 
-  LocationPreset _selectedLocation = locationPresets.first;
+  late final device.NearMeController _nearMe;
   List<MobileEventItem> _events = const [];
   bool _eventsLoading = true;
   String? _eventsError;
@@ -106,7 +118,13 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     WidgetsBinding.instance.addObserver(this);
     _api.session.addListener(_onSessionChanged);
     _restoreTheme();
-    _restoreCityThenFetchEvents();
+    _nearMe = device.NearMeController(
+      locate: widget.locateDevice,
+      namePlace: widget.namePlace,
+      remember: widget.preferences.writeNearMe,
+    );
+    _restoreNearMe();
+    _showCachedEvents().then((_) => _fetchEvents());
     _api.restoreSession();
   }
 
@@ -130,25 +148,17 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     }
   }
 
-  /// A storage problem only means the first city is used; events still load.
-  Future<void> _restoreCityThenFetchEvents() async {
-    String? savedId;
+  /// A storage problem only means Near me starts off.
+  Future<void> _restoreNearMe() async {
+    bool wasOn;
     try {
-      savedId = await widget.preferences.readCityId().timeout(
+      wasOn = await widget.preferences.readNearMe().timeout(
         const Duration(seconds: 2),
       );
     } on Object {
-      savedId = null;
+      wasOn = false;
     }
-    if (!mounted) return;
-    for (final preset in locationPresets) {
-      if (preset.id == savedId) {
-        _selectedLocation = preset;
-        _lastCity = preset;
-      }
-    }
-    await _showCachedEvents();
-    await _fetchEvents();
+    if (mounted) await _nearMe.restore(wasOn);
   }
 
   Future<void> _showCachedEvents() async {
@@ -166,24 +176,10 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     });
   }
 
-  /// Where "Browse all events" goes back to from the device's position.
-  LocationPreset _lastCity = locationPresets.first;
-
-  Future<void> _chooseLocation(LocationPreset location) async {
-    if (location.id != LocationPreset.deviceId) _lastCity = location;
-    setState(() => _selectedLocation = location);
-    _refreshEvents();
-    if (location.id == LocationPreset.deviceId) return;
-    try {
-      await widget.preferences.writeCityId(location.id);
-    } on Object {
-      // The choice works for this run but will not be remembered.
-    }
-  }
-
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _nearMe.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _api.session.removeListener(_onSessionChanged);
     super.dispose();
@@ -194,7 +190,10 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     final foreground = state == AppLifecycleState.resumed;
     if (foreground == _inForeground) return;
     _inForeground = foreground;
-    if (foreground) _refreshTab(_currentTabIndex);
+    if (foreground) {
+      _refreshTab(_currentTabIndex);
+      _nearMe.refreshIfOld();
+    }
     _syncPolling();
   }
 
@@ -383,10 +382,8 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
 
   Future<void> _fetchEvents() async {
     final requestId = ++_eventsRequestId;
-    final result = await _api.fetchEvents(
-      lat: _selectedLocation.latitude,
-      lng: _selectedLocation.longitude,
-    );
+    // The position stays on the phone: distances are worked out here.
+    final result = await _api.fetchEvents();
     if (!mounted || requestId != _eventsRequestId) return;
     setState(() {
       _eventsLoading = false;
@@ -723,11 +720,12 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
             ? 'Still loading. Please go back and try again in a moment.'
             : _profilesError,
         registrationsByEvent: _registrationsByEvent,
-        selectedLocation: _selectedLocation,
-        onLocationChanged: _chooseLocation,
-        onBrowseAll: () => _chooseLocation(_lastCity),
-        locateDevice: widget.locateDevice,
+        nearMe: _nearMe,
         openSettings: widget.openLocationSettings,
+        openDeviceLocationSettings: widget.openDeviceLocationSettings,
+        requestPreciseLocation: widget.requestPreciseLocation,
+        loadMapStyle: widget.loadMapStyle,
+        mapSurfaceBuilder: widget.mapSurfaceBuilder,
         loadEventDetail: _api.fetchEventDetail,
         onRegister: _handleRegister,
         onRefresh: _refreshEvents,

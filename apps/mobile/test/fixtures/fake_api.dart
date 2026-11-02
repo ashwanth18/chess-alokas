@@ -191,16 +191,14 @@ class InMemoryLocalStore implements LocalStore {
 }
 
 class MemoryPreferences implements AppPreferences {
-  String? city;
+  bool nearMe = false;
   String? theme;
 
-  MemoryPreferences([this.city]);
+  @override
+  Future<bool> readNearMe() async => nearMe;
 
   @override
-  Future<String?> readCityId() async => city;
-
-  @override
-  Future<void> writeCityId(String id) async => city = id;
+  Future<void> writeNearMe(bool on) async => nearMe = on;
 
   @override
   Future<String?> readThemeName() async => theme;
@@ -228,7 +226,6 @@ class FakeBackend {
     return handler(request);
   });
 
-  List<http.Request> sent(String method, String path) => requests
-      .where((r) => r.method == method && r.url.path == path)
-      .toList();
+  List<http.Request> sent(String method, String path) =>
+      requests.where((r) => r.method == method && r.url.path == path).toList();
 }

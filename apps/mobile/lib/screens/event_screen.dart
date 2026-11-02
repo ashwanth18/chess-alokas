@@ -6,6 +6,7 @@ import '../services/alokas_api.dart';
 import '../services/file_gateway.dart';
 import '../services/local_store.dart';
 import '../theme/alokas_theme.dart';
+import '../widgets/event_facts.dart';
 import '../widgets/message_card.dart';
 import 'register_screen.dart';
 
@@ -17,8 +18,9 @@ class EventScreen extends StatefulWidget {
   final List<MobilePlayerProfile> profiles;
   final String? profilesUnavailable;
   final List<RegistrationRecord> existingRegistrations;
-  final double? distanceKm;
-  final String originCity;
+
+  /// "12 km away" from the phone's real position; null without one.
+  final String? distanceLabel;
   final Future<ApiResult<EventDetail>> Function() loadDetail;
   final ReceiptPicker receiptPicker;
   final Future<List<RegistrationAttempt>> Function(
@@ -39,8 +41,7 @@ class EventScreen extends StatefulWidget {
     required this.profiles,
     required this.profilesUnavailable,
     required this.existingRegistrations,
-    required this.distanceKm,
-    required this.originCity,
+    required this.distanceLabel,
     required this.loadDetail,
     required this.receiptPicker,
     required this.onSubmit,
@@ -131,12 +132,12 @@ class _EventScreenState extends State<EventScreen> {
   Widget _buildFacts(MobileEventItem event) {
     final p = context.pal;
     final detail = _detail;
-    final distance = widget.distanceKm;
     final where = [
       event.venueAddress ?? event.locationLabel ?? 'Venue not listed',
-      if (distance != null)
-        '${formatDistanceKm(distance)} from ${widget.originCity}',
+      ?widget.distanceLabel,
     ].join('\n');
+    final deadline = event.deadlineAt(DateTime.now());
+    final players = event.playersLabel;
     final format = [
       if (event.style != null) event.style!.toUpperCase(),
       if (event.rounds != null) pluralize(event.rounds!, 'round'),
@@ -174,15 +175,18 @@ class _EventScreenState extends State<EventScreen> {
           event.displayName,
           style: atype(32, weight: 800, width: 108, color: p.ink, height: 1.12),
         ),
+        if (deadline != null) ...[
+          const SizedBox(height: 12),
+          DeadlineBanner(deadline: deadline),
+        ],
         const SizedBox(height: 12),
         Divider(color: p.accent, thickness: 1.5, height: 2),
         const SizedBox(height: 6),
         fact('When', formatDateForPeople(event.date) ?? 'Date not listed'),
         fact('Where', where),
         fact('Entry', event.feeLabel()),
+        if (players != null) fact('Players', players),
         if (format.isNotEmpty) fact('Format', format),
-        if (event.registrationDeadlineLabel != null)
-          fact('Closes', event.registrationDeadlineLabel!),
         if (event.descriptionMd != null) ...[
           const SizedBox(height: 12),
           Text(
@@ -219,11 +223,13 @@ class _EventScreenState extends State<EventScreen> {
           .where((r) => r.isActive)
           .map((r) => '${r.playerName ?? 'Player'}: ${r.statusLabel}')
           .join('\n');
+      // The banner above already says closed.
+      if (existing.isEmpty) return const [];
       return [
         MessageCard(
           key: const Key('event-closed-card'),
-          title: closed,
-          message: existing.isEmpty ? null : existing,
+          title: 'Your entries',
+          message: existing,
         ),
       ];
     }
@@ -242,7 +248,6 @@ class _EventScreenState extends State<EventScreen> {
       return [
         MessageCard(
           title: 'Sign in to register',
-          message: 'Registering a player uses a saved profile on your account.',
           actionLabel: 'Go to Sign In',
           onAction: _goToAccount,
         ),
@@ -260,7 +265,6 @@ class _EventScreenState extends State<EventScreen> {
       return [
         MessageCard(
           title: 'Add a player profile first',
-          message: 'Registration uses the details saved on a player profile.',
           actionLabel: 'Go to Profiles',
           onAction: _goToAccount,
         ),

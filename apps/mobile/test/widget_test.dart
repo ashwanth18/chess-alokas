@@ -24,8 +24,9 @@ Map<String, FakeHandler> _accountRoutes({
   Map<String, dynamic>? dashboard,
 }) {
   return {
-    'GET $_profilesPath': (_) =>
-        jsonResponse({'profiles': profiles ?? [fakeProfile()]}),
+    'GET $_profilesPath': (_) => jsonResponse({
+      'profiles': profiles ?? [fakeProfile()],
+    }),
     'GET /api/player/registrations': (_) =>
         jsonResponse({'registrations': const []}),
     'GET /api/player/dashboard': (_) =>
@@ -39,11 +40,11 @@ Map<String, FakeHandler> _eventRoutes(
 }) {
   return {
     'GET $_eventsPath': (_) => jsonResponse({
-          'events': [event],
-        }),
+      'events': [event],
+    }),
     'GET $_detailPath': (_) => jsonResponse(
-          fakeEventDetail(event, paymentInstructions: paymentInstructions),
-        ),
+      fakeEventDetail(event, paymentInstructions: paymentInstructions),
+    ),
   };
 }
 
@@ -171,16 +172,16 @@ void main() {
     testWidgets('unknown fields are not invented', (tester) async {
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({
-              'events': [sparseEvent],
-            }),
+          'events': [sparseEvent],
+        }),
       });
       await _pumpApp(tester, backend);
 
       expect(find.text('Unnamed event'), findsOneWidget);
       expect(find.text('Venue not listed'), findsOneWidget);
       expect(find.textContaining('Date not listed'), findsOneWidget);
-      expect(find.textContaining('Fee not listed'), findsOneWidget);
-      expect(find.textContaining('km from'), findsNothing);
+      expect(find.text('Entry not listed'), findsOneWidget);
+      expect(find.textContaining('km away'), findsNothing);
       expect(find.byIcon(Icons.verified), findsNothing);
       for (final text in _visibleTexts(tester)) {
         expect(text.toLowerCase(), isNot(contains('verified')));
@@ -228,8 +229,8 @@ void main() {
       });
       await _pumpApp(tester, backend);
 
-      expect(find.text('Near: Kuala Lumpur'), findsOneWidget);
-      expect(find.textContaining('GPS'), findsNothing);
+      expect(find.text('Location off'), findsOneWidget);
+      expect(find.textContaining('Kuala Lumpur'), findsNothing);
     });
   });
 
@@ -277,8 +278,8 @@ void main() {
       );
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({
-              'events': [event],
-            }),
+          'events': [event],
+        }),
         'GET $_detailPath': (_) => jsonResponse(fakeEventDetail(event)),
       });
       await _pumpApp(tester, backend);
@@ -297,8 +298,8 @@ void main() {
       final event = fakeEvent(entryFeeCents: 5000);
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({
-              'events': [event],
-            }),
+          'events': [event],
+        }),
         'GET $_detailPath': (_) =>
             jsonResponse({'error': 'Event not found'}, 404),
       });
@@ -329,10 +330,9 @@ void main() {
       final backend = FakeBackend(
         routes(
           fakeEvent(),
-          (_) => jsonResponse(
-            {'error': 'Registration is currently closed for this tournament.'},
-            400,
-          ),
+          (_) => jsonResponse({
+            'error': 'Registration is currently closed for this tournament.',
+          }, 400),
         ),
       );
       await _pumpApp(tester, backend, storage: _signedInStorage());
@@ -403,20 +403,16 @@ void main() {
       expect(request.headers['Authorization'], 'Bearer fake-access-token');
 
       await _leaveDonePage(tester);
-      expect(
-        find.text('Pending: Test Player One'),
-        findsOneWidget,
-      );
+      expect(find.text('Pending: Test Player One'), findsOneWidget);
     });
 
     testWidgets('a waitlisted response is shown as waitlisted', (tester) async {
       final backend = FakeBackend(
         routes(
           fakeEvent(),
-          (_) => jsonResponse(
-            {'registration': fakeRegistration(status: 'waitlisted')},
-            201,
-          ),
+          (_) => jsonResponse({
+            'registration': fakeRegistration(status: 'waitlisted'),
+          }, 201),
         ),
       );
       await _pumpApp(tester, backend, storage: _signedInStorage());
@@ -444,14 +440,9 @@ void main() {
       final backend = FakeBackend(
         routes(
           fakeEvent(entryFeeCents: 5000),
-          (_) => jsonResponse(
-            {
-              'registration': fakeRegistration(
-                paymentStatus: 'pending_receipt',
-              ),
-            },
-            201,
-          ),
+          (_) => jsonResponse({
+            'registration': fakeRegistration(paymentStatus: 'pending_receipt'),
+          }, 201),
         ),
       );
       await _pumpApp(tester, backend, storage: _signedInStorage());
@@ -466,15 +457,12 @@ void main() {
       final backend = FakeBackend(
         routes(
           fakeEvent(entryFeeCents: 5000),
-          (_) => jsonResponse(
-            {
-              'registration': fakeRegistration(
-                paymentStatus: 'submitted',
-                hasReceipt: true,
-              ),
-            },
-            201,
-          ),
+          (_) => jsonResponse({
+            'registration': fakeRegistration(
+              paymentStatus: 'submitted',
+              hasReceipt: true,
+            ),
+          }, 201),
         ),
       );
       await _pumpApp(
@@ -496,9 +484,13 @@ void main() {
 
       await _tapConfirm(tester);
 
-      final body = jsonDecode(backend.sent('POST', _registerPath).single.body)
-          as Map<String, dynamic>;
-      expect(body['receiptDataUrl'], 'data:image/png;base64,${base64Encode(png)}');
+      final body =
+          jsonDecode(backend.sent('POST', _registerPath).single.body)
+              as Map<String, dynamic>;
+      expect(
+        body['receiptDataUrl'],
+        'data:image/png;base64,${base64Encode(png)}',
+      );
     });
 
     testWidgets('a receipt the server did not record is reported', (
@@ -508,10 +500,9 @@ void main() {
       final backend = FakeBackend(
         routes(
           fakeEvent(entryFeeCents: 5000),
-          (_) => jsonResponse(
-            {'registration': fakeRegistration(hasReceipt: false)},
-            201,
-          ),
+          (_) => jsonResponse({
+            'registration': fakeRegistration(hasReceipt: false),
+          }, 201),
         ),
       );
       await _pumpApp(
@@ -572,21 +563,21 @@ void main() {
       const pdf = [0x25, 0x50, 0x44, 0x46];
       const jpeg = [0xff, 0xd8, 0xff];
       expect(
-        ReceiptFile.validate(PickedReceipt(name: 'w', bytes: sized(20, webp)))
-            .$1!
-            .contentType,
+        ReceiptFile.validate(
+          PickedReceipt(name: 'w', bytes: sized(20, webp)),
+        ).$1!.contentType,
         'image/webp',
       );
       expect(
-        ReceiptFile.validate(PickedReceipt(name: 'p', bytes: sized(20, pdf)))
-            .$1!
-            .contentType,
+        ReceiptFile.validate(
+          PickedReceipt(name: 'p', bytes: sized(20, pdf)),
+        ).$1!.contentType,
         'application/pdf',
       );
       expect(
-        ReceiptFile.validate(PickedReceipt(name: 'j', bytes: sized(20, jpeg)))
-            .$1!
-            .contentType,
+        ReceiptFile.validate(
+          PickedReceipt(name: 'j', bytes: sized(20, jpeg)),
+        ).$1!.contentType,
         'image/jpeg',
       );
     });
@@ -616,13 +607,10 @@ void main() {
       final storage = InMemorySessionStorage();
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
-        'POST $_tokenPath': (_) => jsonResponse(
-              {
-                'error': 'invalid_grant',
-                'error_description': 'Invalid login credentials',
-              },
-              400,
-            ),
+        'POST $_tokenPath': (_) => jsonResponse({
+          'error': 'invalid_grant',
+          'error_description': 'Invalid login credentials',
+        }, 400),
       });
       await _pumpApp(tester, backend, storage: storage);
       await attemptSignIn(tester);
@@ -718,22 +706,22 @@ void main() {
 
   group('Session refresh', () {
     AuthSession expiredSession() => AuthSession(
-          accessToken: 'old-access-token',
-          refreshToken: 'old-refresh-token',
-          expiresAt: DateTime.now().subtract(const Duration(minutes: 5)),
-          userId: fakeUserId,
-          email: 'player@example.test',
-        );
+      accessToken: 'old-access-token',
+      refreshToken: 'old-refresh-token',
+      expiresAt: DateTime.now().subtract(const Duration(minutes: 5)),
+      userId: fakeUserId,
+      email: 'player@example.test',
+    );
 
     test('an expired session refreshes on restore and is stored', () async {
       final storage = InMemorySessionStorage(expiredSession().encode());
       final backend = FakeBackend({
         'POST $_tokenPath': (_) => jsonResponse(
-              tokenResponse(
-                accessToken: 'new-access-token',
-                refreshToken: 'new-refresh-token',
-              ),
-            ),
+          tokenResponse(
+            accessToken: 'new-access-token',
+            refreshToken: 'new-refresh-token',
+          ),
+        ),
       });
       final api = AlokasApiClient(
         config: fakeConfig,
@@ -841,15 +829,14 @@ void main() {
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
         ..._accountRoutes(),
         'GET $_profilesPath': (_) => jsonResponse({
-              'profiles': created ? [fakeProfile()] : const [],
-            }),
+          'profiles': created ? [fakeProfile()] : const [],
+        }),
         'POST $_profilesPath': (request) {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body['username'] == 'taken_name') {
-            return jsonResponse(
-              {'message': 'Username "@taken_name" is already taken.'},
-              409,
-            );
+            return jsonResponse({
+              'message': 'Username "@taken_name" is already taken.',
+            }, 409);
           }
           created = true;
           return jsonResponse({'profile': fakeProfile()}, 201);
@@ -931,8 +918,9 @@ void main() {
       await tester.tap(find.byKey(const Key('save-profile-button')));
       await tester.pumpAndSettle();
 
-      final request =
-          backend.sent('PATCH', '$_profilesPath/$fakeProfileId').single;
+      final request = backend
+          .sent('PATCH', '$_profilesPath/$fakeProfileId')
+          .single;
       expect(jsonDecode(request.body)['yearOfBirth'], 2001);
     });
 
@@ -959,7 +947,9 @@ void main() {
       expect(find.text('Test Player One'), findsWidgets);
     });
 
-    testWidgets('Find my past tournaments shows the real claimedCount', (tester) async {
+    testWidgets('Find my past tournaments shows the real claimedCount', (
+      tester,
+    ) async {
       final backend = FakeBackend({
         'GET $_eventsPath': (_) => jsonResponse({'events': const []}),
         ..._accountRoutes(),
@@ -1021,21 +1011,24 @@ void main() {
       expect(find.textContaining('Found '), findsNothing);
     });
 
-    test('age uses the given year, and an unknown birth year stays unknown', () {
-      final known = MobilePlayerProfile.tryFromJson(fakeProfile())!;
-      expect(known.ageInYear(2030), 30);
-      expect(known.ageInYear(2040), 40);
-      expect(known.age, DateTime.now().year - 2000);
+    test(
+      'age uses the given year, and an unknown birth year stays unknown',
+      () {
+        final known = MobilePlayerProfile.tryFromJson(fakeProfile())!;
+        expect(known.ageInYear(2030), 30);
+        expect(known.ageInYear(2040), 40);
+        expect(known.age, DateTime.now().year - 2000);
 
-      final unknown = MobilePlayerProfile.tryFromJson(
-        fakeProfile(yearOfBirth: null),
-      )!;
-      expect(unknown.age, isNull);
-      expect(unknown.gender, isNull);
-      expect(unknown.school, isNull);
-      expect(unknown.city, isNull);
-      expect(unknown.bestRating, isNull);
-    });
+        final unknown = MobilePlayerProfile.tryFromJson(
+          fakeProfile(yearOfBirth: null),
+        )!;
+        expect(unknown.age, isNull);
+        expect(unknown.gender, isNull);
+        expect(unknown.school, isNull);
+        expect(unknown.city, isNull);
+        expect(unknown.bestRating, isNull);
+      },
+    );
 
     test('category suggestions do not guess', () {
       const open = EventCategoryInfo(id: fakeCategoryOpenId, name: 'Open');

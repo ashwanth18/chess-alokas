@@ -157,6 +157,32 @@ TextStyle atype(
   );
 }
 
+/// The crown's colours, for the logo widget.
+class AlokasLogoColors {
+  static const Color tile = AlokasTokens.logoGreen;
+  static const List<Color> gold = [
+    AlokasTokens.logoGoldTop,
+    AlokasTokens.logoGoldBottom,
+  ];
+}
+
+/// Colours for the map, which takes them as text.
+class AlokasMapColors {
+  static String _hex(Color color) =>
+      '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+  static const Color pinColor = AlokasTokens.forestAccentBright;
+  static const Color pinInkColor = AlokasTokens.forestPaper;
+  static const String pin = '#e6c994';
+  static const String pinInk = '#071f17';
+  static String get label => _hex(AlokasTokens.forestInk3);
+  static String get land => _hex(AlokasTokens.forestPaper2);
+  static String get water => _hex(AlokasTokens.forestPaper);
+  static String get green => _hex(AlokasTokens.forestPaper3);
+  static String get userDot => _hex(AlokasTokens.mapUserDot);
+  static String get userRing => _hex(AlokasTokens.mapUserRing);
+}
+
 class AlokasTheme {
   static const String fontFamily = 'Archivo';
 

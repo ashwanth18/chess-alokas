@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/draft.dart';
@@ -6,9 +8,13 @@ import '../services/alokas_api.dart';
 import '../services/device_location.dart';
 import '../services/file_gateway.dart';
 import '../services/local_store.dart';
+import '../services/map_style.dart';
+import '../services/place_search.dart';
 import '../theme/alokas_theme.dart';
+import '../widgets/event_facts.dart';
 import '../widgets/message_card.dart';
 import 'event_screen.dart';
+import 'events_map.dart';
 import 'register_screen.dart';
 
 String _recordBadgeText(RegistrationRecord record) {
@@ -39,13 +45,12 @@ class DiscoverScreen extends StatefulWidget {
   /// Why [profiles] cannot be trusted right now: still loading, or the error.
   final String? profilesUnavailable;
   final Map<String, List<RegistrationRecord>> registrationsByEvent;
-  final LocationPreset selectedLocation;
-  final ValueChanged<LocationPreset> onLocationChanged;
-
-  /// Leaves "your location" for the city the user last chose.
-  final VoidCallback onBrowseAll;
-  final DeviceLocator locateDevice;
+  final NearMeController nearMe;
   final SettingsOpener openSettings;
+  final SettingsOpener openDeviceLocationSettings;
+  final SettingsOpener requestPreciseLocation;
+  final MapStyleLoader loadMapStyle;
+  final MapSurfaceBuilder mapSurfaceBuilder;
   final Future<ApiResult<EventDetail>> Function(String slugOrId)
   loadEventDetail;
   final Future<List<RegistrationAttempt>> Function(
@@ -74,11 +79,12 @@ class DiscoverScreen extends StatefulWidget {
     required this.profiles,
     required this.profilesUnavailable,
     required this.registrationsByEvent,
-    required this.selectedLocation,
-    required this.onLocationChanged,
-    required this.onBrowseAll,
-    required this.locateDevice,
+    required this.nearMe,
     required this.openSettings,
+    required this.openDeviceLocationSettings,
+    required this.requestPreciseLocation,
+    required this.loadMapStyle,
+    required this.mapSurfaceBuilder,
     required this.loadEventDetail,
     required this.onRegister,
     required this.onRefresh,
@@ -95,106 +101,103 @@ class DiscoverScreen extends StatefulWidget {
 }
 
 class _DiscoverScreenState extends State<DiscoverScreen> {
-  /// Further than this, an event isn't "near you".
-  static const double nearbyKm = 150;
-
-  /// The user asked to see far-away events with their true distances.
-  bool _showFarEvents = false;
-  double? _selectedRadiusKm; // null = no distance limit
   String _selectedCategoryCode = 'All';
   String _searchQuery = '';
+
+  /// Chosen from the dropdown. Null while the user is only typing.
+  Place? _chosenPlace;
+  bool _showMap = false;
+  bool _mapFailed = false;
   final TextEditingController _searchController = TextEditingController();
-  bool _locating = false;
-  DeviceLocationProblem? _locationProblem;
+  final FocusNode _searchFocus = FocusNode();
+
+  /// Keeps "Updated 5 min ago" true while the screen stays open.
+  Timer? _freshnessTimer;
 
   @override
-  void didUpdateWidget(DiscoverScreen old) {
-    super.didUpdateWidget(old);
-    if (old.selectedLocation.id != widget.selectedLocation.id) {
-      _showFarEvents = false;
-    }
-  }
-
-  bool get _usingDevice =>
-      widget.selectedLocation.id == LocationPreset.deviceId;
-
-  /// Using the device's position with nothing close, and no choice made yet.
-  bool get _nothingNearby {
-    if (!_usingDevice || _showFarEvents || widget.events.isEmpty) return false;
-    return !widget.events.any((e) {
-      final distance = _distanceTo(e);
-      return distance != null && distance <= nearbyKm;
+  void initState() {
+    super.initState();
+    widget.nearMe.addListener(_rebuild);
+    _freshnessTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (widget.nearMe.fix != null) _rebuild();
     });
   }
 
   @override
   void dispose() {
+    _freshnessTimer?.cancel();
+    widget.nearMe.removeListener(_rebuild);
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
-  double? _distanceTo(MobileEventItem event) => event.distanceFrom(
-    widget.selectedLocation.latitude,
-    widget.selectedLocation.longitude,
-  );
+  void _rebuild() {
+    if (mounted) setState(() {});
+  }
 
-  Future<void> _useDeviceLocation() async {
+  NearMeController get _nearMe => widget.nearMe;
+
+  void _clearSearch() {
+    _searchController.clear();
     setState(() {
-      _locating = true;
-      _locationProblem = null;
+      _searchQuery = '';
+      _chosenPlace = null;
     });
-    final result = await widget.locateDevice();
-    if (!mounted) return;
+  }
+
+  void _chooseSuggestion(SearchSuggestion suggestion) {
+    _searchFocus.unfocus();
     setState(() {
-      _locating = false;
-      switch (result) {
-        case DeviceLocationFound(:final latitude, :final longitude):
-          widget.onLocationChanged(LocationPreset.device(latitude, longitude));
-        case DeviceLocationProblem():
-          _locationProblem = result;
-      }
+      _searchQuery = suggestion.title;
+      _chosenPlace = suggestion.place;
     });
   }
 
   List<MobileEventItem> get _filteredEvents {
-    final q = _searchQuery.trim().toLowerCase();
-    final radius = _selectedRadiusKm;
-
-    final filtered = widget.events.where((evt) {
-      if (radius != null) {
-        // An event with no coordinates cannot be shown to be within a radius.
-        final dist = _distanceTo(evt);
-        if (dist == null || dist > radius) return false;
-      }
+    final places = placesFor(widget.events);
+    final place = _chosenPlace;
+    final filtered = widget.events.where((event) {
       if (_selectedCategoryCode != 'All' &&
-          !evt.categories.any((c) => c.code == _selectedCategoryCode)) {
+          !event.categories.any((c) => c.code == _selectedCategoryCode)) {
         return false;
       }
-      if (q.isNotEmpty) {
-        final hay = [
-          evt.name,
-          evt.city,
-          evt.state,
-          evt.venueName,
-          evt.organizationName,
-        ].whereType<String>().join(' ').toLowerCase();
-        if (!hay.contains(q)) return false;
-      }
-      return true;
+      return place != null
+          ? place.matchesEvent(event)
+          : eventMatchesQuery(event, _searchQuery, places);
     }).toList();
 
-    filtered.sort((a, b) {
-      final da = _distanceTo(a);
-      final db = _distanceTo(b);
-      if (da == null && db == null) return 0;
-      if (da == null) return 1;
-      if (db == null) return -1;
-      return da.compareTo(db);
-    });
+    if (_nearMe.fix != null) {
+      filtered.sort((a, b) {
+        final da = _nearMe.distanceTo(a);
+        final db = _nearMe.distanceTo(b);
+        if (da == null && db == null) return 0;
+        if (da == null) return 1;
+        if (db == null) return -1;
+        return da.compareTo(db);
+      });
+    } else {
+      filtered.sort(_soonestFirst);
+    }
     return filtered;
   }
 
+  /// Upcoming events by date, then undated ones, then past ones, latest first.
+  int _soonestFirst(MobileEventItem a, MobileEventItem b) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final da = a.date == null ? null : DateTime.tryParse(a.date!);
+    final db = b.date == null ? null : DateTime.tryParse(b.date!);
+    int group(DateTime? d) => d == null ? 1 : (d.isBefore(today) ? 2 : 0);
+    final byGroup = group(da).compareTo(group(db));
+    if (byGroup != 0 || da == null || db == null) return byGroup;
+    return group(da) == 2 ? db.compareTo(da) : da.compareTo(db);
+  }
+
   void _openEvent(MobileEventItem event) {
+    // Otherwise focus returns on the way back and reopens the dropdown over the
+    // controls.
+    _searchFocus.unfocus();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => EventScreen(
@@ -204,8 +207,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           profilesUnavailable: widget.profilesUnavailable,
           existingRegistrations:
               widget.registrationsByEvent[event.id] ?? const [],
-          distanceKm: _distanceTo(event),
-          originCity: widget.selectedLocation.city,
+          distanceLabel: _nearMe.distanceLabel(event),
           loadDetail: () => widget.loadEventDetail(event.slugOrId),
           receiptPicker: widget.receiptPicker,
           onSubmit: (selections, receipt) =>
@@ -252,16 +254,59 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.pal;
     final events = _filteredEvents;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildSearch(),
+              const SizedBox(height: 8),
+              _NearMeStrip(
+                nearMe: _nearMe,
+                openSettings: widget.openSettings,
+                openDeviceLocationSettings: widget.openDeviceLocationSettings,
+                requestPrecise: () async {
+                  await widget.requestPreciseLocation();
+                  await _nearMe.refresh(prompt: false);
+                },
+              ),
+              const SizedBox(height: 8),
+              _buildViewAndFilters(),
+            ],
+          ),
+        ),
+        Expanded(child: _showMap ? _buildMap(events) : _buildList(events)),
+      ],
+    );
+  }
+
+  Widget _buildMap(List<MobileEventItem> events) => EventsMapView(
+    events: events,
+    nearMe: _nearMe,
+    sunlight: Theme.of(context).brightness == Brightness.light,
+    loadStyle: widget.loadMapStyle,
+    surfaceBuilder: widget.mapSurfaceBuilder,
+    onOpenEvent: _openEvent,
+    onUnavailable: () => setState(() {
+      _showMap = false;
+      _mapFailed = true;
+    }),
+  );
+
+  Widget _buildList(List<MobileEventItem> events) {
+    final p = context.pal;
     final countKnown =
-        !_nothingNearby &&
-        (widget.events.isNotEmpty ||
-            (!widget.eventsLoading && widget.eventsError == null));
+        widget.events.isNotEmpty ||
+        (!widget.eventsLoading && widget.eventsError == null);
     return RefreshIndicator(
       onRefresh: widget.onRefresh,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
         children: [
           for (final draft in widget.drafts)
             Padding(
@@ -271,40 +316,23 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 onTap: () => _resumeDraft(draft),
               ),
             ),
-          _buildLocation(),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _searchController,
-            onChanged: (v) => setState(() => _searchQuery = v),
-            decoration: InputDecoration(
-              hintText: 'Search tournament, city, venue',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear),
-                      tooltip: 'Clear search',
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() => _searchQuery = '');
-                      },
-                    )
-                  : null,
+          if (_mapFailed)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Map not available right now',
+                key: const Key('map-unavailable'),
+                style: atype(14, weight: 600, color: p.wait),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          _buildRadiusFilter(),
-          _buildCategoryFilter(),
-          const SizedBox(height: 16),
           SheetHeading(
             countKnown ? 'Tournaments (${events.length})' : 'Tournaments',
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 8),
-            child: Text(
-              'By distance from ${widget.selectedLocation.city}',
+            trailing: Text(
+              _nearMe.fix != null ? 'Nearest first' : 'Soonest first',
               style: atype(14, color: p.ink2),
             ),
           ),
+          const SizedBox(height: 4),
           ..._buildEventList(events),
         ],
       ),
@@ -331,7 +359,6 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       return [
         MessageCard(
           title: 'No events yet',
-          message: 'Published tournaments will appear here.',
           actionLabel: 'Check again',
           onAction: widget.onRefresh,
         ),
@@ -345,22 +372,15 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           onRetry: widget.onRefresh,
         ),
     ];
-    if (_nothingNearby) return [...notice, _buildNothingNearby()];
     if (events.isEmpty) {
       return [
         ...notice,
         MessageCard(
-          title: _usingDevice && _selectedRadiusKm != null
-              ? 'No tournaments within ${_selectedRadiusKm!.round()} km of you.'
-              : 'No tournaments match these filters.',
-          actionLabel: 'Reset Filters',
+          title: 'No matches',
+          actionLabel: 'Clear filters',
           onAction: () {
-            setState(() {
-              _selectedRadiusKm = null;
-              _selectedCategoryCode = 'All';
-              _searchQuery = '';
-              _searchController.clear();
-            });
+            _clearSearch();
+            setState(() => _selectedCategoryCode = 'All');
           },
         ),
       ];
@@ -368,170 +388,157 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     return [...notice, ...events.map(_buildEventRow)];
   }
 
-  /// Far from every event, such as abroad. Says so, names the closest event, and
-  /// leaves the choice to the user rather than showing an empty page.
-  Widget _buildNothingNearby() {
+  Widget _buildSearch() {
     final p = context.pal;
-    MobileEventItem? closest;
-    double? closestKm;
-    for (final event in widget.events) {
-      final distance = _distanceTo(event);
-      if (distance != null && (closestKm == null || distance < closestKm)) {
-        closest = event;
-        closestKm = distance;
-      }
-    }
-    return BrandCard(
-      key: const Key('no-events-near-you'),
-      strong: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'No events near you',
-            style: atype(20, weight: 800, color: p.ink, height: 1.2),
+    return RawAutocomplete<SearchSuggestion>(
+      textEditingController: _searchController,
+      focusNode: _searchFocus,
+      displayStringForOption: (option) => option.title,
+      optionsBuilder: (value) {
+        // Once chosen, the text is the choice: don't offer it again.
+        if (_chosenPlace != null && value.text == _chosenPlace!.name) {
+          return const [];
+        }
+        return suggestionsFor(value.text, widget.events);
+      },
+      onSelected: _chooseSuggestion,
+      fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
+        return TextField(
+          key: const Key('event-search'),
+          controller: controller,
+          focusNode: focusNode,
+          textInputAction: TextInputAction.search,
+          onTapOutside: (_) => focusNode.unfocus(),
+          onChanged: (text) => setState(() {
+            _searchQuery = text;
+            if (_chosenPlace?.name != text) _chosenPlace = null;
+          }),
+          decoration: InputDecoration(
+            hintText: 'Tournament, city or venue',
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: _searchQuery.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    tooltip: 'Clear search',
+                    onPressed: _clearSearch,
+                  )
+                : null,
           ),
-          const SizedBox(height: 4),
-          Text(
-            closest == null
-                ? 'None of the ${pluralize(widget.events.length, 'listed event')} gives a location to measure from.'
-                : 'The closest is ${closest.displayName}, ${formatDistanceKm(closestKm!)} away.',
-            style: atype(16, color: p.ink2, height: 1.35),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            key: const Key('search-suggestions'),
+            color: p.paper2,
+            elevation: 6,
+            borderRadius: BorderRadius.circular(AlokasTheme.radius),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                children: [
+                  for (final option in options)
+                    _suggestionRow(option, onSelected),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 12),
-          ElevatedButton(
-            key: const Key('browse-all-events'),
-            onPressed: widget.onBrowseAll,
-            child: const Text('Browse all events'),
+        );
+      },
+    );
+  }
+
+  Widget _suggestionRow(
+    SearchSuggestion option,
+    AutocompleteOnSelected<SearchSuggestion> onSelected,
+  ) {
+    final p = context.pal;
+    final place = option.place;
+    return InkWell(
+      onTap: () => onSelected(option),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: AlokasTheme.minTarget),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            children: [
+              Icon(
+                place != null
+                    ? Icons.place_outlined
+                    : Icons.emoji_events_outlined,
+                size: 20,
+                color: p.accent,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  option.title,
+                  style: atype(16, weight: 600, color: p.ink, height: 1.25),
+                ),
+              ),
+              if (place != null) ...[
+                const SizedBox(width: 8),
+                Text(
+                  pluralize(option.eventCount, 'event'),
+                  style: atype(13, color: p.ink2, tabular: true),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 8),
-          OutlinedButton(
-            key: const Key('show-true-distances'),
-            onPressed: () => setState(() => _showFarEvents = true),
-            child: const Text('Show true distances'),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildLocation() {
-    final p = context.pal;
-    final selected = widget.selectedLocation;
-    final usingDevice = selected.id == LocationPreset.deviceId;
-    final problem = _locationProblem;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                key: const Key('city-picker'),
-                initialValue: selected.id,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Search near'),
-                items: [
-                  if (usingDevice)
-                    const DropdownMenuItem(
-                      value: LocationPreset.deviceId,
-                      child: Text('Near: your location'),
-                    ),
-                  ...locationPresets.map(
-                    (preset) => DropdownMenuItem<String>(
-                      value: preset.id,
-                      child: Text(preset.label),
-                    ),
-                  ),
-                ],
-                onChanged: (id) {
-                  if (id == null || id == LocationPreset.deviceId) return;
-                  widget.onLocationChanged(
-                    locationPresets.firstWhere((p) => p.id == id),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: usingDevice ? 'Update my location' : 'Use my location',
-              child: OutlinedButton(
-                key: const Key('use-my-location'),
-                onPressed: _locating ? null : _useDeviceLocation,
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(56, 56),
-                  padding: EdgeInsets.zero,
-                ),
-                child: Icon(
-                  usingDevice ? Icons.my_location : Icons.location_searching,
-                  semanticLabel: _locating
-                      ? 'Finding your location'
-                      : usingDevice
-                      ? 'Update my location'
-                      : 'Use my location',
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (problem != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            problem.message,
-            key: const Key('location-problem'),
-            style: atype(14, weight: 600, color: p.wait, height: 1.3),
-          ),
-          if (problem.canOpenSettings)
-            TextButton(
-              onPressed: widget.openSettings,
-              child: const Text('Open app settings'),
-            ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildRadiusFilter() {
-    const options = <(String, double?)>[
-      ('10 km', 10.0),
-      ('25 km', 25.0),
-      ('50 km', 50.0),
-      ('Any distance', null),
-    ];
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final (label, radius) in options)
-          ChoiceBox.text(
-            label: label,
-            selected: _selectedRadiusKm == radius,
-            onTap: () => setState(() => _selectedRadiusKm = radius),
-          ),
-      ],
-    );
-  }
-
-  /// Options come from the categories the loaded events really have.
-  Widget _buildCategoryFilter() {
+  /// List or Map, then the sections the loaded events really have.
+  Widget _buildViewAndFilters() {
     final codes = <String>{
       for (final event in widget.events)
         for (final category in event.categories) category.code,
     }.toList()..sort();
-    if (codes.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
         children: [
-          for (final code in ['All', ...codes])
-            ChoiceBox.text(
-              label: code == 'All' ? 'All sections' : code,
-              selected: _selectedCategoryCode == code,
-              onTap: () => setState(() => _selectedCategoryCode = code),
+          SegmentedButton<bool>(
+            key: const Key('list-map-switch'),
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              minimumSize: WidgetStatePropertyAll(
+                Size(0, AlokasTheme.minTarget),
+              ),
             ),
+            segments: const [
+              ButtonSegment(
+                value: false,
+                label: Text('List'),
+                icon: Icon(Icons.view_list),
+              ),
+              ButtonSegment(
+                value: true,
+                label: Text('Map'),
+                icon: Icon(Icons.map_outlined),
+              ),
+            ],
+            selected: {_showMap},
+            onSelectionChanged: (selection) => setState(() {
+              _showMap = selection.first;
+              if (_showMap) _mapFailed = false;
+            }),
+          ),
+          if (codes.isNotEmpty)
+            for (final code in ['All', ...codes])
+              Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: ChoiceBox.text(
+                  label: code == 'All' ? 'All sections' : code,
+                  selected: _selectedCategoryCode == code,
+                  onTap: () => setState(() => _selectedCategoryCode = code),
+                ),
+              ),
         ],
       ),
     );
@@ -539,20 +546,15 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
 
   Widget _buildEventRow(MobileEventItem evt) {
     final p = context.pal;
-    final distKm = _distanceTo(evt);
+    final distance = _nearMe.distanceLabel(evt);
     final records = widget.registrationsByEvent[evt.id] ?? const [];
-    final count = evt.registeredCount;
-    final max = evt.maxParticipants;
-    final closed = evt.closedReason(DateTime.now());
-    final deadline = evt.registrationDeadlineLabel;
-
-    final facts = [
+    final now = DateTime.now();
+    final closed = evt.closedReason(now);
+    final deadline = evt.deadlineAt(now);
+    final when = [
       formatDateForPeople(evt.date) ?? 'Date not listed',
       ?evt.timeControl,
-      if (count != null)
-        max != null ? '$count/$max players' : pluralize(count, 'player'),
-      evt.feeLabel(),
-    ];
+    ].join(' · ');
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -560,12 +562,11 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (distKm != null)
+            if (distance != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: AlokasBadge(
-                  text:
-                      '${formatDistanceKm(distKm)} from ${widget.selectedLocation.city}',
+                  text: distance,
                   tone: ChipTone.go,
                   icon: Icons.near_me,
                 ),
@@ -574,40 +575,41 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
               evt.displayName,
               style: atype(20, weight: 800, color: p.ink, height: 1.2),
             ),
-            const SizedBox(height: 4),
             if (evt.organizationName != null)
-              Text(
-                evt.organizationName!,
-                style: atype(16, weight: 600, color: p.accent),
-              ),
-            Text(
-              evt.locationLabel ?? 'Venue not listed',
-              style: atype(14, color: p.ink2, height: 1.3),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              facts.join(' · '),
-              style: atype(14, weight: 600, color: p.ink, tabular: true),
-            ),
-            if (evt.categories.isNotEmpty)
-              Text(
-                evt.categories.map((c) => c.name).join(' · '),
-                style: atype(14, color: p.ink2),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  evt.organizationName!,
+                  style: atype(14, weight: 600, color: p.accent),
+                ),
               ),
             const SizedBox(height: 8),
-            if (closed != null)
-              AlokasBadge(
-                key: const Key('event-closed-badge'),
-                text: closed,
-                tone: ChipTone.wait,
-              )
-            else if (evt.isFull)
+            EventFact(icon: Icons.event, text: when),
+            const SizedBox(height: 4),
+            EventFact(
+              icon: Icons.place_outlined,
+              text: evt.locationLabel ?? 'Venue not listed',
+            ),
+            const SizedBox(height: 4),
+            EntryAndPlayers(event: evt),
+            if (evt.categories.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              EventFact(
+                icon: Icons.category_outlined,
+                text: evt.categories.map((c) => c.name).join(' · '),
+              ),
+            ],
+            if (deadline != null) ...[
+              const SizedBox(height: 10),
+              DeadlineBanner(deadline: deadline),
+            ],
+            if (closed == null && evt.isFull) ...[
+              const SizedBox(height: 8),
               const AlokasBadge(
-                text: 'Full: new entries are waitlisted',
+                text: 'Full · waitlist open',
                 tone: ChipTone.wait,
-              )
-            else if (deadline != null)
-              Text('Register by $deadline', style: atype(14, color: p.ink2)),
+              ),
+            ],
             for (final record in records)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -625,7 +627,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 onPressed: () => _openEvent(evt),
                 child: Text(
                   closed != null
-                      ? 'View Details (Registration Closed)'
+                      ? 'View details'
                       : evt.isFull
                       ? 'View & Join Waitlist'
                       : 'View & Register',
@@ -635,6 +637,210 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The one Near me control, and the proof of what it found. A green dot and a
+/// place name appear only with a real fix from this phone; otherwise it says
+/// Location off, and no distance appears anywhere.
+class _NearMeStrip extends StatelessWidget {
+  final NearMeController nearMe;
+  final SettingsOpener openSettings;
+  final SettingsOpener openDeviceLocationSettings;
+  final Future<void> Function() requestPrecise;
+
+  const _NearMeStrip({
+    required this.nearMe,
+    required this.openSettings,
+    required this.openDeviceLocationSettings,
+    required this.requestPrecise,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pal;
+    final fix = nearMe.fix;
+    final located = fix != null;
+    return Container(
+      key: const Key('near-me-strip'),
+      padding: const EdgeInsets.only(left: 12, right: 6),
+      constraints: const BoxConstraints(minHeight: 52),
+      decoration: BoxDecoration(
+        color: located ? p.goWash : p.paper2,
+        borderRadius: BorderRadius.circular(AlokasTheme.radius),
+        border: Border.all(color: located ? p.go : p.rule),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _status(context)),
+          const SizedBox(width: 6),
+          Text('Near me', style: atype(13, weight: 600, color: p.ink2)),
+          Switch(
+            key: const Key('near-me-toggle'),
+            value: nearMe.isOn,
+            onChanged: (on) => on ? nearMe.turnOn() : nearMe.turnOff(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _status(BuildContext context) {
+    final p = context.pal;
+    final fix = nearMe.fix;
+    if (fix != null) return _located(context, fix);
+    if (nearMe.isLocating) {
+      return Row(
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              'Finding you',
+              key: const Key('near-me-finding'),
+              style: atype(14, weight: 600, color: p.ink),
+            ),
+          ),
+        ],
+      );
+    }
+    final problem = nearMe.problem;
+    return Row(
+      children: [
+        Icon(Icons.location_disabled, size: 16, color: p.ink2),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Location off',
+                key: const Key('near-me-off'),
+                style: atype(14, weight: 700, color: p.ink),
+              ),
+              if (problem != null)
+                Text(
+                  problem.message,
+                  key: const Key('location-problem'),
+                  style: atype(13, color: p.wait, height: 1.2),
+                ),
+            ],
+          ),
+        ),
+        if (problem != null)
+          TextButton(
+            key: const Key('near-me-fix'),
+            onPressed: switch (problem.fix) {
+              LocationProblemFix.retry ||
+              LocationProblemFix.permission => nearMe.refresh,
+              LocationProblemFix.appSettings => openSettings,
+              LocationProblemFix.locationSettings => openDeviceLocationSettings,
+            },
+            child: Text(switch (problem.fix) {
+              LocationProblemFix.retry => 'Retry',
+              LocationProblemFix.permission => 'Allow',
+              _ => 'Settings',
+            }),
+          ),
+      ],
+    );
+  }
+
+  Widget _located(BuildContext context, DeviceLocationFound fix) {
+    final p = context.pal;
+    final name = nearMe.placeName;
+    final accuracy = fix.accuracyMeters;
+    final details = [
+      if (fix.isApproximate) 'Approximate',
+      // Without a place name, the coordinates and accuracy are the proof.
+      if (name == null && accuracy != null && !fix.isApproximate)
+        '±${accuracy.round()} m',
+      freshnessLabel(fix.fixedAt, DateTime.now()),
+    ].join(' · ');
+    final where =
+        name ??
+        '${fix.latitude.toStringAsFixed(2)}, ${fix.longitude.toStringAsFixed(2)}';
+    return Row(
+      children: [
+        Expanded(
+          child: Semantics(
+            button: true,
+            label: 'Update my location',
+            child: InkWell(
+              key: const Key('near-me-refresh'),
+              onTap: nearMe.isLocating ? null : nearMe.refresh,
+              child: Container(
+                constraints: const BoxConstraints(
+                  minHeight: AlokasTheme.minTarget,
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      key: const Key('near-me-dot'),
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: p.go,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Near you · $where',
+                            key: const Key('near-me-place'),
+                            style: atype(
+                              14,
+                              weight: 700,
+                              color: p.ink,
+                              height: 1.2,
+                            ),
+                          ),
+                          Text(
+                            details,
+                            style: atype(12, color: p.ink2, height: 1.2),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    if (nearMe.isLocating)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
+                      Icon(Icons.refresh, size: 16, color: p.ink2),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (fix.isApproximate)
+          TextButton(
+            key: const Key('near-me-precise'),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              minimumSize: const Size(48, AlokasTheme.minTarget),
+              textStyle: atype(13, weight: 700),
+            ),
+            onPressed: requestPrecise,
+            child: const Text('Precise'),
+          ),
+      ],
     );
   }
 }

@@ -117,17 +117,59 @@ class BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.pal;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: p.accent,
+        color: AlokasLogoColors.tile,
         borderRadius: BorderRadius.circular(AlokasTheme.radius - 2),
       ),
-      child: Icon(Icons.emoji_events, size: size * 0.62, color: p.onAccent),
+      alignment: Alignment.center,
+      child: CustomPaint(
+        key: const Key('brand-crown'),
+        size: Size.square(size * 0.72),
+        painter: const CrownPainter(),
+      ),
     );
   }
+}
+
+/// The crown from docs/design/logo/crown.svg, on its 24-unit grid.
+class CrownPainter extends CustomPainter {
+  const CrownPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scale = size.width / 24;
+    canvas.scale(scale);
+    final paint = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: AlokasLogoColors.gold,
+      ).createShader(const Rect.fromLTWH(0, 2, 24, 20));
+    canvas.drawCircle(const Offset(12, 4), 2, paint);
+    canvas.drawCircle(const Offset(3.5, 7), 2, paint);
+    canvas.drawCircle(const Offset(20.5, 7), 2, paint);
+    final body = Path()
+      ..moveTo(3.9, 9.6)
+      ..lineTo(7.6, 13)
+      ..lineTo(10.8, 6)
+      ..lineTo(13.2, 6)
+      ..lineTo(16.4, 13)
+      ..lineTo(20.1, 9.6)
+      ..lineTo(18.4, 18)
+      ..lineTo(5.6, 18)
+      ..close();
+    canvas.drawPath(body, paint);
+    canvas.drawRRect(
+      RRect.fromLTRBR(4, 19.5, 20, 22, const Radius.circular(1)),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(CrownPainter oldDelegate) => false;
 }
 
 /// A gold label above a section.
