@@ -6,12 +6,30 @@ This document covers the **Phase 1** multi-tenant B2B organizer architecture and
 
 ## 1. Overview: Dual-Workspace Architecture
 
-Chess Alokas supports two complementary workspaces under a single unified Supabase Auth account, switchable at any time via the top-navigation **Workspace Switcher** (`♟ Player Portal` `/player` ↔ `♕ Organizer Desk` `/app`):
+Chess Alokas has two areas under one Supabase Auth account. People open straight into theirs, with no switcher across the top. See "Who opens where" below.
 
 | Workspace | Target Audience | Scope & Access Model |
 |-----------|-----------------|----------------------|
 | **Player & Family Portal (`/player`)** | Players, parents, and academy students (B2C) | **Global across the platform** — instant free signup, no admin approval required. One account manages a `Self` primary profile plus multiple `Child`, `Student`, or `Family` sub-profiles. |
 | **Organizer Desk (`/app`)** | Tournament directors, chess clubs, schools, and academies (B2B) | **Tenant-scoped via `organizations` & `organization_members`**. Starts immediately in **Sandbox Trial** mode (`1` active tournament, up to `24` players) until verified by a Platform Admin. |
+
+### Who opens where
+
+The rules are in `apps/web/src/auth/workspace.ts`, with tests beside them.
+
+| Who | Means | Opens on | Account menu offers |
+|---|---|---|---|
+| Player | No organization and an `account_role` of `participant` | `/player` | Run a tournament, which opens the organization form on `/app?setup=organization` |
+| Organizer | Any membership, or `account_role` of `organizer` or `both` | `/app` | Nothing extra |
+| Arbiter-only | Every membership is `arbiter` | `/team`, for Floor duty | Nothing extra |
+| Both | An organizer with at least one player profile | `/app`, or `/player` if that was their last choice on this device | Switch to player view, or Switch to organizer view |
+
+- **"Both" needs a player profile.** `account_role = 'both'` can't decide it: the database sets it on anyone who creates an organization, because every account starts as `participant`.
+- **Desktop** is organizer tools only. `/player` redirects to `/app`, and nobody sees a switch.
+- **A return path wins** over all of this after sign-in.
+- **Every URL still works.** `/app` is the one exception to staying put: a known player goes on to `/player`, before the desk's code downloads. An organizer can still open `/player` by its URL, and gets a link back to the desk.
+- **Offline**: the device keeps its last answer in `localStorage`, keyed by user, so a known organizer's desk opens at once and checks in the background. With no answer at all the desk opens, because it's the side that works offline. Landing waits at most 5 seconds.
+- **Public pages** such as `/discover` show the account menu with plain links (My desk, My player page) and no switch.
 
 ---
 
@@ -52,7 +70,7 @@ Chess Alokas supports two complementary workspaces under a single unified Supaba
 
 ## 3. B2B Sandbox Trial & Admin Approval Lifecycle
 
-1. **Organizer Signup (`/signup` → `♕ Organizer / Academy`)**:
+1. **Organizer Signup (`/signup?role=organizer`, or Run tournaments on `/signup`)**:
    - Collects Director Name, Organization/Academy Name, City/State, and Contact Phone/WhatsApp.
    - Calls `POST /organizations`, creating the organization in `trial` / `pending_review` mode (`maxTournamentsQuota = 1`, `maxPlayersPerTournament = 24`).
 2. **Sandbox Trial Quota Enforcement**:
@@ -178,6 +196,7 @@ Web shows the profile notice where `guardianConsentRequired` says so: a child, o
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
+| `GET` | `/me` | `requireAuth` | The signed-in account, including `accountRole`. The browser can't read `profiles.account_role` itself: its grant on `profiles` is by column |
 | `GET` | `/organizations` | `requireAuth` | List organizations where the signed-in user is owner or member |
 | `POST` | `/organizations` | `requireAuth` | Create a new organization in Sandbox Trial mode (`trial` / `pending_review`) |
 | `PATCH` | `/organizations/:id` | `requireAuth` (owner/admin) | Update organization contact details, location, or payment instructions |
