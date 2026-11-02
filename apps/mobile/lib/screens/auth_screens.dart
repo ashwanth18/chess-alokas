@@ -660,7 +660,7 @@ class _AuthPageState extends State<AuthPage> {
   }
 
   List<Widget> _signInBody() => [
-    _heading('Welcome back', 'Sign in to follow your games and players.'),
+    _heading('Welcome back', 'Sign in to follow your games and registrations.'),
     _emailField(last: false),
     const SizedBox(height: 16),
     _passwordField(isNew: false, onDone: _submitSignIn),
@@ -693,7 +693,7 @@ class _AuthPageState extends State<AuthPage> {
     return [
       _heading(
         'Create your account',
-        'Register players, follow your games and keep your certificates.',
+        'Register for events, follow your games and keep your certificates.',
       ),
       _emailField(last: false),
       const SizedBox(height: 16),

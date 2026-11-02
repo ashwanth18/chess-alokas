@@ -234,7 +234,7 @@ class ProfilesScreen extends StatelessWidget {
             const MessageCard(
               title: 'No player profiles yet',
               message:
-                  'Add yourself, or a child you look after, to register for events.',
+                  'Add your player profile to register for events. You can add a child too.',
             )
           else ...[
             if (profilesError != null)

@@ -253,8 +253,8 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         key: const Key('session-ended'),
         title: const Text('Please sign in again'),
         content: const Text(
-          'Your sign-in on this phone has ended. Sign in to see your players '
-          'and matches.',
+          'Your sign-in on this phone has ended. Sign in again to see your '
+          'matches and registrations.',
         ),
         actions: [
           TextButton(
@@ -987,13 +987,13 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
       _careerTab => (
         Icons.workspace_premium_outlined,
         'Your chess record',
-        'Ratings, results and certificates for every player you look after.',
+        'Your ratings, results and certificates, kept in one place.',
       ),
       _ => (
         Icons.person_outline,
         'Your account',
-        'Add your players, register for events and keep track of entries and '
-            'receipts.',
+        'Set up your player profile, register for events and keep track of '
+            'your entries and receipts.',
       ),
     };
     return LockedTab(
