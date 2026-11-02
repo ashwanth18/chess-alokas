@@ -12,6 +12,10 @@
     "build:desktop": "pnpm --filter @chess-alokas/web run build:desktop && pnpm --filter @chess-alokas/api run build:desktop && pnpm --filter @chess-alokas/desktop run dist",
     "fetch:bbp": "node scripts/fetch-bbp-pairings.mjs",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "demo:seed": "pnpm --filter @chess-alokas/api run demo seed",
+    "demo:reset": "pnpm --filter @chess-alokas/api run demo reset",
+    "demo:delete": "pnpm --filter @chess-alokas/api run demo delete",
+    "demo:list": "pnpm --filter @chess-alokas/api run demo list"
   }
 }

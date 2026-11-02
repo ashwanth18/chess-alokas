@@ -13,6 +13,7 @@ export {
   readTemplatePageSize,
 } from './stamp.js';
 export { generateCertificateBatch } from './batch.js';
+export { buildDemoCertificateTemplate } from './sampleTemplate.js';
 export type { BatchPerson, BatchResult } from './batch.js';
 export {
   participantToRow,

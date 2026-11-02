@@ -10,7 +10,8 @@
     "build:desktop": "node scripts/bundle-desktop.mjs",
     "start": "node --env-file=.env dist/index.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx src/demo/cli.ts"
   },
   "dependencies": {
     "@chess-alokas/certificates": "workspace:*",
