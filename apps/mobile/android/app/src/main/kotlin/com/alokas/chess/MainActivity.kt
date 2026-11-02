@@ -1,4 +1,4 @@
-package com.chessalokas.chess_alokas_mobile
+package com.alokas.chess
 
 import io.flutter.embedding.android.FlutterActivity
 

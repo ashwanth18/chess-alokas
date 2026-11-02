@@ -2,4 +2,6 @@
 <resources>
     <!-- Same as forestPaper, so the app never flashes white on launch. -->
     <color name="launch_forest">#071F17</color>
+    <!-- The crown icon's background, from docs/design/logo. -->
+    <color name="ic_launcher_background">#0F3D2E</color>
 </resources>

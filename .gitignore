@@ -17,3 +17,8 @@ vendor/bbp-pairings/**/*.zip
 vendor/bbp-pairings/**/*.tar.gz
 !vendor/bbp-pairings/README.md
 .~lock.*
+
+# Signing keys never belong in the repo
+*.jks
+*.keystore
+key.properties
