@@ -93,6 +93,8 @@ export interface EmailSendQuota {
   allowed: boolean;
   used: number;
   limit: number;
+  /** Set when allowed: hand it to releaseEmailSends to give back sends that never went out. */
+  reservationId?: string;
 }
 
 export interface SyncPullResult {
@@ -393,6 +395,8 @@ export interface Store {
   reserveEmailSends(input: EmailSendReservation): Promise<EmailSendQuota>;
   /** Sends counted in the rolling 24 hours, without reserving any. For showing what's left. */
   emailSendsUsed(scopeKey: string, kind: 'test' | 'bulk'): Promise<number>;
+  /** Gives back up to `count` sends from one reservation, for mail that never reached the provider. */
+  releaseEmailSends(reservationId: string, count: number): Promise<void>;
 
   // Floor Chief Arbiter Alerts (Phase 3)
   createFloorAlert(alert: FloorAlert): Promise<FloorAlert>;
@@ -676,6 +680,7 @@ export class MemoryStore implements Store {
   private participants = new StampedMap<Participant>();
   private games = new StampedMap<Game>();
   private emailSends: Array<{
+    id: string;
     scopeKey: string;
     kind: 'test' | 'bulk';
     count: number;
@@ -2779,13 +2784,23 @@ export class MemoryStore implements Store {
     if (used + input.count > input.limit) {
       return { allowed: false, used, limit: input.limit };
     }
+    const id = crypto.randomUUID();
     this.emailSends.push({
+      id,
       scopeKey: input.scopeKey,
       kind: input.kind,
       count: input.count,
       at: Date.now(),
     });
-    return { allowed: true, used: used + input.count, limit: input.limit };
+    return { allowed: true, used: used + input.count, limit: input.limit, reservationId: id };
+  }
+
+  async releaseEmailSends(reservationId: string, count: number): Promise<void> {
+    if (count <= 0) return;
+    const entry = this.emailSends.find((e) => e.id === reservationId);
+    if (!entry) return;
+    entry.count -= Math.min(count, entry.count);
+    if (entry.count === 0) this.emailSends = this.emailSends.filter((e) => e !== entry);
   }
 
   // ---- Floor Chief Arbiter Alerts (Phase 3) ----
@@ -6467,12 +6482,25 @@ export class PostgresStore implements Store {
       if (used + input.count > input.limit) {
         return { allowed: false, used, limit: input.limit };
       }
-      await s`
+      const [inserted] = await s<{ id: string }[]>`
         INSERT INTO email_sends (scope_key, kind, tournament_id, user_id, recipient_count)
         VALUES (${input.scopeKey}, ${input.kind}, ${input.tournamentId ?? null},
                 ${input.userId ?? null}, ${input.count})
+        RETURNING id
       `;
-      return { allowed: true, used: used + input.count, limit: input.limit };
+      return { allowed: true, used: used + input.count, limit: input.limit, reservationId: inserted!.id };
+    });
+  }
+
+  async releaseEmailSends(reservationId: string, count: number): Promise<void> {
+    if (count <= 0) return;
+    // recipient_count must stay above zero, so a full release removes the row.
+    await this.sql.begin(async (s) => {
+      await s`DELETE FROM email_sends WHERE id = ${reservationId} AND recipient_count <= ${count}`;
+      await s`
+        UPDATE email_sends SET recipient_count = recipient_count - ${count}
+        WHERE id = ${reservationId} AND recipient_count > ${count}
+      `;
     });
   }
 

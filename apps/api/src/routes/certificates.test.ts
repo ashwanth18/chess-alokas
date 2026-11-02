@@ -284,6 +284,147 @@ describe.each(TEST_STORES)('certificate bulk email: %s', (_name, makeBackend) =>
     expect(quota.emailConfigured).toBe(false);
   });
 
+  /** A fresh organization, so these don't share a day's cap with the tests above. */
+  let fresh: { user: string; tid: string };
+  const freshList = async () =>
+    (await t.call(fresh.user, 'GET', `/tournaments/${fresh.tid}/certificates`)).body.issues as Array<{ id: string; status: string }>;
+  const freshIssue = (people: Array<[string, string | null]>) => issue(fresh.tid, people, fresh.user);
+  const freshEmail = (body: unknown) => email(fresh.tid, fresh.user, body);
+  const used = async () =>
+    (await t.call(fresh.user, 'GET', `/tournaments/${fresh.tid}/certificates/email-quota`)).body.used as number;
+
+  describe('on a fresh organization', () => {
+  beforeAll(async () => {
+    const user = await t.newUser();
+    const org = await t.verifiedOrg(user);
+    fresh = { user, tid: (await t.seedTournament(user, org.id)).id };
+  });
+
+  describe('double sends', () => {
+    it('two sends of the same certificates at once (two tabs, a double click) send each one once', async () => {
+      const ids = await freshIssue([
+        ['Goh En Passant', 'goh.twice@example.invalid'],
+        ['Teoh Rook Lift', 'teoh.twice@example.invalid'],
+        ['Yap Pin Yi', 'yap.twice@example.invalid'],
+      ]);
+      // A slow mail service, so both requests are in flight together.
+      const slow = vi.fn(async (_url: string, init: { body: string }) => {
+        await new Promise((r) => setTimeout(r, 30));
+        sent.push({ to: JSON.parse(init.body).to[0], subject: '' });
+        return new Response('{}', { status: 200 });
+      });
+      vi.stubGlobal('fetch', slow);
+      const [a, b] = await Promise.all([
+        freshEmail({ issueIds: ids }),
+        freshEmail({ issueIds: ids }),
+      ]);
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      expect(a.body.sent + b.body.sent).toBe(3);
+      expect(sent.map((s) => s.to).sort()).toEqual([
+        'goh.twice@example.invalid',
+        'teoh.twice@example.invalid',
+        'yap.twice@example.invalid',
+      ]);
+      const skippedReasons = [...a.body.results, ...b.body.results]
+        .filter((r: { status: string }) => r.status === 'skipped')
+        .map((r: { error: string }) => r.error);
+      expect(skippedReasons).toHaveLength(3);
+      for (const reason of skippedReasons) expect(['Already being sent from another tab', 'Already sent']).toContain(reason);
+      expect((await freshList()).filter((i) => ids.includes(i.id)).every((i) => i.status === 'emailed')).toBe(true);
+    });
+
+    it('two resends at once still send once', async () => {
+      const [id] = await freshIssue([['Lee Skewer Xuan', 'lee.twice@example.invalid']]);
+      await freshEmail({ issueIds: [id] });
+      sent = [];
+      const [a, b] = await Promise.all([
+        freshEmail({ issueIds: [id], resend: true }),
+        freshEmail({ issueIds: [id], resend: true }),
+      ]);
+      expect(a.body.sent + b.body.sent).toBe(1);
+      expect(sent).toHaveLength(1);
+    });
+
+    it('a send that dies mid-way leaves nothing claimed, so the next one can go', async () => {
+      const [id] = await freshIssue([['Chong Rook Hao', 'chong.offline@example.invalid']]);
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      }));
+      const res = await freshEmail({ issueIds: [id] });
+      expect(res.body.results[0]).toMatchObject({ status: 'failed', error: "Couldn't reach the mail service" });
+      expect((await freshList()).find((i) => i.id === id)!.status).toBe('failed');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+      expect((await freshEmail({ issueIds: [id] })).body.sent).toBe(1);
+    });
+  });
+
+  describe('the daily cap counts only mail that reached Resend', () => {
+    it('no Resend key: nothing reached it, nothing counted', async () => {
+      const [id] = await freshIssue([['Ng Pawn Mei', 'ng.nokey@example.invalid']]);
+      delete process.env['RESEND_API_KEY'];
+      const before = await used();
+      const res = await freshEmail({ issueIds: [id] });
+      expect(res.body).toMatchObject({ sent: 0, failed: 1 });
+      expect(await used()).toBe(before);
+    });
+
+    it('could not reach the mail service: not counted', async () => {
+      const [id] = await freshIssue([['Lim Gambit Ling', 'lim.offline@example.invalid']]);
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      }));
+      const before = await used();
+      await freshEmail({ issueIds: [id] });
+      expect(await used()).toBe(before);
+    });
+
+    it('Resend refused it: that did reach Resend, so it counts; the sent ones count too', async () => {
+      const ids = await freshIssue([
+        ['Arjun Pirc', 'arjun.counted@example.invalid'],
+        ['Priya Benoni', 'priya.bounce@example.invalid'],
+      ]);
+      bounce.add('priya.bounce@example.invalid');
+      const before = await used();
+      const res = await freshEmail({ issueIds: ids });
+      expect(res.body).toMatchObject({ sent: 1, failed: 1 });
+      expect(await used()).toBe(before + 2);
+    });
+
+    it('a mix: only the ones that reached Resend count', async () => {
+      const ids = await freshIssue([
+        ['Vikram Tempo', 'vikram.mix@example.invalid'],
+        ['Siti Bishopah', 'siti.mix@example.invalid'],
+      ]);
+      // The first goes through; the mail service vanishes before the second.
+      let calls = 0;
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        calls += 1;
+        if (calls > 1) throw new TypeError('fetch failed');
+        return new Response('{}', { status: 200 });
+      }));
+      const before = await used();
+      const res = await freshEmail({ issueIds: ids });
+      expect(res.body).toMatchObject({ sent: 1, failed: 1 });
+      expect(await used()).toBe(before + 1);
+      expect(res.body.quota.used).toBe(before + 1);
+    });
+
+    it('a send the cap refuses puts its claims back, so they can still be sent', async () => {
+      const unverifiedish = await t.newUser();
+      const smallOrg = await t.verifiedOrg(unverifiedish);
+      const tid = (await t.seedTournament(unverifiedish, smallOrg.id)).id;
+      const [id] = await issue(tid, [['Wan Rookiah', 'wan.cap@example.invalid']], unverifiedish);
+      await backend.store.reserveEmailSends({ kind: 'bulk', scopeKey: `org:${smallOrg.id}`, count: 2000, limit: 2000 });
+      const refused = await email(tid, unverifiedish, { issueIds: [id] });
+      expect(refused.status).toBe(429);
+      const issues = (await t.call(unverifiedish, 'GET', `/tournaments/${tid}/certificates`)).body.issues;
+      expect(issues[0].status).toBe('stored');
+    });
+  });
+
+  });
+
   it('a typo in one address doesn\'t fail the whole issue batch', async () => {
     const ids = await issue(otherTournamentId, [
       ['Ng Pawn Mei', 'ng.pawn@example'],

@@ -548,34 +548,66 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
         };
       }
 
+      const allowance = await bulkAllowance(tournament, request.userId);
+      if (allowance.kind === 'refused') {
+        return reply.code(403).send({ error: allowance.reason });
+      }
+
+      // Claim before counting: a certificate another tab or a double click is already sending is
+      // skipped here, and never counted or sent twice.
+      const claimedIds = new Set(
+        await certStore.claimForSending(
+          tournamentId,
+          sendable.map((s) => s.issue.id),
+          { resend: Boolean(parsed.data.resend) },
+        ),
+      );
+      const claimed = sendable.filter((s) => claimedIds.has(s.issue.id));
+      for (const { issue, email } of sendable) {
+        if (!claimedIds.has(issue.id)) {
+          skipped.push({
+            id: issue.id,
+            name: issue.recipientName,
+            email,
+            status: 'skipped',
+            error: 'Already being sent from another tab',
+          });
+        }
+      }
+      /** Puts a claim back as it was, for a send that stops before it starts. */
+      const unclaim = (issue: (typeof selected)[number]) =>
+        certStore.updateIssueStatus(issue.id, {
+          status: issue.status === 'pending' ? 'failed' : issue.status,
+          error: issue.status === 'pending' ? 'An earlier send was interrupted' : (issue.error ?? null),
+        });
+
       let quota: { limit: number | null; used: number; remaining: number | null } = {
         limit: null,
         used: 0,
         remaining: null,
       };
-      const allowance = await bulkAllowance(tournament, request.userId);
-      if (allowance.kind === 'refused') {
-        return reply.code(403).send({ error: allowance.reason });
-      }
+      let reservationId: string | null = null;
       if (allowance.kind === 'capped') {
-        if (sendable.length > 0) {
+        if (claimed.length > 0) {
           const cap = await tournamentStore.reserveEmailSends({
             kind: 'bulk',
             scopeKey: allowance.scopeKey,
-            count: sendable.length,
+            count: claimed.length,
             limit: allowance.limit,
             tournamentId,
             userId: request.userId ?? null,
           });
           if (!cap.allowed) {
+            await Promise.all(claimed.map(({ issue }) => unclaim(issue)));
             const left = Math.max(0, cap.limit - cap.used);
             return reply.code(429).send({
-              error: `Only ${left} of today's ${cap.limit} certificate emails are left, and this send needs ${sendable.length}. Nothing was sent. Untick some, or send the rest tomorrow.`,
+              error: `Only ${left} of today's ${cap.limit} certificate emails are left, and this send needs ${claimed.length}. Nothing was sent. Untick some, or send the rest tomorrow.`,
               limit: cap.limit,
               used: cap.used,
               remaining: left,
             });
           }
+          reservationId = cap.reservationId ?? null;
           quota = { limit: cap.limit, used: cap.used, remaining: Math.max(0, cap.limit - cap.used) };
         } else {
           const used = await tournamentStore.emailSendsUsed(allowance.scopeKey, 'bulk');
@@ -588,47 +620,76 @@ export const certificatesPlugin: FastifyPluginAsync<PluginOptions> = async (app,
       const bodyTpl = parsed.data.body || tournament.certEmailBody || DEFAULT_CERT_EMAIL_BODY;
 
       const sent: Result[] = [];
-      const fail = async (issue: { id: string; recipientName: string }, email: string, error: string) => {
+      const finished = new Set<string>();
+      /** Sends that failed before reaching Resend: given back to the day's cap at the end. */
+      let neverReached = 0;
+      const fail = async (
+        issue: { id: string; recipientName: string },
+        email: string,
+        error: string,
+        reached: boolean,
+      ) => {
+        if (!reached) neverReached += 1;
         await certStore.updateIssueStatus(issue.id, { status: 'failed', error });
+        finished.add(issue.id);
         sent.push({ id: issue.id, name: issue.recipientName, email, status: 'failed', error });
       };
 
-      for (const { issue, email } of sendable) {
-        const pdf = await readCertificatePdf(issue.storagePath);
-        if (!pdf) {
-          await fail(issue, email, 'The certificate file is missing. Issue it again.');
-          continue;
-        }
-        if (pdf.byteLength > MAX_EMAIL_PDF_BYTES) {
-          await fail(issue, email, 'PDF is too large to email (over 8 MB)');
-          continue;
-        }
+      try {
+        for (const { issue, email } of claimed) {
+          const pdf = await readCertificatePdf(issue.storagePath);
+          if (!pdf) {
+            await fail(issue, email, 'The certificate file is missing. Issue it again.', false);
+            continue;
+          }
+          if (pdf.byteLength > MAX_EMAIL_PDF_BYTES) {
+            await fail(issue, email, 'PDF is too large to email (over 8 MB)', false);
+            continue;
+          }
 
-        const vars = emailVars({
-          playerName: issue.recipientName,
-          tournament: tournament.name,
-          type: issue.type,
-          serial: issue.serial,
-        });
-        const send = await sendResendEmail({
-          to: email,
-          subject: renderCertTemplate(subjectTpl, vars),
-          html: certBodyToHtml(renderCertTemplate(bodyTpl, vars)),
-          pdf,
-          fileName: `${issue.recipientName.replace(/[^\w.\-]+/g, '_')}.pdf`,
-          requirePdf: true,
-        });
-
-        if (send.ok) {
-          // This is what "Already sent" on the review screen reads back.
-          await certStore.updateIssueStatus(issue.id, {
-            status: 'emailed',
-            emailedAt: new Date().toISOString(),
-            error: null,
+          const vars = emailVars({
+            playerName: issue.recipientName,
+            tournament: tournament.name,
+            type: issue.type,
+            serial: issue.serial,
           });
-          sent.push({ id: issue.id, name: issue.recipientName, email, status: 'emailed' });
-        } else {
-          await fail(issue, email, send.error);
+          const send = await sendResendEmail({
+            to: email,
+            subject: renderCertTemplate(subjectTpl, vars),
+            html: certBodyToHtml(renderCertTemplate(bodyTpl, vars)),
+            pdf,
+            fileName: `${issue.recipientName.replace(/[^\w.\-]+/g, '_')}.pdf`,
+            requirePdf: true,
+          });
+
+          if (send.ok) {
+            // This is what "Already sent" on the review screen reads back.
+            await certStore.updateIssueStatus(issue.id, {
+              status: 'emailed',
+              emailedAt: new Date().toISOString(),
+              error: null,
+            });
+            finished.add(issue.id);
+            sent.push({ id: issue.id, name: issue.recipientName, email, status: 'emailed' });
+          } else {
+            await fail(issue, email, send.error, send.reached);
+          }
+        }
+      } finally {
+        // Something threw part way: release what wasn't finished, so nothing stays claimed.
+        for (const { issue } of claimed) {
+          if (!finished.has(issue.id)) {
+            neverReached += 1;
+            await certStore
+              .updateIssueStatus(issue.id, { status: 'failed', error: 'Sending was interrupted' })
+              .catch(() => undefined);
+          }
+        }
+        if (reservationId && neverReached > 0) {
+          await tournamentStore.releaseEmailSends(reservationId, neverReached).catch(() => undefined);
+          if (quota.remaining !== null) {
+            quota = { ...quota, used: quota.used - neverReached, remaining: quota.remaining + neverReached };
+          }
         }
       }
 

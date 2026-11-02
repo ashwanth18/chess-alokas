@@ -69,6 +69,9 @@ function rowToIssue(row: IssueRow): CertificateIssue {
   };
 }
 
+/** A claim older than this was left by a send that never finished, and may be taken again. */
+export const SEND_CLAIM_STALE_MS = 10 * 60 * 1000;
+
 export interface CertificateIssueStore {
   createIssue(input: CertificateIssueInput): Promise<CertificateIssue>;
   listIssues(tournamentId: string): Promise<CertificateIssue[]>;
@@ -81,10 +84,38 @@ export interface CertificateIssueStore {
       error?: string | null;
     },
   ): Promise<CertificateIssue | null>;
+  /**
+   * Claims certificates for sending, atomically: only one request can claim each, so two tabs or a
+   * double click can't send one twice. Claims stored and failed ones; already-emailed ones and
+   * abandoned claims only with `resend`. Returns the ids this call claimed. Any final status from
+   * updateIssueStatus releases the claim.
+   */
+  claimForSending(tournamentId: string, ids: string[], opts: { resend: boolean }): Promise<string[]>;
 }
 
 export class MemoryCertificateIssueStore implements CertificateIssueStore {
   private issues = new Map<string, CertificateIssue>();
+  private claimedAt = new Map<string, number>();
+
+  async claimForSending(tournamentId: string, ids: string[], opts: { resend: boolean }): Promise<string[]> {
+    // One synchronous pass: nothing else runs between the check and the set.
+    const claimed: string[] = [];
+    for (const id of ids) {
+      const issue = this.issues.get(id);
+      if (!issue || issue.tournamentId !== tournamentId) continue;
+      const at = this.claimedAt.get(id);
+      const abandoned = issue.status === 'pending' && at !== undefined && Date.now() - at > SEND_CLAIM_STALE_MS;
+      const free =
+        issue.status === 'stored' ||
+        issue.status === 'failed' ||
+        (opts.resend && (issue.status === 'emailed' || abandoned));
+      if (!free) continue;
+      this.issues.set(id, { ...issue, status: 'pending' });
+      this.claimedAt.set(id, Date.now());
+      claimed.push(id);
+    }
+    return claimed;
+  }
 
   async createIssue(input: CertificateIssueInput): Promise<CertificateIssue> {
     const issue: CertificateIssue = {
@@ -129,6 +160,7 @@ export class MemoryCertificateIssueStore implements CertificateIssueStore {
   ): Promise<CertificateIssue | null> {
     const existing = this.issues.get(id);
     if (!existing) return null;
+    this.claimedAt.delete(id);
     const next: CertificateIssue = {
       ...existing,
       status: patch.status,
@@ -185,12 +217,35 @@ export class PostgresCertificateIssueStore implements CertificateIssueStore {
       UPDATE certificate_issues SET
         status = ${patch.status},
         emailed_at = COALESCE(${patch.emailedAt ?? null}, emailed_at),
-        error = ${patch.error ?? null}
+        error = ${patch.error ?? null},
+        send_claimed_at = NULL
       WHERE id = ${id}
       RETURNING *
     `;
     const row = rows[0];
     return row ? rowToIssue(row) : null;
+  }
+
+  async claimForSending(tournamentId: string, ids: string[], opts: { resend: boolean }): Promise<string[]> {
+    if (ids.length === 0) return [];
+    // One UPDATE in its own transaction: Postgres locks each row it changes, so a second request
+    // waits, then sees 'pending' and claims nothing.
+    const staleSeconds = SEND_CLAIM_STALE_MS / 1000;
+    const rows = await this.sql.begin(
+      (s) => s<{ id: string }[]>`
+        UPDATE certificate_issues SET status = 'pending', send_claimed_at = now()
+        WHERE tournament_id = ${tournamentId}
+          AND id IN ${s(ids)}
+          AND (
+            status IN ('stored', 'failed')
+            OR (${opts.resend} AND status = 'emailed')
+            OR (${opts.resend} AND status = 'pending' AND send_claimed_at IS NOT NULL
+                AND send_claimed_at < now() - make_interval(secs => ${staleSeconds}))
+          )
+        RETURNING id
+      `,
+    );
+    return rows.map((r) => r.id);
   }
 }
 
