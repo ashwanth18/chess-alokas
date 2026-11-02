@@ -54,21 +54,28 @@ class AlokasApiClient {
   // ---- Auth ----
 
   /// Loads a saved session at startup. Without one the app is simply signed out.
-  Future<void> restoreSession() async {
-    if (!auth.isConfigured) return;
+  /// [onRead] runs once the saved session is known, before any refresh, so the
+  /// app can open with no signal.
+  Future<void> restoreSession({void Function()? onRead}) async {
+    if (!auth.isConfigured) {
+      onRead?.call();
+      return;
+    }
     String? stored;
     try {
       stored = await _storage.read();
     } on Object {
+      onRead?.call();
       return;
     }
-    if (stored == null) return;
-    final saved = AuthSession.tryDecode(stored);
+    final saved = stored == null ? null : AuthSession.tryDecode(stored);
     if (saved == null) {
-      await _setSession(null);
+      if (stored != null) await _setSession(null);
+      onRead?.call();
       return;
     }
     session.value = saved;
+    onRead?.call();
     if (_isExpiring(saved)) await _refresh();
   }
 

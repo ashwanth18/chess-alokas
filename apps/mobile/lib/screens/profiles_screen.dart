@@ -5,14 +5,13 @@ import '../services/alokas_api.dart';
 import '../services/file_gateway.dart';
 import '../theme/alokas_theme.dart';
 import '../widgets/legal.dart';
+import '../widgets/locked_tab.dart';
 import '../widgets/message_card.dart';
 import '../widgets/player_name.dart';
 
+/// The Account tab for someone signed in. Guests see a locked tab instead.
 class ProfilesScreen extends StatelessWidget {
-  final bool isAuthConfigured;
-
-  /// Null means signed out.
-  final String? signedInEmail;
+  final String signedInEmail;
   final List<MobilePlayerProfile> profiles;
   final bool profilesLoading;
   final String? profilesError;
@@ -30,12 +29,6 @@ class ProfilesScreen extends StatelessWidget {
   final Future<ApiResult<void>> Function(String id) onDeleteProfile;
   final Future<ApiResult<int>> Function(MobilePlayerProfile profile)
   onClaimPastTournaments;
-  final Future<ApiResult<AuthSession>> Function(String email, String password)
-  onSignIn;
-  final Future<ApiResult<SignUpOutcome>> Function(String email, String password)
-  onSignUp;
-  final Future<ApiResult<void>> Function(String email) onResendConfirmation;
-  final Future<ApiResult<void>> Function(String email) onRequestPasswordReset;
   final Future<void> Function() onSignOut;
   final Future<ApiResult<void>> Function() onDeleteAccount;
   final AlokasThemeChoice themeChoice;
@@ -53,7 +46,6 @@ class ProfilesScreen extends StatelessWidget {
 
   const ProfilesScreen({
     super.key,
-    required this.isAuthConfigured,
     required this.signedInEmail,
     required this.profiles,
     required this.profilesLoading,
@@ -65,10 +57,6 @@ class ProfilesScreen extends StatelessWidget {
     required this.onUpdateProfile,
     required this.onDeleteProfile,
     required this.onClaimPastTournaments,
-    required this.onSignIn,
-    required this.onSignUp,
-    required this.onResendConfirmation,
-    required this.onRequestPasswordReset,
     required this.onSignOut,
     required this.onDeleteAccount,
     required this.themeChoice,
@@ -78,8 +66,6 @@ class ProfilesScreen extends StatelessWidget {
     required this.receiptPicker,
     required this.onUploadReceipt,
   });
-
-  bool get _signedIn => signedInEmail != null;
 
   void _say(BuildContext context, String text) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -165,23 +151,9 @@ class ProfilesScreen extends StatelessWidget {
     showDialog<void>(
       context: context,
       builder: (_) => _DeleteAccountDialog(
-        email: signedInEmail ?? '',
+        email: signedInEmail,
         onDelete: onDeleteAccount,
         onDeleted: () => _say(context, 'Your account was deleted.'),
-      ),
-    );
-  }
-
-  void _openSignInSheet(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _AuthSheet(
-        isAuthConfigured: isAuthConfigured,
-        onSignIn: onSignIn,
-        onSignUp: onSignUp,
-        onResendConfirmation: onResendConfirmation,
-        onRequestPasswordReset: onRequestPasswordReset,
       ),
     );
   }
@@ -215,25 +187,23 @@ class ProfilesScreen extends StatelessWidget {
     }
   }
 
+  /// The account's own name: the player profile marked as the person
+  /// themselves, if there is one.
+  String? get _ownName {
+    final own = profiles.where((x) => x.relationship == 'self');
+    return own.isEmpty ? null : own.first.fullName;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final list = ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-      children: [
-        _buildAccount(context),
-        const SizedBox(height: 16),
-        _buildTheme(context),
-        const SizedBox(height: 24),
-        if (!_signedIn)
-          MessageCard(
-            title: 'Sign in to manage player profiles',
-            message: isAuthConfigured
-                ? 'You can browse events without an account. Registering a player and managing profiles need sign-in.'
-                : notConfiguredMessage,
-            actionLabel: isAuthConfigured ? 'Sign In' : null,
-            onAction: isAuthConfigured ? () => _openSignInSheet(context) : null,
-          )
-        else ...[
+    final p = context.pal;
+    return RefreshIndicator(
+      onRefresh: onRetryProfiles,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
+        children: [
+          _buildAccount(context),
+          const SizedBox(height: 24),
           ..._buildRegistrations(context),
           SheetHeading(
             profiles.isEmpty && (profilesError != null || profilesLoading)
@@ -275,89 +245,78 @@ class ProfilesScreen extends StatelessWidget {
               ),
             for (final profile in profiles) _buildProfile(context, profile),
           ],
-        ],
-        const SizedBox(height: 16),
-        const Wrap(
-          spacing: 8,
-          children: [
-            LegalLink('Privacy Policy', privacyUrl),
-            LegalLink('Terms', termsUrl),
-          ],
-        ),
-        if (_signedIn)
-          TextButton(
-            key: const Key('open-delete-account'),
-            style: TextButton.styleFrom(foregroundColor: context.pal.flag),
-            onPressed: () => _openDeleteAccount(context),
-            child: const Text('Delete my account'),
+          const SizedBox(height: 24),
+          const SheetHeading('Settings'),
+          ThemePicker(choice: themeChoice, onChanged: onThemeChanged),
+          const SizedBox(height: 16),
+          const LegalLinks(),
+          const SizedBox(height: 24),
+          Divider(color: p.rule),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            key: const Key('sign-out-button'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+            ),
+            onPressed: onSignOut,
+            icon: const Icon(Icons.logout),
+            label: const Text('Sign out'),
           ),
-      ],
-    );
-    if (!_signedIn) return list;
-    return RefreshIndicator(onRefresh: onRetryProfiles, child: list);
-  }
-
-  Widget _buildAccount(BuildContext context) {
-    final p = context.pal;
-    return BrandCard(
-      strong: true,
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AlokasBadge(
-                  text: _signedIn ? 'Signed in' : 'Not signed in',
-                  tone: _signedIn ? ChipTone.go : ChipTone.wait,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  signedInEmail ?? 'Browsing events only',
-                  style: atype(16, weight: 700, color: p.ink, height: 1.25),
-                ),
-              ],
+          const SizedBox(height: 8),
+          Center(
+            child: TextButton(
+              key: const Key('open-delete-account'),
+              style: TextButton.styleFrom(foregroundColor: p.flag),
+              onPressed: () => _openDeleteAccount(context),
+              child: const Text('Delete my account'),
             ),
           ),
-          const SizedBox(width: 8),
-          if (_signedIn)
-            OutlinedButton(
-              key: const Key('sign-out-button'),
-              onPressed: onSignOut,
-              child: const Text('Sign Out'),
-            )
-          else
-            ElevatedButton(
-              key: const Key('open-sign-in-button'),
-              onPressed: () => _openSignInSheet(context),
-              child: const Text('Sign In'),
-            ),
         ],
       ),
     );
   }
 
-  Widget _buildTheme(BuildContext context) {
+  Widget _buildAccount(BuildContext context) {
     final p = context.pal;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Display', style: atype(14, weight: 600, color: p.accent)),
-        const SizedBox(height: 4),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final choice in AlokasThemeChoice.values)
-              ChoiceBox.text(
-                key: Key('theme-${choice.name}'),
-                label: choice.label,
-                selected: themeChoice == choice,
-                onTap: () => onThemeChanged(choice),
-              ),
-          ],
-        ),
-      ],
+    final name = _ownName;
+    final initial = (name ?? signedInEmail).trim();
+    return BrandCard(
+      key: const Key('account-header'),
+      strong: true,
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle),
+            child: Text(
+              initial.isEmpty ? '?' : initial.substring(0, 1).toUpperCase(),
+              style: atype(22, weight: 800, color: p.onAccent),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (name != null)
+                  PlayerName(name, size: 18, weight: 800, color: p.ink),
+                Text(
+                  signedInEmail,
+                  key: const Key('account-email'),
+                  style: atype(
+                    name == null ? 17 : 15,
+                    weight: name == null ? 700 : 400,
+                    color: name == null ? p.ink : p.ink2,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -615,396 +574,6 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
           child: Text(_busy ? 'Deleting...' : 'Delete account'),
         ),
       ],
-    );
-  }
-}
-
-enum _AuthMode { signIn, signUp, reset, checkEmail, resetSent }
-
-/// Email sign-in, creating an account, the confirmation-email state, and asking
-/// for a password reset. Everything goes through callbacks to the auth service.
-class _AuthSheet extends StatefulWidget {
-  final bool isAuthConfigured;
-  final Future<ApiResult<AuthSession>> Function(String email, String password)
-  onSignIn;
-  final Future<ApiResult<SignUpOutcome>> Function(String email, String password)
-  onSignUp;
-  final Future<ApiResult<void>> Function(String email) onResendConfirmation;
-  final Future<ApiResult<void>> Function(String email) onRequestPasswordReset;
-
-  const _AuthSheet({
-    required this.isAuthConfigured,
-    required this.onSignIn,
-    required this.onSignUp,
-    required this.onResendConfirmation,
-    required this.onRequestPasswordReset,
-  });
-
-  @override
-  State<_AuthSheet> createState() => _AuthSheetState();
-}
-
-class _AuthSheetState extends State<_AuthSheet> {
-  static const int minPasswordLength = 8;
-
-  final TextEditingController _email = TextEditingController();
-  final TextEditingController _password = TextEditingController();
-  _AuthMode _mode = _AuthMode.signIn;
-  bool _busy = false;
-  String? _error;
-  String? _notice;
-  bool _unconfirmed = false;
-
-  @override
-  void dispose() {
-    _email.dispose();
-    _password.dispose();
-    super.dispose();
-  }
-
-  void _switchTo(_AuthMode mode) {
-    setState(() {
-      _mode = mode;
-      _error = null;
-      _notice = null;
-      _unconfirmed = false;
-      _busy = false;
-    });
-  }
-
-  bool _looksLikeEmail(String value) =>
-      RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
-
-  Future<void> _submitSignIn() async {
-    if (_email.text.trim().isEmpty || _password.text.isEmpty) {
-      setState(() => _error = 'Enter your email and password.');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-      _notice = null;
-      _unconfirmed = false;
-    });
-    final result = await widget.onSignIn(_email.text, _password.text);
-    if (!mounted) return;
-    switch (result) {
-      case ApiSuccess():
-        Navigator.of(context).pop();
-      case ApiFailure(:final message):
-        setState(() {
-          _busy = false;
-          _error = message;
-          _unconfirmed = message == emailNotConfirmedMessage;
-        });
-    }
-  }
-
-  Future<void> _submitSignUp() async {
-    if (!_looksLikeEmail(_email.text)) {
-      setState(() => _error = 'Enter a valid email address.');
-      return;
-    }
-    if (_password.text.length < minPasswordLength) {
-      setState(
-        () => _error =
-            'Use a password of at least $minPasswordLength characters.',
-      );
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    final result = await widget.onSignUp(_email.text, _password.text);
-    if (!mounted) return;
-    switch (result) {
-      case ApiSuccess(value: SignedUpWithSession()):
-        Navigator.of(context).pop();
-      case ApiSuccess(value: ConfirmationRequired()):
-        _password.clear();
-        _switchTo(_AuthMode.checkEmail);
-      case ApiFailure(:final message):
-        setState(() {
-          _busy = false;
-          _error = message;
-        });
-    }
-  }
-
-  Future<void> _submitReset() async {
-    if (!_looksLikeEmail(_email.text)) {
-      setState(() => _error = 'Enter a valid email address.');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    final result = await widget.onRequestPasswordReset(_email.text);
-    if (!mounted) return;
-    switch (result) {
-      case ApiSuccess():
-        _switchTo(_AuthMode.resetSent);
-      case ApiFailure(:final message):
-        setState(() {
-          _busy = false;
-          _error = message;
-        });
-    }
-  }
-
-  Future<void> _resend() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-      _notice = null;
-    });
-    final result = await widget.onResendConfirmation(_email.text);
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      switch (result) {
-        case ApiSuccess():
-          _notice = 'Sent again to ${_email.text.trim()}.';
-        case ApiFailure(:final message):
-          _error = message;
-      }
-    });
-  }
-
-  Widget _emailField() => TextField(
-    key: const Key('sign-in-email'),
-    controller: _email,
-    keyboardType: TextInputType.emailAddress,
-    autocorrect: false,
-    autofillHints: const [AutofillHints.email],
-    decoration: const InputDecoration(labelText: 'Email'),
-  );
-
-  Widget _passwordField(bool isNew) => TextField(
-    key: const Key('sign-in-password'),
-    controller: _password,
-    obscureText: true,
-    autofillHints: [isNew ? AutofillHints.newPassword : AutofillHints.password],
-    decoration: InputDecoration(
-      labelText: 'Password',
-      helperText: isNew ? 'At least $minPasswordLength characters' : null,
-    ),
-  );
-
-  Widget _primary(Key key, String label, String busyLabel, VoidCallback onTap) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        key: key,
-        onPressed: _busy ? null : onTap,
-        child: Text(_busy ? busyLabel : label),
-      ),
-    );
-  }
-
-  List<Widget> _feedback() {
-    final p = context.pal;
-    return [
-      if (_error != null) ...[
-        const SizedBox(height: 8),
-        Text(
-          _error!,
-          key: const Key('sign-in-error'),
-          style: atype(16, weight: 600, color: p.flag, height: 1.3),
-        ),
-      ],
-      if (_notice != null) ...[
-        const SizedBox(height: 8),
-        Text(
-          _notice!,
-          key: const Key('sign-in-notice'),
-          style: atype(16, weight: 600, color: p.go, height: 1.3),
-        ),
-      ],
-    ];
-  }
-
-  List<Widget> _body() {
-    final p = context.pal;
-    switch (_mode) {
-      case _AuthMode.signIn:
-        return [
-          _emailField(),
-          const SizedBox(height: 12),
-          _passwordField(false),
-          ..._feedback(),
-          if (_unconfirmed)
-            TextButton(
-              key: const Key('resend-confirmation'),
-              onPressed: _busy ? null : _resend,
-              child: const Text('Send the confirmation email again'),
-            ),
-          const SizedBox(height: 16),
-          _primary(
-            const Key('sign-in-submit'),
-            'Sign In',
-            'Signing In...',
-            _submitSignIn,
-          ),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 8,
-            children: [
-              TextButton(
-                key: const Key('open-sign-up'),
-                onPressed: () => _switchTo(_AuthMode.signUp),
-                child: const Text('Create an account'),
-              ),
-              TextButton(
-                key: const Key('open-reset'),
-                onPressed: () => _switchTo(_AuthMode.reset),
-                child: const Text('Forgot password?'),
-              ),
-            ],
-          ),
-        ];
-      case _AuthMode.signUp:
-        return [
-          _emailField(),
-          const SizedBox(height: 12),
-          _passwordField(true),
-          ..._feedback(),
-          const SizedBox(height: 12),
-          Text(
-            'By creating an account you agree to the Terms and Privacy Policy.',
-            key: const Key('signup-agreement'),
-            style: atype(14, color: p.ink2, height: 1.3),
-          ),
-          const Wrap(
-            spacing: 8,
-            children: [
-              LegalLink('Terms', termsUrl),
-              LegalLink('Privacy Policy', privacyUrl),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _primary(
-            const Key('sign-up-submit'),
-            'Create account',
-            'Creating...',
-            _submitSignUp,
-          ),
-          const SizedBox(height: 4),
-          TextButton(
-            key: const Key('back-to-sign-in'),
-            onPressed: () => _switchTo(_AuthMode.signIn),
-            child: const Text('I already have an account'),
-          ),
-        ];
-      case _AuthMode.reset:
-        return [
-          Text(
-            'We email you a link to choose a new password.',
-            style: atype(16, color: p.ink2, height: 1.35),
-          ),
-          const SizedBox(height: 12),
-          _emailField(),
-          ..._feedback(),
-          const SizedBox(height: 16),
-          _primary(
-            const Key('reset-submit'),
-            'Send reset link',
-            'Sending...',
-            _submitReset,
-          ),
-          const SizedBox(height: 4),
-          TextButton(
-            key: const Key('back-to-sign-in'),
-            onPressed: () => _switchTo(_AuthMode.signIn),
-            child: const Text('Back to sign in'),
-          ),
-        ];
-      case _AuthMode.checkEmail:
-        return [
-          Text(
-            'If ${_email.text.trim()} is new, a confirmation link is on its way. '
-            'Open it, then come back and sign in.',
-            key: const Key('check-email-message'),
-            style: atype(16, color: p.ink, height: 1.35),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'If this email already has an account, no link is sent: sign in, or '
-            'reset your password.',
-            style: atype(16, color: p.ink2, height: 1.35),
-          ),
-          ..._feedback(),
-          const SizedBox(height: 16),
-          _primary(
-            const Key('back-to-sign-in'),
-            'Go to sign in',
-            'Please wait...',
-            () => _switchTo(_AuthMode.signIn),
-          ),
-          TextButton(
-            key: const Key('resend-confirmation'),
-            onPressed: _busy ? null : _resend,
-            child: const Text('Send the email again'),
-          ),
-        ];
-      case _AuthMode.resetSent:
-        return [
-          Text(
-            'If an account exists for ${_email.text.trim()}, a reset link is on '
-            'its way. After choosing a new password, come back and sign in.',
-            key: const Key('reset-sent-message'),
-            style: atype(16, color: p.ink, height: 1.35),
-          ),
-          const SizedBox(height: 16),
-          _primary(
-            const Key('back-to-sign-in'),
-            'Go to sign in',
-            'Please wait...',
-            () => _switchTo(_AuthMode.signIn),
-          ),
-        ];
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pal;
-    const titles = {
-      _AuthMode.signIn: 'Sign In',
-      _AuthMode.signUp: 'Create an account',
-      _AuthMode.reset: 'Reset your password',
-      _AuthMode.checkEmail: 'Check your email',
-      _AuthMode.resetSent: 'Check your email',
-    };
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(
-        16,
-        16,
-        16,
-        MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.isAuthConfigured ? titles[_mode]! : 'Sign In',
-            key: const Key('auth-title'),
-            style: atype(24, weight: 800, color: p.accent),
-          ),
-          const SizedBox(height: 12),
-          if (!widget.isAuthConfigured)
-            Text(
-              notConfiguredMessage,
-              key: const Key('sign-in-not-configured'),
-              style: atype(16, weight: 600, color: p.wait, height: 1.35),
-            )
-          else
-            ..._body(),
-        ],
-      ),
     );
   }
 }

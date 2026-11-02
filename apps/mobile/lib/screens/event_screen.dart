@@ -1,23 +1,21 @@
 import 'package:flutter/material.dart';
 
-import '../models/draft.dart';
 import '../models/models.dart';
 import '../services/alokas_api.dart';
 import '../services/file_gateway.dart';
 import '../services/local_store.dart';
 import '../theme/alokas_theme.dart';
+import '../widgets/account_scope.dart';
 import '../widgets/event_facts.dart';
 import '../widgets/message_card.dart';
+import '../widgets/venue_actions.dart';
 import 'register_screen.dart';
 
 /// An event's facts and how to enter it. Everything comes from the API; nothing
-/// here invites a payment or an entry the server would refuse.
+/// here invites a payment or an entry the server would refuse. The account
+/// comes from [AccountScope], so signing in from here carries straight on.
 class EventScreen extends StatefulWidget {
   final MobileEventItem event;
-  final bool isSignedIn;
-  final List<MobilePlayerProfile> profiles;
-  final String? profilesUnavailable;
-  final List<RegistrationRecord> existingRegistrations;
 
   /// "12 km away" from the phone's real position; null without one.
   final String? distanceLabel;
@@ -29,26 +27,18 @@ class EventScreen extends StatefulWidget {
   )
   onSubmit;
   final VoidCallback onGoToAccount;
-  final RegistrationDraft? draft;
   final DraftStore draftStore;
-  final String? accountKey;
   final VoidCallback onDraftsChanged;
 
   const EventScreen({
     super.key,
     required this.event,
-    required this.isSignedIn,
-    required this.profiles,
-    required this.profilesUnavailable,
-    required this.existingRegistrations,
     required this.distanceLabel,
     required this.loadDetail,
     required this.receiptPicker,
     required this.onSubmit,
     required this.onGoToAccount,
-    required this.draft,
     required this.draftStore,
-    required this.accountKey,
     required this.onDraftsChanged,
   });
 
@@ -60,6 +50,10 @@ class _EventScreenState extends State<EventScreen> {
   EventDetail? _detail;
   bool _loading = true;
   String? _error;
+
+  /// Set when a guest signed in to register: registration opens once their
+  /// players are known.
+  bool _registerWhenReady = false;
 
   @override
   void initState() {
@@ -95,27 +89,59 @@ class _EventScreenState extends State<EventScreen> {
     widget.onGoToAccount();
   }
 
+  List<RegistrationRecord> _existing(AccountScope account) =>
+      account.registrationsByEvent[widget.event.id] ?? const [];
+
   void _startRegistration(EventDetail detail) {
+    final account = AccountScope.of(context);
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => RegisterScreen(
           detail: detail,
-          profiles: widget.profiles,
-          existingRegistrations: widget.existingRegistrations,
+          profiles: account.profiles,
+          existingRegistrations: _existing(account),
           receiptPicker: widget.receiptPicker,
           onSubmit: widget.onSubmit,
-          draft: widget.draft,
+          draft: account.draftFor(widget.event.id),
           draftStore: widget.draftStore,
-          accountKey: widget.accountKey,
+          accountKey: account.accountKey,
           onDraftsChanged: widget.onDraftsChanged,
         ),
       ),
     );
   }
 
+  /// A guest signs in first, then comes back here and carries on, with any
+  /// registration they had started on this phone.
+  Future<void> _signInToRegister() async {
+    final signedIn = await AccountScope.of(context).openAuth();
+    if (!signedIn || !mounted) return;
+    setState(() => _registerWhenReady = true);
+  }
+
+  /// Runs on every build while waiting: opens registration once the players
+  /// are in, or stops waiting if there are none or they failed to load.
+  void _continueAfterSignIn(AccountScope account, EventDetail? detail) {
+    if (!_registerWhenReady || !account.signedIn || !account.profilesSettled) {
+      return;
+    }
+    _registerWhenReady = false;
+    final closed = widget.event.closedReason(DateTime.now()) != null;
+    if (detail == null ||
+        closed ||
+        account.profiles.isEmpty ||
+        account.profilesUnavailable != null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _startRegistration(detail);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final event = _detail?.event ?? widget.event;
+    _continueAfterSignIn(AccountScope.of(context), _detail);
     return Scaffold(
       appBar: AppBar(title: const Text('Event')),
       body: ListView(
@@ -184,6 +210,10 @@ class _EventScreenState extends State<EventScreen> {
         const SizedBox(height: 6),
         fact('When', formatDateForPeople(event.date) ?? 'Date not listed'),
         fact('Where', where),
+        Padding(
+          padding: const EdgeInsets.only(left: 88, top: 2, bottom: 6),
+          child: VenueActions(event: event),
+        ),
         fact('Entry', event.feeLabel()),
         if (players != null) fact('Players', players),
         if (format.isNotEmpty) fact('Format', format),
@@ -219,7 +249,7 @@ class _EventScreenState extends State<EventScreen> {
 
     final closed = event.closedReason(DateTime.now());
     if (closed != null) {
-      final existing = widget.existingRegistrations
+      final existing = _existing(AccountScope.of(context))
           .where((r) => r.isActive)
           .map((r) => '${r.playerName ?? 'Player'}: ${r.statusLabel}')
           .join('\n');
@@ -243,25 +273,48 @@ class _EventScreenState extends State<EventScreen> {
     ];
   }
 
+  String _registerLabel(EventDetail detail, bool hasDraft) => hasDraft
+      ? 'Continue registration'
+      : detail.event.isFull
+      ? 'Join the waitlist'
+      : 'Register a player';
+
   List<Widget> _buildEntry(EventDetail detail) {
-    if (!widget.isSignedIn) {
+    final account = AccountScope.of(context);
+    final p = context.pal;
+    if (!account.signedIn) {
       return [
-        MessageCard(
-          title: 'Sign in to register',
-          actionLabel: 'Go to Sign In',
-          onAction: _goToAccount,
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            key: const Key('start-register-button'),
+            onPressed: account.authAvailable ? _signInToRegister : null,
+            child: Text(_registerLabel(detail, false)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          account.authAvailable
+              ? 'Sign in or create an account to register.'
+              : notConfiguredMessage,
+          key: const Key('register-needs-account'),
+          textAlign: TextAlign.center,
+          style: atype(14, color: p.ink2, height: 1.35),
         ),
       ];
     }
-    if (widget.profilesUnavailable != null) {
+    if (_registerWhenReady && !account.profilesSettled) {
+      return const [LoadingLine()];
+    }
+    if (account.profilesUnavailable != null) {
       return [
         MessageCard(
           title: 'Your player profiles are not available',
-          message: widget.profilesUnavailable,
+          message: account.profilesUnavailable,
         ),
       ];
     }
-    if (widget.profiles.isEmpty) {
+    if (account.profiles.isEmpty) {
       return [
         MessageCard(
           title: 'Add a player profile first',
@@ -270,20 +323,14 @@ class _EventScreenState extends State<EventScreen> {
         ),
       ];
     }
-    final hasDraft = widget.draft != null;
+    final hasDraft = account.draftFor(widget.event.id) != null;
     return [
       SizedBox(
         width: double.infinity,
         child: ElevatedButton(
           key: const Key('start-register-button'),
           onPressed: () => _startRegistration(detail),
-          child: Text(
-            hasDraft
-                ? 'Continue registration'
-                : detail.event.isFull
-                ? 'Join the waitlist'
-                : 'Register a player',
-          ),
+          child: Text(_registerLabel(detail, hasDraft)),
         ),
       ),
     ];

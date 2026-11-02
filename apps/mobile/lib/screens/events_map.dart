@@ -13,6 +13,7 @@ import '../services/device_location.dart';
 import '../services/map_style.dart';
 import '../theme/alokas_theme.dart';
 import '../widgets/event_facts.dart';
+import '../widgets/venue_actions.dart';
 
 const String mapAttribution = '© OpenStreetMap · OpenFreeMap';
 
@@ -489,10 +490,16 @@ class _MapEventCard extends StatelessWidget {
             EventFact(icon: Icons.payments_outlined, text: event.entryLabel),
           ],
         ),
+        if (venueAddressFor(event) case final address?) ...[
+          const SizedBox(height: 6),
+          EventFact(icon: Icons.place_outlined, text: address),
+        ],
         if (deadline != null) ...[
           const SizedBox(height: 8),
           DeadlineBanner(deadline: deadline),
         ],
+        const SizedBox(height: 8),
+        VenueActions(event: event),
         const SizedBox(height: 8),
         SizedBox(
           width: double.infinity,

@@ -182,17 +182,20 @@ class SheetHeading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.pal;
+    final heading = Text(text, style: atype(18, weight: 800, color: p.accent));
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: Text(text, style: atype(18, weight: 800, color: p.accent)),
-          ),
-          ?trailing,
-        ],
-      ),
+      // The trailing note moves under the heading when both don't fit, as
+      // with large text on a small phone.
+      child: trailing == null
+          ? SizedBox(width: double.infinity, child: heading)
+          : Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              spacing: 8,
+              runSpacing: 2,
+              children: [heading, trailing!],
+            ),
     );
   }
 }

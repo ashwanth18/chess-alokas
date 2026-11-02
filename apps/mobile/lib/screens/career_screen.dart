@@ -10,7 +10,6 @@ import '../widgets/message_card.dart';
 import '../widgets/player_name.dart';
 
 class CareerScreen extends StatelessWidget {
-  final bool isSignedIn;
   final List<MobilePlayerProfile> profiles;
   final String? selectedProfileId;
   final ValueChanged<String> onSelectProfile;
@@ -28,7 +27,6 @@ class CareerScreen extends StatelessWidget {
 
   const CareerScreen({
     super.key,
-    required this.isSignedIn,
     required this.profiles,
     required this.selectedProfileId,
     required this.onSelectProfile,
@@ -83,16 +81,6 @@ class CareerScreen extends StatelessWidget {
   List<Widget> _buildContent(BuildContext context) {
     final current = dashboard;
     final profile = _activeProfile;
-    if (!isSignedIn) {
-      return [
-        MessageCard(
-          title: 'Sign in to see your career',
-          message: 'Ratings, results and certificates appear here.',
-          actionLabel: 'Go to Sign In',
-          onAction: onGoToAccount,
-        ),
-      ];
-    }
     if (current == null && loading) return const [LoadingLine()];
     final problem = error;
     if (problem != null && (current == null || profile == null)) {

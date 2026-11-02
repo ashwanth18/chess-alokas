@@ -424,14 +424,17 @@ void main() {
       expect(find.textContaining('Pending: '), findsNothing);
     });
 
-    testWidgets('signed out, the sheet asks for sign-in and posts nothing', (
+    testWidgets('signed out, registering asks for sign-in and posts nothing', (
       tester,
     ) async {
       final backend = FakeBackend(_eventRoutes(fakeEvent()));
       await _pumpApp(tester, backend);
       await _openFirstEvent(tester);
 
-      expect(find.text('Sign in to register'), findsOneWidget);
+      expect(find.byKey(const Key('register-needs-account')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('start-register-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Welcome back'), findsOneWidget);
       expect(find.byKey(const Key('confirm-register-button')), findsNothing);
       expect(backend.sent('POST', _registerPath), isEmpty);
     });
@@ -585,9 +588,7 @@ void main() {
 
   group('Sign-in', () {
     Future<void> attemptSignIn(WidgetTester tester) async {
-      await tester.tap(find.text('Account'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('open-sign-in-button')));
+      await tester.tap(find.byKey(const Key('appbar-sign-in')));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('sign-in-email')),
@@ -618,9 +619,9 @@ void main() {
       expect(find.text('Invalid login credentials'), findsOneWidget);
       expect(storage.value, isNull);
 
-      await tester.tapAt(const Offset(10, 10));
+      await tester.pageBack();
       await tester.pumpAndSettle();
-      expect(find.text('Not signed in'), findsWidgets);
+      expect(find.byKey(const Key('appbar-sign-in')), findsOneWidget);
       expect(find.byKey(const Key('sign-out-button')), findsNothing);
       expect(backend.sent('GET', _profilesPath), isEmpty);
     });
@@ -651,12 +652,15 @@ void main() {
       });
       await _pumpApp(tester, backend, storage: storage);
       await attemptSignIn(tester);
+      expect(find.byKey(const Key('appbar-sign-in')), findsNothing);
+      await tester.tap(find.text('Account'));
+      await tester.pumpAndSettle();
 
       expect(find.text('player@example.test'), findsOneWidget);
       expect(find.text('Test Player One'), findsWidgets);
       expect(storage.value, contains('fake-refresh-token'));
       expect(
-        backend.sent('GET', _profilesPath).single.headers['Authorization'],
+        backend.sent('GET', _profilesPath).first.headers['Authorization'],
         'Bearer fake-access-token',
       );
     });
@@ -672,15 +676,13 @@ void main() {
         backend,
         config: const AppConfig(apiBaseUrl: 'https://api.example.test/api'),
       );
+      expect(find.byKey(const Key('appbar-sign-in')), findsNothing);
       await tester.tap(find.text('Account'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining("isn't available"), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('open-sign-in-button')));
-      await tester.pumpAndSettle();
-
       expect(find.byKey(const Key('sign-in-not-configured')), findsOneWidget);
+      expect(find.byKey(const Key('locked-sign-in')), findsNothing);
       expect(find.byKey(const Key('sign-in-submit')), findsNothing);
       expect(backend.sent('POST', _tokenPath), isEmpty);
     });
@@ -816,7 +818,8 @@ void main() {
       await tester.tap(find.text('Account'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Sign in to manage player profiles'), findsOneWidget);
+      expect(find.text('Your account'), findsOneWidget);
+      expect(find.byKey(const Key('locked-sign-in')), findsOneWidget);
       expect(find.byKey(const Key('open-add-profile-button')), findsNothing);
       expect(backend.sent('GET', _profilesPath), isEmpty);
     });
@@ -1068,11 +1071,11 @@ void main() {
 
       await tester.tap(find.text('Matchday'));
       await tester.pumpAndSettle();
-      expect(find.text('Sign in to see your matches'), findsOneWidget);
+      expect(find.text('Follow your games'), findsOneWidget);
 
       await tester.tap(find.text('Career'));
       await tester.pumpAndSettle();
-      expect(find.text('Sign in to see your career'), findsOneWidget);
+      expect(find.text('Your chess record'), findsOneWidget);
       expect(backend.sent('GET', '/api/player/dashboard'), isEmpty);
     });
 

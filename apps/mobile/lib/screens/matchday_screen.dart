@@ -11,7 +11,6 @@ import 'checkin_pass_screen.dart';
 import 'live_screen.dart';
 
 class MatchdayScreen extends StatelessWidget {
-  final bool isSignedIn;
   final List<MobilePlayerProfile> profiles;
   final String? selectedProfileId;
   final ValueChanged<String> onSelectProfile;
@@ -33,7 +32,6 @@ class MatchdayScreen extends StatelessWidget {
 
   const MatchdayScreen({
     super.key,
-    required this.isSignedIn,
     required this.profiles,
     required this.selectedProfileId,
     required this.onSelectProfile,
@@ -86,18 +84,6 @@ class MatchdayScreen extends StatelessWidget {
           ]
         : const <Widget>[];
 
-    if (!isSignedIn) {
-      return [
-        _gutter(
-          MessageCard(
-            title: 'Sign in to see your matches',
-            message: 'Your board and opponent appear here during a tournament.',
-            actionLabel: 'Go to Sign In',
-            onAction: onGoToAccount,
-          ),
-        ),
-      ];
-    }
     if (current == null && loading) return [...picker, const LoadingLine()];
     final problem = error;
     if (problem != null && current == null) {

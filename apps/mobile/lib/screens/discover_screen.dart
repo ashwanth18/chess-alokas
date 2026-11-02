@@ -39,11 +39,7 @@ class DiscoverScreen extends StatefulWidget {
   /// When [events] last came from the server; null if they never have.
   final DateTime? eventsUpdatedAt;
   final List<MobileEventItem> events;
-  final bool isSignedIn;
   final List<MobilePlayerProfile> profiles;
-
-  /// Why [profiles] cannot be trusted right now: still loading, or the error.
-  final String? profilesUnavailable;
   final Map<String, List<RegistrationRecord>> registrationsByEvent;
   final NearMeController nearMe;
   final SettingsOpener openSettings;
@@ -75,9 +71,7 @@ class DiscoverScreen extends StatefulWidget {
     required this.eventsError,
     this.eventsUpdatedAt,
     required this.events,
-    required this.isSignedIn,
     required this.profiles,
-    required this.profilesUnavailable,
     required this.registrationsByEvent,
     required this.nearMe,
     required this.openSettings,
@@ -202,20 +196,13 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       MaterialPageRoute<void>(
         builder: (_) => EventScreen(
           event: event,
-          isSignedIn: widget.isSignedIn,
-          profiles: widget.profiles,
-          profilesUnavailable: widget.profilesUnavailable,
-          existingRegistrations:
-              widget.registrationsByEvent[event.id] ?? const [],
           distanceLabel: _nearMe.distanceLabel(event),
           loadDetail: () => widget.loadEventDetail(event.slugOrId),
           receiptPicker: widget.receiptPicker,
           onSubmit: (selections, receipt) =>
               widget.onRegister(event, selections, receipt),
           onGoToAccount: widget.onGoToAccount,
-          draft: widget.drafts.where((d) => d.eventId == event.id).firstOrNull,
           draftStore: widget.draftStore,
-          accountKey: widget.accountKey,
           onDraftsChanged: widget.onDraftsChanged,
         ),
       ),
@@ -255,32 +242,43 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     final events = _filteredEvents;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildSearch(),
-              const SizedBox(height: 8),
-              _NearMeStrip(
-                nearMe: _nearMe,
-                openSettings: widget.openSettings,
-                openDeviceLocationSettings: widget.openDeviceLocationSettings,
-                requestPrecise: () async {
-                  await widget.requestPreciseLocation();
-                  await _nearMe.refresh(prompt: false);
-                },
-              ),
-              const SizedBox(height: 8),
-              _buildViewAndFilters(),
-            ],
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // With large text on a small phone the controls scroll in the top
+          // half, so the events always keep the rest.
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: constraints.maxHeight / 2),
+            child: SingleChildScrollView(child: _buildHeader()),
           ),
-        ),
-        Expanded(child: _showMap ? _buildMap(events) : _buildList(events)),
-      ],
+          Expanded(child: _showMap ? _buildMap(events) : _buildList(events)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildSearch(),
+          const SizedBox(height: 8),
+          _NearMeStrip(
+            nearMe: _nearMe,
+            openSettings: widget.openSettings,
+            openDeviceLocationSettings: widget.openDeviceLocationSettings,
+            requestPrecise: () async {
+              await widget.requestPreciseLocation();
+              await _nearMe.refresh(prompt: false);
+            },
+          ),
+          const SizedBox(height: 8),
+          _buildViewAndFilters(),
+        ],
+      ),
     );
   }
 

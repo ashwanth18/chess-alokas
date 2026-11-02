@@ -579,7 +579,7 @@ void main() {
     Future<void> openSheet(WidgetTester tester) async {
       await tester.tap(find.text('Account'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('open-sign-in-button')));
+      await tester.tap(find.byKey(const Key('locked-sign-in')));
       await tester.pumpAndSettle();
     }
 
@@ -645,6 +645,7 @@ void main() {
       await _tapKey(tester, 'sign-up-submit');
 
       expect(storage.value, isNotNull);
+      expect(find.byKey(const Key('auth-title')), findsNothing);
       expect(find.byKey(const Key('sign-out-button')), findsOneWidget);
     });
 
@@ -665,7 +666,7 @@ void main() {
       );
       await _tapKey(tester, 'sign-up-submit');
 
-      expect(find.byKey(const Key('sign-in-error')), findsOneWidget);
+      expect(find.text('Use at least 8 characters.'), findsOneWidget);
       expect(backend.sent('POST', '/auth/v1/signup'), isEmpty);
     });
 
@@ -711,7 +712,7 @@ void main() {
       await _tapKey(tester, 'reset-submit');
 
       expect(find.byKey(const Key('reset-sent-message')), findsOneWidget);
-      expect(find.textContaining('If an account exists'), findsOneWidget);
+      expect(find.textContaining('If there is an account'), findsOneWidget);
     });
 
     test('no other sign-in provider is left in the app', () {
@@ -721,8 +722,12 @@ void main() {
           .where((f) => f.path.endsWith('.dart'))
           .map((f) => f.readAsStringSync().toLowerCase())
           .join();
+      // Directions may open Google Maps; that is not a sign-in provider.
+      final signIn = text
+          .replaceAll('google maps', '')
+          .replaceAll('www.google.com', '');
       for (final term in const ['google', 'github', 'oauth', 'provider=']) {
-        expect(text, isNot(contains(term)));
+        expect(signIn, isNot(contains(term)));
       }
     });
   });
@@ -1359,7 +1364,7 @@ void main() {
       await _pump(tester, FakeBackend(routes((_) => jsonResponse(null, 204))));
       await tester.tap(find.text('Account'));
       await tester.pumpAndSettle();
-      await _tapKey(tester, 'open-sign-in-button');
+      await _tapKey(tester, 'locked-sign-in');
       await _tapKey(tester, 'open-sign-up');
       expect(find.byKey(const Key('signup-agreement')), findsOneWidget);
       expect(find.byKey(const Key('link-$termsUrl')), findsWidgets);
@@ -1390,7 +1395,7 @@ void main() {
 
         expect(api.sent('DELETE', '/api/me'), hasLength(1));
         expect(storage.value, isNull);
-        expect(find.byKey(const Key('open-sign-in-button')), findsOneWidget);
+        expect(find.byKey(const Key('welcome-screen')), findsOneWidget);
         final keys = (store as InMemoryLocalStore).texts.keys;
         expect(keys.where((k) => k.startsWith('draft_')), isEmpty);
         expect(

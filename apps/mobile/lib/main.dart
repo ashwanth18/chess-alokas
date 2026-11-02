@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'models/draft.dart';
 import 'models/live.dart';
 import 'models/models.dart';
+import 'screens/auth_screens.dart';
 import 'screens/career_screen.dart';
 import 'screens/discover_screen.dart';
 import 'screens/events_map.dart';
@@ -13,11 +14,14 @@ import 'screens/profiles_screen.dart';
 import 'screens/register_screen.dart';
 import 'services/alokas_api.dart';
 import 'services/device_location.dart' as device;
+import 'services/email_app.dart' as email;
 import 'services/file_gateway.dart';
 import 'services/local_store.dart';
 import 'services/map_style.dart';
 import 'services/preferences.dart';
 import 'theme/alokas_theme.dart';
+import 'widgets/account_scope.dart';
+import 'widgets/locked_tab.dart';
 import 'widgets/message_card.dart';
 
 void main() {
@@ -38,6 +42,9 @@ class ChessAlokasMobileApp extends StatefulWidget {
   final MapStyleLoader loadMapStyle;
   final MapSurfaceBuilder mapSurfaceBuilder;
 
+  /// Opens the email app after sign-up; null where there is no way to.
+  final email.EmailAppOpener? openEmailApp;
+
   /// How often an open Matchday or live page checks for news.
   final Duration pollInterval;
 
@@ -55,6 +62,7 @@ class ChessAlokasMobileApp extends StatefulWidget {
     this.namePlace = device.nameDevicePlace,
     this.loadMapStyle = loadOpenFreeMapStyle,
     this.mapSurfaceBuilder = buildMapLibreSurface,
+    this.openEmailApp = email.openEmailApp,
     this.pollInterval = const Duration(seconds: 30),
   });
 
@@ -72,6 +80,22 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
   late final AlokasApiClient _api;
   late final OfflineCache _cache;
   late final DraftStore _drafts;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  /// False for the moment it takes to read what this phone remembers.
+  bool _launchReady = false;
+
+  /// How this person last came in; null shows the welcome screen.
+  EntryChoice? _entry;
+
+  /// Set while signing out or deleting the account, so that losing the
+  /// session is not mistaken for it running out.
+  bool _endingSession = false;
+  bool _sessionEndedPending = false;
+  bool _sessionPromptOpen = false;
+
+  /// The email of the session that ended, to fill in on sign-in.
+  String? _endedEmail;
   int _currentTabIndex = 0;
   AlokasThemeChoice _theme = AlokasThemeChoice.forest;
   bool _inForeground = true;
@@ -125,7 +149,134 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     );
     _restoreNearMe();
     _showCachedEvents().then((_) => _fetchEvents());
-    _api.restoreSession();
+    _startUp();
+  }
+
+  /// Opens on the welcome screen, the app, or Discover for a guest, as soon as
+  /// the saved choice and session are read. A refresh of the session carries
+  /// on behind, so a signed-in person opens the app with no signal.
+  Future<void> _startUp() async {
+    final sessionRead = Completer<void>();
+    _api.restoreSession(
+      onRead: () {
+        if (!sessionRead.isCompleted) sessionRead.complete();
+      },
+    );
+    EntryChoice? entry;
+    try {
+      entry = await widget.preferences.readEntry().timeout(
+        const Duration(seconds: 2),
+      );
+    } on Object {
+      entry = null;
+    }
+    await sessionRead.future.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () {},
+    );
+    if (!mounted) return;
+    final signedIn = _api.isSignedIn;
+    setState(() {
+      _entry = signedIn ? EntryChoice.member : entry;
+      _launchReady = true;
+    });
+    if (signedIn && entry != EntryChoice.member) {
+      _rememberEntry(EntryChoice.member);
+    }
+    if (!signedIn && entry == EntryChoice.member) _sessionEnded(null);
+    _maybePromptSessionEnded();
+  }
+
+  Future<void> _rememberEntry(EntryChoice? choice) async {
+    if (mounted) setState(() => _entry = choice);
+    try {
+      await widget.preferences.writeEntry(choice);
+    } on Object {
+      // Works for this run; the welcome screen may show again next launch.
+    }
+  }
+
+  void _browseAsGuest() {
+    setState(() => _currentTabIndex = _discoverTab);
+    _rememberEntry(EntryChoice.guest);
+  }
+
+  AuthActions get _authActions => AuthActions(
+    isConfigured: _api.auth.isConfigured,
+    signIn: (email, password) =>
+        _api.signInWithPassword(email: email, password: password),
+    signUp: (email, password) => _api.signUp(email: email, password: password),
+    resendConfirmation: _api.auth.resendConfirmation,
+    requestPasswordReset: _api.auth.requestPasswordReset,
+    openEmailApp: widget.openEmailApp,
+  );
+
+  /// The one way into sign-in, from anywhere. Completes with true when
+  /// someone is signed in; the page underneath is still there to return to.
+  Future<bool> _openAuth({
+    AuthStart start = AuthStart.signIn,
+    String? email,
+  }) async {
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return false;
+    final result = await navigator.push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) =>
+            AuthPage(actions: _authActions, start: start, initialEmail: email),
+      ),
+    );
+    return result == true && _api.isSignedIn;
+  }
+
+  /// The session ran out or was refused: not a sign-out by the person.
+  void _sessionEnded(String? email) {
+    _endedEmail = email ?? _endedEmail;
+    _sessionEndedPending = true;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _maybePromptSessionEnded(),
+    );
+  }
+
+  /// One calm prompt, over whatever is open. What was on screen stays.
+  Future<void> _maybePromptSessionEnded() async {
+    if (!_sessionEndedPending || _sessionPromptOpen || !_launchReady) return;
+    final navigatorContext = _navigatorKey.currentContext;
+    if (navigatorContext == null || _api.isSignedIn) {
+      _sessionEndedPending = false;
+      return;
+    }
+    _sessionEndedPending = false;
+    _sessionPromptOpen = true;
+    final signIn = await showDialog<bool>(
+      context: navigatorContext,
+      builder: (context) => AlertDialog(
+        key: const Key('session-ended'),
+        title: const Text('Please sign in again'),
+        content: const Text(
+          'Your sign-in on this phone has ended. Sign in to see your players '
+          'and matches.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('session-not-now'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Not now'),
+          ),
+          ElevatedButton(
+            key: const Key('session-sign-in'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Sign in'),
+          ),
+        ],
+      ),
+    );
+    _sessionPromptOpen = false;
+    if (!mounted || _api.isSignedIn) return;
+    if (signIn == true) {
+      await _openAuth(email: _endedEmail);
+    } else {
+      _rememberEntry(EntryChoice.guest);
+    }
   }
 
   Future<void> _restoreTheme() async {
@@ -247,12 +398,24 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
   String? _accountKey(AuthSession? session) =>
       session == null ? null : (session.userId ?? session.email ?? 'account');
 
+  /// The last session seen, for its email once it has gone.
+  AuthSession? _lastSession;
+
   void _onSessionChanged() {
-    final key = _accountKey(_api.session.value);
+    final session = _api.session.value;
+    final key = _accountKey(session);
+    final previous = _lastSession;
+    _lastSession = session;
     if (!mounted) return;
     if (key == _loadedAccountKey) {
       setState(() {});
       return;
+    }
+    if (key == null && _loadedAccountKey != null && !_endingSession) {
+      _sessionEnded(previous?.email);
+    }
+    if (key != null && _launchReady && _entry != EntryChoice.member) {
+      _rememberEntry(EntryChoice.member);
     }
     _dashboardRequestId++;
     setState(() {
@@ -350,20 +513,43 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     });
   }
 
-  /// Signing out removes the children's data this phone has kept.
+  /// Signing out removes the children's data this phone has kept, and goes
+  /// back to the welcome screen.
   Future<void> _signOut() async {
-    await _cache.clearAccounts();
-    await _drafts.clearAll();
-    await _api.signOut();
+    _endingSession = true;
+    try {
+      await _cache.clearAccounts();
+      await _drafts.clearAll();
+      await _api.signOut();
+    } finally {
+      _endingSession = false;
+    }
+    _backToWelcome();
+  }
+
+  void _backToWelcome() {
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() => _currentTabIndex = _discoverTab);
+    _rememberEntry(null);
   }
 
   /// The account is gone only once the server says so; then so is this phone's
   /// copy of it.
   Future<ApiResult<void>> _deleteAccount() async {
-    final result = await _api.deleteAccount();
+    _endingSession = true;
+    final ApiResult<void> result;
+    try {
+      result = await _api.deleteAccount();
+    } finally {
+      _endingSession = false;
+    }
     if (result is ApiSuccess<void>) {
       await _cache.clearAccounts();
       await _drafts.clearAll();
+      if (mounted) {
+        setState(() => _currentTabIndex = _discoverTab);
+        _rememberEntry(null);
+      }
     }
     return result;
   }
@@ -701,24 +887,73 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
     return result;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final session = _api.session.value;
-    final signedIn = session != null;
+  String? get _profilesUnavailable => _profiles.isNotEmpty
+      ? null
+      : _profilesLoading
+      ? 'Still loading. Please go back and try again in a moment.'
+      : _profilesError;
 
-    final pages = <Widget>[
-      DiscoverScreen(
+  Widget _page(AuthSession? session) {
+    if (session == null && _currentTabIndex != _discoverTab) {
+      return _lockedPage(_currentTabIndex);
+    }
+    return switch (_currentTabIndex) {
+      _matchdayTab => MatchdayScreen(
+        profiles: _profiles,
+        selectedProfileId: _selectedProfileId,
+        onSelectProfile: _selectProfile,
+        loading: _dashboardLoading || _profilesLoading,
+        error: _dashboardError ?? _profilesError,
+        dashboardUpdatedAt: _dashboardUpdatedAt,
+        dashboard: _dashboard,
+        onRefresh: _refreshDashboard,
+        onGoToAccount: () => _selectTab(_accountTab),
+        liveByToken: _live,
+        liveUpdatedAt: _liveAt,
+        loadLive: _api.fetchLive,
+        onLiveLoaded: _rememberLive,
+        pollInterval: widget.pollInterval,
+      ),
+      _careerTab => CareerScreen(
+        profiles: _profiles,
+        selectedProfileId: _selectedProfileId,
+        onSelectProfile: _selectProfile,
+        loading: _dashboardLoading || _profilesLoading,
+        error: _dashboardError ?? _profilesError,
+        dashboardUpdatedAt: _dashboardUpdatedAt,
+        dashboard: _dashboard,
+        onRefresh: _refreshDashboard,
+        onGoToAccount: () => _selectTab(_accountTab),
+        onDownloadCertificate: _api.downloadCertificate,
+        certificateSaver: widget.certificateSaver,
+      ),
+      _accountTab => ProfilesScreen(
+        signedInEmail: session?.email ?? 'Signed in',
+        profiles: _profiles,
+        profilesLoading: _profilesLoading,
+        profilesError: _profilesError,
+        profilesUpdatedAt: _profilesUpdatedAt,
+        activeRegistrationsFor: _activeRegistrationsFor,
+        onRetryProfiles: _refreshProfiles,
+        onCreateProfile: _createProfile,
+        onUpdateProfile: _updateProfile,
+        onDeleteProfile: _deleteProfile,
+        onClaimPastTournaments: _claimPastTournaments,
+        onSignOut: _signOut,
+        onDeleteAccount: _deleteAccount,
+        themeChoice: _theme,
+        onThemeChanged: _chooseTheme,
+        registrations: _registrations,
+        eventNameFor: (id) => id == null ? null : _eventNames[id],
+        receiptPicker: widget.receiptPicker,
+        onUploadReceipt: _uploadReceipt,
+      ),
+      _ => DiscoverScreen(
         eventsLoading: _eventsLoading,
         eventsError: _eventsError,
         eventsUpdatedAt: _eventsUpdatedAt,
         events: _events,
-        isSignedIn: signedIn,
         profiles: _profiles,
-        profilesUnavailable: _profiles.isNotEmpty
-            ? null
-            : _profilesLoading
-            ? 'Still loading. Please go back and try again in a moment.'
-            : _profilesError,
         registrationsByEvent: _registrationsByEvent,
         nearMe: _nearMe,
         openSettings: widget.openLocationSettings,
@@ -736,134 +971,150 @@ class _ChessAlokasMobileAppState extends State<ChessAlokasMobileApp>
         accountKey: _loadedAccountKey,
         onDraftsChanged: _reloadDrafts,
       ),
-      MatchdayScreen(
-        isSignedIn: signedIn,
-        profiles: _profiles,
-        selectedProfileId: _selectedProfileId,
-        onSelectProfile: _selectProfile,
-        loading: _dashboardLoading || _profilesLoading,
-        error: _dashboardError ?? _profilesError,
-        dashboardUpdatedAt: _dashboardUpdatedAt,
-        dashboard: _dashboard,
-        onRefresh: _refreshDashboard,
-        onGoToAccount: () => _selectTab(_accountTab),
-        liveByToken: _live,
-        liveUpdatedAt: _liveAt,
-        loadLive: _api.fetchLive,
-        onLiveLoaded: _rememberLive,
-        pollInterval: widget.pollInterval,
-      ),
-      CareerScreen(
-        isSignedIn: signedIn,
-        profiles: _profiles,
-        selectedProfileId: _selectedProfileId,
-        onSelectProfile: _selectProfile,
-        loading: _dashboardLoading || _profilesLoading,
-        error: _dashboardError ?? _profilesError,
-        dashboardUpdatedAt: _dashboardUpdatedAt,
-        dashboard: _dashboard,
-        onRefresh: _refreshDashboard,
-        onGoToAccount: () => _selectTab(_accountTab),
-        onDownloadCertificate: _api.downloadCertificate,
-        certificateSaver: widget.certificateSaver,
-      ),
-      ProfilesScreen(
-        isAuthConfigured: _api.auth.isConfigured,
-        signedInEmail: signedIn ? (session.email ?? 'Signed in') : null,
-        profiles: _profiles,
-        profilesLoading: _profilesLoading,
-        profilesError: _profilesError,
-        profilesUpdatedAt: _profilesUpdatedAt,
-        activeRegistrationsFor: _activeRegistrationsFor,
-        onRetryProfiles: _refreshProfiles,
-        onCreateProfile: _createProfile,
-        onUpdateProfile: _updateProfile,
-        onDeleteProfile: _deleteProfile,
-        onClaimPastTournaments: _claimPastTournaments,
-        onSignIn: (email, password) =>
-            _api.signInWithPassword(email: email, password: password),
-        onSignUp: (email, password) =>
-            _api.signUp(email: email, password: password),
-        onResendConfirmation: _api.auth.resendConfirmation,
-        onRequestPasswordReset: _api.auth.requestPasswordReset,
-        onSignOut: _signOut,
-        onDeleteAccount: _deleteAccount,
-        themeChoice: _theme,
-        onThemeChanged: _chooseTheme,
-        registrations: _registrations,
-        eventNameFor: (id) => id == null ? null : _eventNames[id],
-        receiptPicker: widget.receiptPicker,
-        onUploadReceipt: _uploadReceipt,
-      ),
-    ];
+    };
+  }
 
-    return MaterialApp(
-      title: 'Chess Alokas',
-      debugShowCheckedModeBanner: false,
-      theme: AlokasTheme.of(_theme),
-      themeAnimationDuration: Duration.zero,
-      home: Builder(
-        builder: (context) {
-          final p = context.pal;
-          return Scaffold(
-            appBar: AppBar(
-              titleSpacing: 16,
-              title: Row(
-                children: [
-                  const BrandMark(),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Chess Alokas',
-                          style: atype(18, weight: 800, color: p.ink),
-                        ),
-                        Text(
-                          signedIn ? 'Signed in' : 'Not signed in',
-                          style: atype(13, weight: 600, color: p.accent),
-                        ),
-                      ],
-                    ),
+  /// Matchday, Career and Account for a guest: one locked state, the same on
+  /// each, opening the same sign-in pages and coming back to this tab.
+  Widget _lockedPage(int tab) {
+    final (IconData icon, String title, String message) = switch (tab) {
+      _matchdayTab => (
+        Icons.sports_esports_outlined,
+        'Follow your games',
+        'Your board, colour and opponent for each round, and the standings, '
+            'during a tournament.',
+      ),
+      _careerTab => (
+        Icons.workspace_premium_outlined,
+        'Your chess record',
+        'Ratings, results and certificates for every player you look after.',
+      ),
+      _ => (
+        Icons.person_outline,
+        'Your account',
+        'Add your players, register for events and keep track of entries and '
+            'receipts.',
+      ),
+    };
+    return LockedTab(
+      key: ValueKey('locked-$tab'),
+      icon: icon,
+      title: title,
+      message: message,
+      authAvailable: _api.auth.isConfigured,
+      onSignIn: () => _openAuth(email: _endedEmail),
+      onCreateAccount: () => _openAuth(start: AuthStart.createAccount),
+      footer: tab == _accountTab
+          ? [
+              const SizedBox(height: 40),
+              ThemePicker(choice: _theme, onChanged: _chooseTheme),
+              const SizedBox(height: 16),
+              const LegalLinks(),
+            ]
+          : const [],
+    );
+  }
+
+  Widget _home(AuthSession? session) {
+    if (!_launchReady) return const LaunchScreen();
+    if (session == null && _entry == null) {
+      return WelcomeScreen(
+        onSignIn: () => _openAuth(),
+        onCreateAccount: () => _openAuth(start: AuthStart.createAccount),
+        onBrowse: _browseAsGuest,
+      );
+    }
+    return Builder(
+      builder: (context) {
+        final p = context.pal;
+        return Scaffold(
+          appBar: AppBar(
+            titleSpacing: 16,
+            title: Row(
+              children: [
+                const BrandMark(),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    'Chess Alokas',
+                    style: atype(18, weight: 800, color: p.ink),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            body: pages[_currentTabIndex],
-            bottomNavigationBar: DecoratedBox(
-              decoration: BoxDecoration(
-                boxShadow: [BoxShadow(color: p.shadow, blurRadius: 12)],
-              ),
-              child: NavigationBar(
-                selectedIndex: _currentTabIndex,
-                onDestinationSelected: _selectTab,
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.explore_outlined),
-                    selectedIcon: Icon(Icons.explore),
-                    label: 'Discover',
+            actions: [
+              if (session == null && _api.auth.isConfigured)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: TextButton(
+                    key: const Key('appbar-sign-in'),
+                    style: TextButton.styleFrom(foregroundColor: p.accent),
+                    onPressed: () => _openAuth(email: _endedEmail),
+                    child: const Text('Sign in'),
                   ),
-                  NavigationDestination(
-                    icon: Icon(Icons.sports_esports_outlined),
-                    selectedIcon: Icon(Icons.sports_esports),
-                    label: 'Matchday',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.workspace_premium_outlined),
-                    selectedIcon: Icon(Icons.workspace_premium),
-                    label: 'Career',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.people_outline),
-                    selectedIcon: Icon(Icons.people),
-                    label: 'Account',
-                  ),
-                ],
-              ),
+                ),
+            ],
+          ),
+          body: _page(session),
+          bottomNavigationBar: DecoratedBox(
+            decoration: BoxDecoration(
+              boxShadow: [BoxShadow(color: p.shadow, blurRadius: 12)],
             ),
-          );
-        },
+            child: NavigationBar(
+              selectedIndex: _currentTabIndex,
+              onDestinationSelected: _selectTab,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.explore_outlined),
+                  selectedIcon: Icon(Icons.explore),
+                  label: 'Discover',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.sports_esports_outlined),
+                  selectedIcon: Icon(Icons.sports_esports),
+                  label: 'Matchday',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.workspace_premium_outlined),
+                  selectedIcon: Icon(Icons.workspace_premium),
+                  label: 'Career',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.people_outline),
+                  selectedIcon: Icon(Icons.people),
+                  label: 'Account',
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = _api.session.value;
+    return AccountScope(
+      signedIn: session != null,
+      profiles: _profiles,
+      profilesSettled:
+          _profiles.isNotEmpty ||
+          _profilesUpdatedAt != null ||
+          (_profilesError != null && !_profilesLoading),
+      profilesUnavailable: _profilesUnavailable,
+      registrationsByEvent: _registrationsByEvent,
+      drafts: _draftList,
+      accountKey: _loadedAccountKey,
+      authAvailable: _api.auth.isConfigured,
+      openAuth: _openAuth,
+      child: MaterialApp(
+        title: 'Chess Alokas',
+        navigatorKey: _navigatorKey,
+        debugShowCheckedModeBanner: false,
+        theme: AlokasTheme.of(_theme),
+        themeAnimationDuration: Duration.zero,
+        home: _home(session),
       ),
     );
   }

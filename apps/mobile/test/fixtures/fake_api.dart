@@ -190,9 +190,12 @@ class InMemoryLocalStore implements LocalStore {
   ].where((k) => k.startsWith(prefix)).toList();
 }
 
+/// Starts as a returning guest, so most tests open straight on Discover. A
+/// first-launch test sets [entry] to null.
 class MemoryPreferences implements AppPreferences {
   bool nearMe = false;
   String? theme;
+  EntryChoice? entry = EntryChoice.guest;
 
   @override
   Future<bool> readNearMe() async => nearMe;
@@ -205,6 +208,12 @@ class MemoryPreferences implements AppPreferences {
 
   @override
   Future<void> writeThemeName(String name) async => theme = name;
+
+  @override
+  Future<EntryChoice?> readEntry() async => entry;
+
+  @override
+  Future<void> writeEntry(EntryChoice? choice) async => entry = choice;
 }
 
 typedef FakeHandler = http.Response Function(http.Request request);
